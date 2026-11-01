@@ -48,6 +48,10 @@
 **
 **	02-NOV-2026	CLD	X.00-13ECO09 / REV: 00.13.09 - Added DEVLOST (the device has gone: EIO/ENODEV/
 **				ENXIO, a hangup) and DEVABSENT (the device cannot be opened, it is retried).
+**
+**	01-NOV-2026	CLD	X.00-14 / REV: 00.14.00 - The RAW listener mode: added RAWSTART, RAWSTOP,
+**				RAWKICK, RAWBUSY, LSNBADMODE, LSNRAWSHR, TTYPOLLEV, LSNRAWOPT; LSNADDED
+**				shows the mode of the listener.
 **--
 */
 
@@ -129,7 +133,7 @@ $DEF_MSG(T2R, ERROR,	LSNBADBIND,		"[listener #!2ZL] --- <bind> value <!AZ> is il
 $DEF_MSG(T2R, ERROR,	LSNRANGE,		"[listener #!2ZL] --- port number !SL is out of range [!SL..!SL]") \
 $DEF_MSG(T2R, ERROR,	LSNBADADDR,		"[listener #!2ZL] --- inet_pton(<!AZ>)->!SL, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	LSNNOTGT,		"[listener #!2ZL] --- target <!AZ> has not been defined in <serials> section") \
-$DEF_MSG(T2R, INFO,	LSNADDED,		"Added listener #!2ZL [Target: <!AZ>, Net: <!AZ:!%I:!UW>, Connection limit: !UL, Idle tmo: !UL sec] --- added") \
+$DEF_MSG(T2R, INFO,	LSNADDED,		"Added listener #!2ZL [Target: <!AZ>, Net: <!AZ:!%I:!UW>, Connection limit: !UL, Idle tmo: !UL sec, Mode: !AZ] --- added") \
 $DEF_MSG(T2R, ERROR,	NOLSNRS,			"No listeners have been defined!!") \
 $DEF_MSG(T2R, ERROR,	CFGPARSE,		"!AZ:!UL - !AZ, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	SIGERR,			"Cannot establish handler for signal !UL, errno: !SL") \
@@ -158,6 +162,14 @@ $DEF_MSG(T2R, WARN,	ECHOMISM,		"[#!SL:<!AZ>] Echo of the write request: address 
 $DEF_MSG(T2R, WARN,	LATEANS,			"[#!SL:<!AZ>] !UL octets have arrived after the failed exchange (a late answer?) --- dropped") \
 $DEF_MSG(T2R, ERROR,	DEVLOST,			"[#!SL:<!AZ>] !AZ, errno: !SL --- the device is lost, it will be reopened every !UL msec") \
 $DEF_MSG(T2R, WARN,	DEVABSENT,		"Device <!AZ> is absent --- it will be opened every !UL msec, the requests get exception 10 (GATEWAY_PATH_UNAVAILABLE) meanwhile") \
+$DEF_MSG(T2R, INFO,	RAWSTART,		"[#!SL] !%I:!UW --- the raw session on <!AZ> has been started") \
+$DEF_MSG(T2R, INFO,	RAWSTOP,			"[#!SL] the raw session on <!AZ> is finished: !UQ octets to the line, !UQ octets from the line") \
+$DEF_MSG(T2R, WARN,	RAWKICK,			"[#!SL] the raw session is taken over by !%I:!UW (#!SL) --- the old one is shut down") \
+$DEF_MSG(T2R, WARN,	RAWBUSY,			"[#!SL] !%I:!UW --- the raw listener is busy and <takeover> is off --- the connection is rejected") \
+$DEF_MSG(T2R, ERROR,	LSNBADMODE,		"[listener #!2ZL] --- unknown <mode> value <!AZ>, use MODBUS or RAW") \
+$DEF_MSG(T2R, ERROR,	LSNRAWSHR,		"[listener #!2ZL] --- target <!AZ> is used by the listener on port !UW too, a RAW listener needs the serial line for itself") \
+$DEF_MSG(T2R, ERROR,	TTYPOLLEV,		"[#!SL:<!AZ>] poll()->!SL, .revents: !XW --- the serial line has failed") \
+$DEF_MSG(T2R, ERROR,	LSNRAWOPT,		"[listener #!2ZL] --- <!AZ> is not allowed in the !AZ mode") \
 
 
 

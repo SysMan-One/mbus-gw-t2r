@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-13ECO09"
-#define	__REV__		"00.13.09"
+#define	__IDENT__	"X.00-14"
+#define	__REV__		"00.14.00"
 
 /*
 **++
@@ -104,6 +104,9 @@
 **				(GATEWAY_PATH_UNAVAILABLE) without the per-request EXCRPT. t2r$tty_open(): a
 **				device absent at the start is not fatal any more (DEVABSENT, the listener is
 **				up). s_tty_open() got a_quiet: the reopen attempts do not signal.
+**
+**	01-NOV-2026	CLD	X.00-14 / REV: 00.14.00 - t2r$tty_raw_relay(): the RAW listener mode, a
+**				transparent relay of the octets between a TCP client and the serial line.
 **--
 */
 #include	<time.h>
@@ -119,6 +122,7 @@
 #include	<sys/uio.h>
 #include	<linux/serial.h>
 #include	<sys/ioctl.h>
+#include	<sys/socket.h>
 
 
 #define		__FAC__	"T2R"
@@ -1639,4 +1643,202 @@ MODBUS_REQ_T	*l_req_pdu;
 		}
 
 	return	l_rc;
+}
+
+
+
+
+/*
+ *   DESCRIPTION: The RAW listener mode: relay the octets as is between the TCP socket of a client
+ *	and the serial line, in both directions at once, until the client goes away. The serial line
+ *	is taken for an exclusive use (s_tty_lock()) for the whole session: a session which takes the
+ *	line over waits here until the previous one has released it. The stale input of the line is
+ *	discarded at the start. Both directions have their own buffer (T2R$K_RAW_BUFSZ) and the back
+ *	pressure: the socket is not read while the line has not swallowed the previous portion, the
+ *	line is not read while the socket has not accepted the previous one - TCP slows the client
+ *	down, the line driver - the device (as far as the line has a flow control at all).
+ *	The relay is finished by: the peer close (or a shutdown() of the socket by the dispatcher -
+ *	the takeover), an error of the socket or of the line, <a_idletmo> seconds of the silence in
+ *	both directions, <g_exit_flag> (checked every T2R$K_RAW_POLL_MSEC).
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line (opened by t2r$tty_open())
+ *	a_sd:		The TCP socket of the client
+ *	a_idletmo:	The idle timeout, seconds
+ *
+ *   IMPLICIT INPUTS:
+ *	g_exit_flag, g_trace
+ *
+ *   OUTPUTS:
+ *	a_net2tty:	The octets which have been written to the line
+ *	a_tty2net:	The octets which have been sent to the client
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS	- the client has gone away or the gateway is stopping
+ *	STS$K_WARN	- the idle timeout (IDLETMO has been signalled)
+ *	T2R$__DEVBUSY	- the line lock has not been taken, nothing has been relayed
+ *	otherwise	- the condition code of the signalled failure (NETSYSERR, TTYSYSERR, TTYPOLLEV, ...)
+ */
+int	t2r$tty_raw_relay (
+		T2R$_SERIAL	*a_serial,
+			int	a_sd,
+			int	a_idletmo,
+		uint64_t	*a_net2tty,
+		uint64_t	*a_tty2net
+			)
+{
+int	l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0;
+ssize_t	l_cnt;
+struct pollfd	l_pfd[2];
+struct timespec	l_now, l_lastio;
+uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
+
+	*a_net2tty = *a_tty2net = 0;
+
+	if ( !(1 & s_tty_lock (a_serial)) )
+		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
+
+	if ( 0 > (l_rc = tcflush(a_serial->fd, TCIOFLUSH)) )				/* A leftover of the previous session */
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, errno);
+
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &l_lastio);
+
+	l_pfd[0].fd = a_sd;
+	l_pfd[1].fd = a_serial->fd;
+
+	while ( !g_exit_flag )
+		{
+		/* Only the direction which has a room is read, only the one which has a data is written */
+		l_pfd[0].events = (l_n2t_len ? 0 : POLLIN) | (l_t2n_len ? POLLOUT : 0);
+		l_pfd[1].events = (l_t2n_len ? 0 : POLLIN) | (l_n2t_len ? POLLOUT : 0);
+		l_pfd[0].revents = l_pfd[1].revents = 0;
+
+		if ( 0 > (l_rc = poll(l_pfd, 2, T2R$K_RAW_POLL_MSEC)) )
+			{
+			if ( errno == EINTR )
+				continue;
+
+			l_sts = $PUTMSG_FAO(T2R$__NETSYSERR, a_sd, "poll(raw)", l_rc, errno);
+			break;
+			}
+
+		clock_gettime(CLOCK_MONOTONIC_COARSE, &l_now);
+
+		if ( !l_rc )
+			{
+			if ( (l_lastio.tv_sec + a_idletmo) < l_now.tv_sec )
+				{
+				$PUTMSG_FAO(T2R$__IDLETMO, a_sd, a_idletmo);
+				l_sts = STS$K_WARN;
+				break;
+				}
+
+			continue;
+			}
+
+		l_lastio = l_now;
+
+		if ( l_pfd[1].revents & (POLLERR | POLLHUP | POLLNVAL) )			/* An USB adapter has gone, ... */
+			{
+			l_sts = $PUTMSG_FAO(T2R$__TTYPOLLEV, a_serial->fd, a_serial->devname, l_rc, l_pfd[1].revents);
+			break;
+			}
+
+		if ( l_pfd[0].revents & (POLLERR | POLLNVAL) )
+			{
+			$PUTMSG_FAO(T2R$__NETPOLLEV, a_sd, l_rc, l_pfd[0].revents, errno);
+			l_sts = STS$K_WARN;
+			break;
+			}
+
+		/*
+		 * Client -> line. POLLHUP comes together with the last data of a closed connection: the data is
+		 * read first, the close is seen as recv() == 0 on the next round.
+		 */
+		if ( (!l_n2t_len) && (l_pfd[0].revents & (POLLIN | POLLHUP)) )
+			{
+			if ( !(l_cnt = recv(a_sd, l_n2t, sizeof(l_n2t), MSG_DONTWAIT)) )
+				{
+				$PUTMSG_FAO(T2R$__PEERCLOSE, a_sd);
+				break;
+				}
+
+			if ( 0 > l_cnt )
+				{
+				if ( (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR) )
+					{
+					l_sts = $PUTMSG_FAO(T2R$__NETSYSERR, a_sd, "recv()", (int) l_cnt, errno);
+					break;
+					}
+				}
+			else	{
+				l_n2t_len = (int) l_cnt;
+				l_n2t_off = 0;
+
+				$IFTRACE(g_trace, "[#%d] client -> <%s>: %d octets", a_sd, a_serial->devname, l_n2t_len);
+				}
+			}
+
+		if ( l_n2t_len )								/* Try at once - the line is O_NDELAY */
+			{
+			if ( 0 > (l_cnt = write(a_serial->fd, l_n2t + l_n2t_off, l_n2t_len - l_n2t_off)) )
+				{
+				if ( (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR) )
+					{
+					l_sts = $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "write()", (int) l_cnt, errno);
+					break;
+					}
+				}
+			else	{
+				l_n2t_off += (int) l_cnt;
+				*a_net2tty += (uint64_t) l_cnt;
+
+				if ( l_n2t_off == l_n2t_len )
+					l_n2t_len = l_n2t_off = 0;
+				}
+			}
+
+		/* Line -> client. VMIN = VTIME = 0: read() == 0 is "no data yet", not a hangup */
+		if ( (!l_t2n_len) && (l_pfd[1].revents & POLLIN) )
+			{
+			if ( 0 > (l_cnt = read(a_serial->fd, l_t2n, sizeof(l_t2n))) )
+				{
+				if ( (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR) )
+					{
+					l_sts = $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", (int) l_cnt, errno);
+					break;
+					}
+				}
+			else if ( l_cnt )
+				{
+				l_t2n_len = (int) l_cnt;
+				l_t2n_off = 0;
+
+				$IFTRACE(g_trace, "[#%d] <%s> -> client: %d octets", a_sd, a_serial->devname, l_t2n_len);
+				}
+			}
+
+		if ( l_t2n_len )
+			{
+			if ( 0 > (l_cnt = send(a_sd, l_t2n + l_t2n_off, l_t2n_len - l_t2n_off, MSG_DONTWAIT | MSG_NOSIGNAL)) )
+				{
+				if ( (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR) )
+					{
+					l_sts = $PUTMSG_FAO(T2R$__NETSYSERR, a_sd, "send()", (int) l_cnt, errno);
+					break;
+					}
+				}
+			else	{
+				l_t2n_off += (int) l_cnt;
+				*a_tty2net += (uint64_t) l_cnt;
+
+				if ( l_t2n_off == l_t2n_len )
+					l_t2n_len = l_t2n_off = 0;
+				}
+			}
+		}
+
+	s_tty_unlock (a_serial);
+
+	return	l_sts;
 }

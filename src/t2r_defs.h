@@ -39,6 +39,10 @@
 **				is absent or lost, the next reopen attempt), added T2R$K_REOPEN_MSEC,
 **				T2R$K_CHECK_MSEC and t2r$tty_check().
 **
+**	01-NOV-2026	CLD	X.00-14 / REV: 00.14.00 - The RAW (transparent) listener mode: T2R$K_MODE_*,
+**				T2R$K_RAW_* constants, T2R$_LISTENER got .mode, .takeover and the current
+**				raw session (.rawsess under .rawlock), t2r$tty_raw_relay().
+**
 **--
 */
 
@@ -110,6 +114,21 @@ enum {
 #define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 4	*/
 #define		T2R$K_USBGAP_MSEC	20				/* A gap inside of an answer from an USB adapter: 16 msec
 									   of the FTDI latency_timer plus a margin */
+
+/*
+ * The RAW (transparent) mode of a listener: octets are relayed as is between a single TCP client
+ * and the serial line, no MODBUS framing at all.
+ */
+enum	{
+	T2R$K_MODE_MODBUS = 0,						/* MODBUS TCP (MBAP) <-> MODBUS RTU, the default */
+	T2R$K_MODE_RAW							/* A transparent octet stream TCP <-> serial line */
+};
+
+#define		T2R$K_RAW_BUFSZ		4096				/* A relay buffer per direction, octets		*/
+#define		T2R$K_RAW_POLL_MSEC	1000				/* <g_exit_flag> and <idletmo> check interval	*/
+#define		T2R$K_RAW_KAIDLE	30				/* TCP keepalive: idle seconds before probing	*/
+#define		T2R$K_RAW_KAINTVL	10				/* TCP keepalive: seconds between probes	*/
+#define		T2R$K_RAW_KACNT		3				/* TCP keepalive: unanswered probes = dead peer	*/
 
 /*
  * Limits for validation of the has been configured parameters of a serial line and a listener
@@ -192,12 +211,16 @@ typedef struct	t2r$_listener {
 			iotmo,
 			connlm,						/* Connection limit on this listener */
 			idletmo,					/* Idle session timeout, seconds */
-			sessions;					/* Active sessions, __atomic_*() only */
+			sessions,					/* Active sessions, __atomic_*() only */
+			mode,						/* T2R$K_MODE_MODBUS or T2R$K_MODE_RAW */
+			takeover;					/* RAW: a new client kicks the current one */
 	struct sockaddr_in sk;						/* Socket address structure: TCP, 0.0.0.0:502 */
 		char target[T2R$K_TTY_DEVNAME + 1];			/* "COM1", "/dev/ttyS0" */
 
 	T2R$_SERIAL	*serial;					/* A context to has been defined serial device */
 
+	pthread_mutex_t	rawlock;					/* RAW: guards .rawsess */
+	struct t2r$__session *rawsess;					/* RAW: the current session, NULL - none */
 } T2R$_LISTENER;
 
 
@@ -248,6 +271,7 @@ int	t2r$tty_open(T2R$_SERIAL *);
 int	t2r$tty_close(T2R$_SERIAL *);
 int	t2r$tty_exec_req(T2R$_SERIAL *, void *a_req_dsc, void *a_resp_dsc, uint8_t *a_excode);
 int	t2r$tty_check(T2R$_SERIAL *);
+int	t2r$tty_raw_relay(T2R$_SERIAL *, int a_sd, int a_idletmo, uint64_t *a_net2tty, uint64_t *a_tty2net);
 
 #ifdef __cplusplus
 }

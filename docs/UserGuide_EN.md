@@ -122,13 +122,65 @@ name into `device` (and into `target` of the listener) instead:
 | `target` | **yes** | Which serial port to forward to --- must match a `device` from `serials` **exactly** | |
 | `connlm` | no | How many TCP clients may be connected to this port **at the same time**; one more is disconnected at once (`CONNLIMIT`). Default: 32 | 1..512 |
 | `idletmo` | no | A client which sends nothing for this many **seconds** is disconnected (`IDLETMO`). Default: 60 | 1..86400 |
+| `mode` | no | What the listener does: `"MODBUS"` is the MODBUS TCP to RTU gateway, `"RAW"` is a transparent stream of octets (see 3.3). Capital or small letters --- it does not matter. Any other word is an error (`LSNBADMODE`). Default: `"MODBUS"` | `"MODBUS"`, `"RAW"` |
+| `takeover` | no | **Only for `RAW`.** `1`: a new client kicks the current client out (`RAWKICK`). `0`: a new client is rejected while another one is connected (`RAWBUSY`). In the `MODBUS` mode this key is an error (`LSNRAWOPT`). Default: 1 | 0..1 |
 | `iotmo` | no | Reserved, not used yet | |
+
+In the `RAW` mode two defaults are different: `connlm` may only be 1, and `idletmo` is 86400 (not 60).
 
 Notes for the very beginning:
 
 - Port **502** is the standard MODBUS TCP port, but on Linux ports below 1024 need root.
   If you do not want to run as root, use e.g. `5502` and point your client there.
-- Several listeners may share one `target` --- the gateway will serialize their requests.
+- Several `MODBUS` listeners may share one `target` --- the gateway will serialize their requests.
+  A `RAW` listener needs its serial port for itself (see 3.3).
+
+### 3.3. The RAW (transparent) mode
+
+In the `MODBUS` mode the gateway understands MODBUS. In the `RAW` mode it does **not**. It just
+carries octets from the TCP client to the serial line and from the serial line to the client. It
+changes nothing. This is a "virtual COM port over the network".
+
+Typical use: a Windows PC has a program for some old device. The program wants a COM port. You
+install a COM-over-TCP program on the PC (it makes a virtual COM port and connects it to the
+gateway by TCP). The program thinks it works with a real COM port. The device can speak **any**
+serial protocol, not only MODBUS.
+
+```
+ [Program on the PC] --- virtual COM --- TCP ---> [mbusgw-t2r, mode RAW] --- serial line ---> [Device]
+```
+
+A settings example:
+
+```
+listeners = (
+	{ bind = "TCP:0.0.0.0:4001"; mode = "RAW"; target = "/dev/ttyUSB1"; }
+);
+serials = (
+	{ device = "/dev/ttyUSB1"; chars = "19200, 8, E, 1"; flow = "NONE"; iotmo = 1000; }
+);
+```
+
+The rules of the RAW mode:
+
+- **One client at a time.** `connlm` may only be 1.
+- **A new client takes over** (`takeover = 1`, the default). The old connection is closed, the new
+  one gets the line. The log says `RAWKICK`. With `takeover = 0` the old client stays and the
+  new one is refused (`RAWBUSY`).
+- **The serial port is only for this listener.** No other listener, MODBUS or RAW, may use the
+  same `target` (`LSNRAWSHR`; the order of the records does not matter). MODBUS listeners may still share a port among themselves.
+- **The speed and the parity are taken from the gateway.** They come from the `serials` record.
+  If the program on the PC sets another speed on its virtual COM port, this is **not** passed to the line.
+  Set the right `chars` in the `serials` record.
+- **A long silence is normal.** The default `idletmo` is 86400 seconds (one day). The gateway
+  closes a client only after that. But a client which is dead (the PC crashed, the cable was
+  cut) is found by the TCP keepalive and dropped in about 1 minute (30 seconds of silence, then 3 probes, 10 seconds apart).
+- **No Time Stamp.** The `ts_*` pseudo device (chapter 6) does not work in the RAW mode.
+- On a start of a session the old octets in the serial port buffers are thrown away.
+
+A note for both modes: the serial input is "binary-clean" since X.00-14. The port does not change
+CR into LF and does not cut the 8th bit any more. Before, an octet `0x0D` could arrive as
+`0x0A` on a port with the default settings.
 
 ## 4. Running the gateway
 
@@ -257,6 +309,9 @@ dislikes.**
 | `%T2R-W-EXCRPT, [...] Report exception 4 (SERVER_DEVICE_FAILURE) ...` | The gateway told the TCP client "the serial side failed" | look at the *previous* log line --- it names the real reason (NOANSWER, CRC16ERR, ...) |
 | `%T2R-W-CONNLIMIT, [...] --- the listener has reached its connection limit (N) --- the connection is rejected` | The port already has `connlm` clients connected | if they are all real clients, raise `connlm` of this listener; otherwise find who keeps the connections open: `ss -tn` |
 | `%T2R-W-IDLETMO, [...] No activity for the past N seconds (idletmo) --- close the connection` | A client has sent nothing for `idletmo` seconds | normal for a client which polls rarely --- it reconnects; to keep the connection, raise `idletmo` of this listener |
+| `%T2R-E-LSNRAWSHR, [listener #NN] --- target <...> is used by the listener on port N too, ...` | A RAW listener wants a serial port which another listener uses | give the RAW listener its own serial port, or make the other listener use another one; or make the RAW listener a MODBUS one |
+| `%T2R-W-RAWBUSY, [...] --- the raw listener is busy and <takeover> is off --- the connection is rejected` | A client is already connected to the RAW port and `takeover = 0` | normal. Disconnect the first client, or set `takeover = 1` |
+| `%T2R-E-TTYPOLLEV, [...] poll()->N, .revents: XXXX --- the serial line has failed` | The serial port broke during a RAW session (a USB adapter was unplugged) | replug the adapter, look at `dmesg \| tail`; the client reconnects and the session starts again |
 | `%T2R-E-TXDRAINTMO, [...] --- the request has not been transmitted in N msec` | The USB adapter took the request but did not send it out; the request gets exception 4 | the adapter or its USB link hangs: `dmesg \| tail`; replug the adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it: the next request tries again |
 | `%T2R-E-DEVLOCKERR` / `DEVBUSY` on every request of one port, the other ports are fine | Another request holds the line and does not end | update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial driver). Before the restart, save what the stuck thread does: `for t in /proc/$(pidof mbusgw-t2r)/task/*; do echo $t $(cat $t/wchan); done` |
 | `%T2R-E-SESSFAIL, [...] --- cannot start a session thread, pthread_create()->11` | Too many TCP clients at once: every client takes a thread, and systemd limits the service (`TasksMax`, 578 on a small board) | find who keeps so many connections open (`ss -tn`); if they are all real, raise the limit: `TasksMax=2048` in the `[Service]` section of the unit, then `systemctl daemon-reload` |
@@ -325,7 +380,7 @@ dislikes.**
 | `LSNRANGE` | E | The TCP port number is out of range [1..65535] |
 | `LSNBADADDR` | E | The IP address in bind is not a valid IPv4 address |
 | `LSNNOTGT` | E | The target of a listener is not in the serials section; the record is skipped |
-| `LSNADDED` | I | A listeners record is accepted; the address, the port and the target are shown |
+| `LSNADDED` | I | A listeners record is accepted; the address, the port, the target, the limits and the mode are shown (the text ends with `, Mode: MODBUS`, `, Mode: RAW` or `, Mode: RAW (takeover)`) |
 | `NOLSNRS` | E | Not a single listeners record survived the validation; the gateway stops |
 | `CFGPARSE` | E | The settings file cannot be read or has a syntax error; the file name and the line are shown |
 | `SIGERR` | E | A signal handler cannot be set --- an internal error, please report it |
@@ -348,12 +403,20 @@ dislikes.**
 | `DEVNOTINI` | W | Closing a serial port which was never opened --- harmless |
 | `DEVBUSY` | E | The serial line cannot be taken for a request; the request gets exception 4 |
 | `CONNLIMIT` | W | A new TCP client is disconnected at once: the port already has `connlm` clients |
-| `LSNOPTRNG` | E | A listeners option (`connlm`, `idletmo`) is out of range; the record is skipped |
+| `LSNOPTRNG` | E | A listeners option (`connlm`, `idletmo`, `takeover`) is out of range (in the RAW mode `connlm` may only be 1); the record is skipped |
 | `TXDRAINTMO` | E | The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4 |
 | `ECHOMISM` | W | The answer to a write request is not its echo (another address or value); the request gets exception 4 |
 | `DEVLOST` | E | The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile |
 | `DEVABSENT` | W | The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second |
 | `LATEANS` | W | After a failed request something came from the line within `lategd` --- a late answer; it is dropped |
+| `RAWSTART` | I | A RAW session has started: the client address and the serial port are shown. Nothing to do |
+| `RAWSTOP` | I | A RAW session has ended; shows how many octets went to the line and how many came from the line. Nothing to do --- the numbers help to see if the data flowed at all |
+| `RAWKICK` | W | A new client took the RAW port over (`takeover = 1`): the old connection is shut down. If this happens by itself again and again, two programs fight for one port --- stop one of them, or set `takeover = 0` |
+| `RAWBUSY` | W | A new client is refused: the RAW port is busy and `takeover = 0`. Wait until the first client leaves, or set `takeover = 1` |
+| `LSNBADMODE` | E | The `mode` value is unknown; the record is skipped. Write `"MODBUS"` or `"RAW"` |
+| `LSNRAWSHR` | E | The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own |
+| `TTYPOLLEV` | E | The serial port failed during a RAW session (hang-up or error, e.g. a USB adapter was unplugged); the session is closed. Replug the adapter, check `dmesg`; the client can connect again |
+| `LSNRAWOPT` | E | A listeners option is not allowed in this mode (`takeover` in the MODBUS mode); the record is skipped. Remove the option or set `mode = "RAW"` |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*
 

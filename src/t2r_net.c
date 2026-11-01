@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"X.00-13ECO09"
-#define	__REV__		"00.13.09"
+#define	__IDENT__	"X.00-14"
+#define	__REV__		"00.14.00"
 
 /*
 **++
@@ -74,6 +74,12 @@
 **				t2r$tty_check() for every serial every T2R$K_CHECK_MSEC (a replugged USB
 **				adapter of an idle line is closed and reopened); no REQFAIL for exception 10
 **				(the device is absent - DEVLOST/DEVABSENT has told it once, not per request).
+**
+**	01-NOV-2026	CLD	X.00-14 / REV: 00.14.00 - The RAW listener mode: s_net_session() hands a RAW
+**				session to t2r$tty_raw_relay(); s_net_listener() keeps one session per RAW
+**				listener - a new client takes the line over (shutdown() of the old socket,
+**				RAWKICK) or is rejected when <takeover> is 0 (RAWBUSY); the RAW sockets get
+**				the TCP keepalive (a dead client is dropped in ~1 minute).
 **--
 */
 
@@ -291,6 +297,50 @@ int	l_rc;
 
 
 /*
+ *   DESCRIPTION: Serve a session of a RAW listener: relay the octets between the client and the
+ *	serial line (t2r$tty_raw_relay()) and report the counters. At the end the session drops
+ *	itself as the current one of the listener - under .rawlock and BEFORE the caller closes the
+ *	socket: the dispatcher does shutdown() of the current session's socket on a takeover, so it
+ *	must never see a closed (and maybe already reused) descriptor number.
+ *
+ *   INPUTS:
+ *	a_session:	A session context: .sd, .sk, .target, .listener
+ *
+ *   IMPLICIT OUTPUTS:
+ *	a_session->listener->rawsess
+ *
+ *   RETURNS:
+ *	the status of t2r$tty_raw_relay()
+ */
+static int	s_net_raw_session (
+		T2R$_SESSION	*a_session
+		)
+{
+int	l_rc;
+uint64_t	l_n2t = 0, l_t2n = 0;
+T2R$_LISTENER	*l_listener = a_session->listener;
+
+	$PUTMSG_FAO(T2R$__RAWSTART, a_session->sd, &a_session->sk.sin_addr, ntohs(a_session->sk.sin_port), a_session->target->devname);
+
+	l_rc = t2r$tty_raw_relay (a_session->target, a_session->sd, l_listener->idletmo, &l_n2t, &l_t2n);
+
+	$PUTMSG_FAO(T2R$__RAWSTOP, a_session->sd, a_session->target->devname, l_n2t, l_t2n);
+
+	pthread_mutex_lock(&l_listener->rawlock);
+
+	if ( l_listener->rawsess == a_session )						/* Not taken over by a newer one */
+		l_listener->rawsess = NULL;
+
+	pthread_mutex_unlock(&l_listener->rawlock);
+
+	return	l_rc;
+}
+
+
+
+
+
+/*
  *   DESCRIPTION: A detached thread serving a single TCP client: receive an MBAP request, forward
  *	it as an RTU PDU to the target serial device, convert the RTU answer back to MBAP and send
  *	it to the client. The session is closed on: no activity for <idletmo> seconds of the
@@ -331,6 +381,15 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 	l_serial = l_session->target;
 	assert ( l_serial );
 
+
+	/*
+	 * A RAW listener: no MODBUS state machine at all, the whole session is a relay
+	 */
+	if ( l_session->listener->mode == T2R$K_MODE_RAW )
+		{
+		s_net_raw_session (l_session);
+		goto	l_exit;							/* The common exit path */
+		}
 
 	l_pfd.fd = l_session->sd;
 	l_pfd.events = POLLIN;
@@ -463,6 +522,7 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 
 
 
+l_exit:
 	$PUTMSG_FAO(T2R$__NETDISCN, l_session->sd, &l_session->sk.sin_addr,
 		ntohs(l_session->sk.sin_port));
 
@@ -472,6 +532,68 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 	free( (void *) l_session);
 
 	return	NULL;
+}
+
+
+
+
+
+/*
+ *   DESCRIPTION: Admit a new client of a RAW listener: one session at a time. If there is a current
+ *	session, it is either shut down (shutdown(SHUT_RDWR) wakes its relay, it releases the line
+ *	and exits by itself; the new session waits for the line in t2r$tty_raw_relay()) - when
+ *	<takeover> is on, or the new client is rejected (RAWBUSY). An admitted session becomes the
+ *	current one and its socket gets the TCP keepalive: a client which has gone without a FIN (a
+ *	crash, a reverted VM, a cut cable) is detected in ~T2R$K_RAW_KAIDLE + KAINTVL * KACNT seconds.
+ *
+ *   INPUTS:
+ *	a_listener:	The RAW listener
+ *	a_session:	The new session: .sd, .sk
+ *
+ *   IMPLICIT OUTPUTS:
+ *	a_listener->rawsess
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS	- admitted, the caller starts the session thread
+ *	T2R$__RAWBUSY	- rejected, the caller closes the socket
+ */
+static int	s_net_raw_admit (
+		T2R$_LISTENER	*a_listener,
+		T2R$_SESSION	*a_session
+		)
+{
+int	l_rc;
+static const int	l_kaidle = T2R$K_RAW_KAIDLE, l_kaintvl = T2R$K_RAW_KAINTVL, l_kacnt = T2R$K_RAW_KACNT;
+
+	pthread_mutex_lock(&a_listener->rawlock);
+
+	if ( a_listener->rawsess )
+		{
+		if ( !a_listener->takeover )
+			{
+			pthread_mutex_unlock(&a_listener->rawlock);
+
+			return	$PUTMSG_FAO(T2R$__RAWBUSY, a_session->sd, &a_session->sk.sin_addr, ntohs(a_session->sk.sin_port));
+			}
+
+		/* The old session clears .rawsess under the lock before close(): its .sd is still its own */
+		$PUTMSG_FAO(T2R$__RAWKICK, a_listener->rawsess->sd, &a_session->sk.sin_addr, ntohs(a_session->sk.sin_port), a_session->sd);
+
+		if ( (l_rc = shutdown(a_listener->rawsess->sd, SHUT_RDWR)) )
+			$PUTMSG_FAO(T2R$__NETSYSWRN, a_listener->rawsess->sd, "shutdown()", l_rc, errno);
+		}
+
+	a_listener->rawsess = a_session;
+
+	pthread_mutex_unlock(&a_listener->rawlock);
+
+	if ( (l_rc = setsockopt(a_session->sd, SOL_SOCKET, SO_KEEPALIVE, &s_one, sizeof(s_one)))
+		|| (l_rc = setsockopt(a_session->sd, IPPROTO_TCP, TCP_KEEPIDLE, &l_kaidle, sizeof(l_kaidle)))
+		|| (l_rc = setsockopt(a_session->sd, IPPROTO_TCP, TCP_KEEPINTVL, &l_kaintvl, sizeof(l_kaintvl)))
+		|| (l_rc = setsockopt(a_session->sd, IPPROTO_TCP, TCP_KEEPCNT, &l_kacnt, sizeof(l_kacnt))) )
+		$PUTMSG_FAO(T2R$__NETSYSWRN, a_session->sd, "setsockopt(keepalive)", l_rc, errno);
+
+	return	STS$K_SUCCESS;
 }
 
 
@@ -561,9 +683,11 @@ const struct timespec l_period_ts = {.tv_sec = T2R$K_CHECK_MSEC / 1000, .tv_nsec
 					/*
 					 * <connlm> - a limit of the simultaneous sessions of the listener. Only this
 					 * thread does increment the counter, so the check-then-increment is safe;
-					 * the sessions do decrement it at their exit.
+					 * the sessions do decrement it at their exit. A RAW listener is limited by its
+					 * .rawsess instead: the old session may still be leaving after a takeover.
 					 */
-					if ( g_listeners[i].connlm <= __atomic_load_n(&g_listeners[i].sessions, __ATOMIC_ACQUIRE) )
+					if ( (g_listeners[i].mode != T2R$K_MODE_RAW)
+						&& (g_listeners[i].connlm <= __atomic_load_n(&g_listeners[i].sessions, __ATOMIC_ACQUIRE)) )
 						{
 						$PUTMSG_FAO(T2R$__CONNLIMIT, l_sd, &l_sk.sin_addr, ntohs(l_sk.sin_port), g_listeners[i].connlm);
 						close(l_sd);
@@ -586,12 +710,27 @@ const struct timespec l_period_ts = {.tv_sec = T2R$K_CHECK_MSEC / 1000, .tv_nsec
 					l_session->target = g_listeners[i].serial;
 					l_session->listener = &g_listeners[i];
 
+					if ( (g_listeners[i].mode == T2R$K_MODE_RAW) && !(1 & s_net_raw_admit(&g_listeners[i], l_session)) )
+						{
+						close(l_sd);
+						free(l_session);
+						continue;
+						}
+
 					__atomic_add_fetch(&g_listeners[i].sessions, 1, __ATOMIC_ACQ_REL);	/* Before the thread can exit */
 
 											/* Start dedicated thread for session */
 					if ( (l_rc = pthread_create(&l_tid, NULL, s_net_session, l_session)) )
 						{
 						$PUTMSG_FAO(T2R$__SESSFAIL, l_sd, &l_sk.sin_addr, ntohs(l_sk.sin_port), l_rc);
+
+						pthread_mutex_lock(&g_listeners[i].rawlock);		/* RAW: never leave a dangling .rawsess */
+
+						if ( g_listeners[i].rawsess == l_session )
+							g_listeners[i].rawsess = NULL;
+
+						pthread_mutex_unlock(&g_listeners[i].rawlock);
+
 						close(l_sd);
 						__atomic_sub_fetch(&g_listeners[i].sessions, 1, __ATOMIC_RELEASE);
 						free(l_session);

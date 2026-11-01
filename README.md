@@ -27,7 +27,7 @@ A easy-to-use TCP-to-RTU gateway for MODBUS protocol is supposed to be used as a
  - a programming skill esspecialy for I/O on  RS323 and RS-485 ports
  - basic checking of work of MODBUS-capable devices
  - build two-directionional gateways for TCP-to-RTU and RTU-to-TCP (not implemented yet)
- - transparently pass serial I/O over TCP
+ - transparently pass serial I/O over TCP (available: the RAW listener mode)
 
 ###	Main features & advantages
   - serves multiple MODBUS-capable devices on single RS-485 line
@@ -335,9 +335,12 @@ The `listeners` section --- one record per TCP port:
 | `target` | yes | The serial device (from the `serials` section) to forward the requests to | `"/dev/ttyUSB0"` |
 | `connlm` | no | How many TCP clients may be connected to this port **at the same time**; one more is disconnected at once (`%T2R-W-CONNLIMIT`) | 1..512, default 32 |
 | `idletmo` | no | A client which sends nothing for this many **seconds** is disconnected (`%T2R-W-IDLETMO`); a client which polls rarely just reconnects | 1..86400, default 60 |
+| `mode` | no | `"MODBUS"` --- the MODBUS TCP to RTU gateway; `"RAW"` --- a transparent octet stream (see *RAW (transparent) mode* below). Not case-sensitive; any other value rejects the record (`%T2R-E-LSNBADMODE`) | `"MODBUS"` (default), `"RAW"` |
+| `takeover` | no | **RAW only.** `1`: a new client kicks the current one out (`%T2R-W-RAWKICK`); `0`: a new client is rejected while one is connected (`%T2R-W-RAWBUSY`). In the MODBUS mode the key is an error (`%T2R-E-LSNRAWOPT`) | 0..1, default 1 |
 | `iotmo` | no | Reserved, not used yet | |
 
 An out of range `connlm`/`idletmo` rejects the whole listener record (`%T2R-E-LSNOPTRNG`).
+In the RAW mode `connlm` may only be 1 and the default `idletmo` is 86400 (not 60).
 Every simultaneous client takes one thread: with many clients mind the `TasksMax` limit of the
 systemd unit (see *Troubleshooting*, `SESSFAIL`, in the User Guide).
 
@@ -346,6 +349,36 @@ listeners = (
 	{bind = "TCP:0.0.0.0:502"; target = "/dev/ttyUSB0"; connlm = 16; idletmo = 60;}
 );
 ```
+
+##### RAW (transparent) mode
+With `mode = "RAW"` the listener does not speak MODBUS at all: it relays the octets **as they are**
+between one TCP client and the serial line, in both directions. It is a virtual COM port over
+TCP: a program on a Windows PC (through a virtual COM port driver which carries the octets over
+TCP) sees the remote serial port as a local one. It works for **any** serial protocol, not only MODBUS.
+
+```
+listeners = (
+	{bind = "TCP:0.0.0.0:4001"; mode = "RAW"; target = "/dev/ttyUSB1";}
+);
+serials = (
+	{device = "/dev/ttyUSB1"; chars = "19200, 8, E, 1"; flow = "NONE"; iotmo = 1000;}
+);
+```
+
+Limits and rules:
+
+ - One client at a time (`connlm` may only be 1). By default a new client **takes over**: the old
+   connection is shut down (`RAWKICK`). With `takeover = 0` the new client is rejected (`RAWBUSY`).
+ - The serial line of a RAW listener cannot be used by any other listener, MODBUS or RAW
+   (`%T2R-E-LSNRAWSHR`). MODBUS listeners may still share a line among themselves.
+ - The speed, the parity and the stop bits come from the `serials` record of the gateway. Whatever
+   the remote program sets on its virtual COM port is **not** transported.
+ - The default `idletmo` is 86400 seconds. A client which has died silently (a crash, a cut
+   cable) is dropped by the TCP keepalive in about 1 minute (30 s idle + 3 probes x 10 s).
+ - The Time Stamp pseudo device (`ts_*`) is not used in the RAW mode.
+
+Since X.00-14 the serial input is binary-clean in **both** modes (no CR/NL translation, no 8th bit
+stripping): before, an octet 0x0D could arrive as 0x0A on a port with the default settings.
 
 ## Authors and acknowledgment
 Developer: Ruslan (AKA : The BadAss SysMan) Laishev

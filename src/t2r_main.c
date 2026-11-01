@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.00-13ECO09"
-#define	__REV__		"00.13.09"
+#define	__IDENT__	"X.00-14"
+#define	__REV__		"00.14.00"
 
 /*
 **++
@@ -178,6 +178,12 @@
 **				device which has gone is closed at once (DEVLOST), reopened every second,
 **				also on an idle line; the requests get exception 10 meanwhile; a device
 **				absent at the start does not stop its listener (DEVABSENT).
+**
+**	01-NOV-2026	CLD	X.00-14 / REV: 00.14.00 - The RAW (transparent) listener mode: the new <mode>
+**				("MODBUS" - default, or "RAW") and <takeover> listener options; a RAW listener
+**				serves one client at a time (a new one takes the line over by default), its
+**				default <idletmo> is T2R$K_IDLETMO_MAX, its serial line cannot be shared with
+**				any other listener (LSNRAWSHR); see T2R-NET and T2R-TTY X.00-14.
 **--
 */
 
@@ -260,6 +266,12 @@ int		g_listeners_nr;						/* Count of records in the table */
 
 
 config_t	g_cfg;							/* Lib Config API context */
+
+static KWDENT	s_mode_tbl[] =						/* <mode> of a listener, case-insensitive */
+{
+	{ {$ASCINI("MODBUS")},	{.val = T2R$K_MODE_MODBUS} },
+	{ {$ASCINI("RAW")},	{.val = T2R$K_MODE_RAW} }
+};
 
 
 
@@ -550,7 +562,11 @@ char	l_chars[64];
  *	rejected, the port and the address are validated) and <target> (a defined serial device);
  *	optional <connlm> (the simultaneous sessions limit, T2R$K_CONNLM_MIN..MAX, default
  *	T2R$K_CONNLM_DEF), <idletmo> (the idle session timeout, seconds, T2R$K_IDLETMO_MIN..MAX,
- *	default T2R$K_IDLETMO_DEF) and <iotmo> (is stored, not used yet). Fill the global table of
+ *	default T2R$K_IDLETMO_DEF) and <iotmo> (is stored, not used yet); <mode> ("MODBUS" - the
+ *	default, "RAW" - a transparent octet stream) and, for RAW only, <takeover> (0/1, default 1 -
+ *	a new client kicks the current one). A RAW listener: <connlm> is 1 (no other value is
+ *	accepted), <idletmo> defaults to T2R$K_IDLETMO_MAX, its target serial line must not be used
+ *	by any other listener (LSNRAWSHR, whatever the order of the records). Fill the global table of
  *	listeners (at most T2R$K_MAX_LISTENERS records). An ill-formed or out of range record is
  *	rejected with a diagnostic, processing is continued from the next one.
  *
@@ -578,6 +594,7 @@ config_setting_t *l_setting, *l_args;
 const char *l_str;
 int	l_count, l_int = -1, l_port_nr;
 T2R$_LISTENER	*l_listener;
+KWDENT	*l_kwd;
 char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 
 	if ( !(l_setting = config_lookup(a_cfg, "listeners")) )
@@ -661,11 +678,60 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 		if ( config_setting_lookup_int(l_args, "iotmo", &l_int) )
 			l_listener->iotmo = l_int;
 
-		l_listener->connlm = T2R$K_CONNLM_DEF;					/* Both are optional */
-		l_listener->idletmo = T2R$K_IDLETMO_DEF;
+		l_listener->mode = T2R$K_MODE_MODBUS;					/* <mode> is optional */
+
+		if ( config_setting_lookup_string(l_args, "mode", &l_str) )
+			{
+			if ( !(1 & __util$lookup_key(l_str, (int) strlen(l_str), s_mode_tbl, $ARRSZ(s_mode_tbl), &l_kwd, UTIL$K_LOOKUP_NCASE)) )
+				{
+				$PUTMSG_FAO(T2R$__LSNBADMODE, i, l_str);
+				continue;
+				}
+
+			l_listener->mode = l_kwd->val;
+			}
+
+		/*
+		 * A RAW listener relays a stream of a single client: one session at a time, and the client
+		 * may stay silent for hours (a terminal, a rarely polling SCADA) - a dead peer is detected
+		 * by the TCP keepalive, not by the idle timeout.
+		 */
+		if ( l_listener->mode == T2R$K_MODE_RAW )
+			{
+			l_listener->connlm = 1;
+			l_listener->idletmo = T2R$K_IDLETMO_MAX;
+			l_listener->takeover = 1;
+			}
+		else	{
+			l_listener->connlm = T2R$K_CONNLM_DEF;
+			l_listener->idletmo = T2R$K_IDLETMO_DEF;
+			}
+
+		if ( config_setting_lookup_int(l_args, "takeover", &l_int) )
+			{
+			if ( l_listener->mode != T2R$K_MODE_RAW )
+				{
+				$PUTMSG_FAO(T2R$__LSNRAWOPT, i, "takeover", "MODBUS");
+				continue;
+				}
+
+			if ( !$ISINRANGE(l_int, 0, 1) )
+				{
+				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "takeover", l_int, 0, 1);
+				continue;
+				}
+
+			l_listener->takeover = l_int;
+			}
 
 		if ( config_setting_lookup_int(l_args, "connlm", &l_int) )
 			{
+			if ( (l_listener->mode == T2R$K_MODE_RAW) && (l_int != 1) )
+				{
+				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "connlm", l_int, 1, 1);
+				continue;
+				}
+
 			if ( !$ISINRANGE(l_int, T2R$K_CONNLM_MIN, T2R$K_CONNLM_MAX) )
 				{
 				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "connlm", l_int, T2R$K_CONNLM_MIN, T2R$K_CONNLM_MAX);
@@ -698,11 +764,40 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 			continue;
 			}
 
+		/*
+		 * A raw stream and the MODBUS request/answer exchanges (or two raw streams) on the same line
+		 * would corrupt each other: a serial line of a RAW listener belongs to it alone. Both orders of
+		 * the records are caught here, MODBUS listeners are still free to share a line.
+		 */
+		l_int = -1;
+
+		for (int j = 0; j < g_listeners_nr; j++)
+			{
+			if ( (g_listeners[j].serial == l_listener->serial)
+				&& ((g_listeners[j].mode == T2R$K_MODE_RAW) || (l_listener->mode == T2R$K_MODE_RAW)) )
+				{
+				l_int = j;
+				break;
+				}
+			}
+
+		if ( 0 <= l_int )
+			{
+			$PUTMSG_FAO(T2R$__LSNRAWSHR, i, l_str, ntohs(g_listeners[l_int].sk.sin_port));
+			continue;
+			}
+
 		strncpy(l_listener->target, l_str, T2R$K_TTY_DEVNAME);		/* The tail is zeroed by the memset above */
 
+		if ( (l_int = pthread_mutex_init(&l_listener->rawlock, NULL)) )
+			{
+			$PUTMSG_FAO(T2R$__SYSERR, "pthread_mutex_init(rawlock)", l_int, errno);
+			continue;
+			}
 
 		$PUTMSG_FAO(T2R$__LSNADDED, i, l_listener->serial->devname, (l_listener->proto == IPPROTO_UDP) ? "UDP": "TCP",
-			&l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), l_listener->connlm, l_listener->idletmo);
+			&l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), l_listener->connlm, l_listener->idletmo,
+			(l_listener->mode == T2R$K_MODE_RAW) ? (l_listener->takeover ? "RAW (takeover)" : "RAW") : "MODBUS");
 
 
 		l_listener++;
