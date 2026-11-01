@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-14"
-#define	__REV__		"00.14.00"
+#define	__IDENT__	"X.00-14ECO01"
+#define	__REV__		"00.14.01"
 
 /*
 **++
@@ -107,6 +107,10 @@
 **
 **	01-NOV-2026	CLD	X.00-14 / REV: 00.14.00 - t2r$tty_raw_relay(): the RAW listener mode, a
 **				transparent relay of the octets between a TCP client and the serial line.
+**
+**	01-NOV-2026	CLD	X.00-14ECO01 / REV: 00.14.01 - t2r$tty_raw_relay(): after a hangup of the client
+**				the socket is left out of poll() while the last portion goes to the line
+**				(POLLHUP is always reported - the loop was spinning at a slow line rate).
 **--
 */
 #include	<time.h>
@@ -1687,7 +1691,7 @@ int	t2r$tty_raw_relay (
 		uint64_t	*a_tty2net
 			)
 {
-int	l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0;
+int	l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0;
 ssize_t	l_cnt;
 struct pollfd	l_pfd[2];
 struct timespec	l_now, l_lastio;
@@ -1708,9 +1712,15 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 	while ( !g_exit_flag )
 		{
-		/* Only the direction which has a room is read, only the one which has a data is written */
+		/*
+		 * Only the direction which has a room is read, only the one which has a data is written.
+		 * After a hangup of the client (a close, a shutdown() by a takeover) the socket is left out
+		 * while the last portion still goes to the line: POLLHUP is reported whatever .events are, a
+		 * polled socket would spin the loop until a slow line has swallowed the data.
+		 */
+		l_pfd[0].fd = (l_hup && l_n2t_len) ? -1 : a_sd;
 		l_pfd[0].events = (l_n2t_len ? 0 : POLLIN) | (l_t2n_len ? POLLOUT : 0);
-		l_pfd[1].events = (l_t2n_len ? 0 : POLLIN) | (l_n2t_len ? POLLOUT : 0);
+		l_pfd[1].events = ((l_t2n_len || l_hup) ? 0 : POLLIN) | (l_n2t_len ? POLLOUT : 0);
 		l_pfd[0].revents = l_pfd[1].revents = 0;
 
 		if ( 0 > (l_rc = poll(l_pfd, 2, T2R$K_RAW_POLL_MSEC)) )
@@ -1750,6 +1760,9 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 			l_sts = STS$K_WARN;
 			break;
 			}
+
+		if ( l_pfd[0].revents & POLLHUP )						/* Nobody will read the line -> client data */
+			l_hup = 1, l_t2n_len = l_t2n_off = 0;
 
 		/*
 		 * Client -> line. POLLHUP comes together with the last data of a closed connection: the data is
@@ -1818,7 +1831,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 				}
 			}
 
-		if ( l_t2n_len )
+		if ( l_t2n_len && !l_hup )
 			{
 			if ( 0 > (l_cnt = send(a_sd, l_t2n + l_t2n_off, l_t2n_len - l_t2n_off, MSG_DONTWAIT | MSG_NOSIGNAL)) )
 				{

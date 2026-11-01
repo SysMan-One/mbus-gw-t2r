@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.00-14"
-#define	__REV__		"00.14.00"
+#define	__IDENT__	"X.00-14ECO01"
+#define	__REV__		"00.14.01"
 
 /*
 **++
@@ -184,6 +184,9 @@
 **				serves one client at a time (a new one takes the line over by default), its
 **				default <idletmo> is T2R$K_IDLETMO_MAX, its serial line cannot be shared with
 **				any other listener (LSNRAWSHR); see T2R-NET and T2R-TTY X.00-14.
+**
+**	01-NOV-2026	CLD	X.00-14ECO01 / REV: 00.14.01 - The RAW relay does not spin after a hangup of the
+**				client while the line still swallows the last portion (see T2R-TTY).
 **--
 */
 
