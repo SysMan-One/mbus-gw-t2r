@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-14ECO01"
-#define	__REV__		"00.14.01"
+#define	__IDENT__	"X.00-14ECO02"
+#define	__REV__		"00.14.02"
 
 /*
 **++
@@ -111,6 +111,13 @@
 **	01-NOV-2026	CLD	X.00-14ECO01 / REV: 00.14.01 - t2r$tty_raw_relay(): after a hangup of the client
 **				the socket is left out of poll() while the last portion goes to the line
 **				(POLLHUP is always reported - the loop was spinning at a slow line rate).
+**
+**	02-NOV-2026	CLD	X.00-14ECO02 / REV: 00.14.02 - t2r$tty_raw_relay() after the rebase onto X.00-13ECO09:
+**				an absent or lost device is reopened at the start of a session (s_tty_reopen());
+**				if it is still absent, the session ends at once (the client gets a FIN without
+**				data: what it has sent is read out first, a close() with an unread input is an RST); a hangup or EIO/ENODEV/ENXIO of the line during the session
+**				closes the device (s_tty_lost(), DEVLOST - was TTYPOLLEV, the dead descriptor
+**				was kept) and ends the session.
 **--
 */
 #include	<time.h>
@@ -1663,7 +1670,9 @@ MODBUS_REQ_T	*l_req_pdu;
  *	down, the line driver - the device (as far as the line has a flow control at all).
  *	The relay is finished by: the peer close (or a shutdown() of the socket by the dispatcher -
  *	the takeover), an error of the socket or of the line, <a_idletmo> seconds of the silence in
- *	both directions, <g_exit_flag> (checked every T2R$K_RAW_POLL_MSEC).
+ *	both directions, <g_exit_flag> (checked every T2R$K_RAW_POLL_MSEC). An absent or lost device
+ *	is reopened at the start (s_tty_reopen()); if it is still not there the session ends at once.
+ *	A hangup or EIO/ENODEV/ENXIO of the line closes the device (s_tty_lost()) and ends the session.
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line (opened by t2r$tty_open())
@@ -1681,7 +1690,9 @@ MODBUS_REQ_T	*l_req_pdu;
  *	STS$K_SUCCESS	- the client has gone away or the gateway is stopping
  *	STS$K_WARN	- the idle timeout (IDLETMO has been signalled)
  *	T2R$__DEVBUSY	- the line lock has not been taken, nothing has been relayed
- *	otherwise	- the condition code of the signalled failure (NETSYSERR, TTYSYSERR, TTYPOLLEV, ...)
+ *	T2R$__DEVABSENT	- the device is absent, nothing has been relayed
+ *	T2R$__DEVLOST	- the device has gone during the session
+ *	otherwise	- the condition code of the signalled failure (NETSYSERR, TTYSYSERR, ...)
  */
 int	t2r$tty_raw_relay (
 		T2R$_SERIAL	*a_serial,
@@ -1691,7 +1702,7 @@ int	t2r$tty_raw_relay (
 		uint64_t	*a_tty2net
 			)
 {
-int	l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0;
+int	l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0, l_errno;
 ssize_t	l_cnt;
 struct pollfd	l_pfd[2];
 struct timespec	l_now, l_lastio;
@@ -1702,8 +1713,35 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 	if ( !(1 & s_tty_lock (a_serial)) )
 		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
 
+	if ( !(1 & (l_rc = s_tty_reopen (a_serial))) )					/* Absent: the client gets a FIN at once */
+		{
+		s_tty_unlock (a_serial);
+		$IFTRACE(g_trace, "[#%d] <%s> is absent --- the raw session is not started", a_sd, a_serial->devname);
+
+		/*
+		 * A FIN, not an RST: the octets which the client has already sent are read out first - a
+		 * close() with an unread input resets the connection, and a client takes a reset for a
+		 * network failure (a virtual COM port driver keeps reconnecting), a FIN - for "no line".
+		 */
+		shutdown(a_sd, SHUT_WR);
+
+		while ( 0 < recv(a_sd, l_n2t, sizeof(l_n2t), MSG_DONTWAIT) );
+
+		return	l_rc;
+		}
+
 	if ( 0 > (l_rc = tcflush(a_serial->fd, TCIOFLUSH)) )				/* A leftover of the previous session */
-		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, errno);
+		{
+		if ( s_tty_gone_errno (l_errno = errno) )
+			{
+			l_sts = s_tty_lost (a_serial, "tcflush()", l_errno);
+			s_tty_unlock (a_serial);
+
+			return	l_sts;
+			}
+
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, l_errno);
+		}
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &l_lastio);
 
@@ -1750,7 +1788,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 		if ( l_pfd[1].revents & (POLLERR | POLLHUP | POLLNVAL) )			/* An USB adapter has gone, ... */
 			{
-			l_sts = $PUTMSG_FAO(T2R$__TTYPOLLEV, a_serial->fd, a_serial->devname, l_rc, l_pfd[1].revents);
+			l_sts = s_tty_lost (a_serial, "poll() hangup", 0);
 			break;
 			}
 
@@ -1796,9 +1834,10 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 			{
 			if ( 0 > (l_cnt = write(a_serial->fd, l_n2t + l_n2t_off, l_n2t_len - l_n2t_off)) )
 				{
-				if ( (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR) )
+				if ( ((l_errno = errno) != EAGAIN) && (l_errno != EWOULDBLOCK) && (l_errno != EINTR) )
 					{
-					l_sts = $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "write()", (int) l_cnt, errno);
+					l_sts = s_tty_gone_errno (l_errno) ? s_tty_lost (a_serial, "write()", l_errno)
+						: (int) $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "write()", (int) l_cnt, l_errno);
 					break;
 					}
 				}
@@ -1816,9 +1855,10 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 			{
 			if ( 0 > (l_cnt = read(a_serial->fd, l_t2n, sizeof(l_t2n))) )
 				{
-				if ( (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR) )
+				if ( ((l_errno = errno) != EAGAIN) && (l_errno != EWOULDBLOCK) && (l_errno != EINTR) )
 					{
-					l_sts = $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", (int) l_cnt, errno);
+					l_sts = s_tty_gone_errno (l_errno) ? s_tty_lost (a_serial, "read()", l_errno)
+						: (int) $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", (int) l_cnt, l_errno);
 					break;
 					}
 				}

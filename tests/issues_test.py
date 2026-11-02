@@ -7,6 +7,7 @@
 #   icrnl	- the gateway's tty is left with ICRNL (a fresh port), the answers carry 0x0D octets: no CRC16ERR expected
 #   late	- the slave answers a bit later than <iotmo>, two clients write and read back their own registers:
 #		  no foreign data with the success status is expected
+#   rawreplug	- the same for a RAW listener: no device - the client gets a FIN at once, a running session is closed
 #   replug	- the device behind a symlink disappears (the pty master is closed) and comes back (a new pty): the busy
 #		  and the idle cases, and the device absent at the start; exception 0x0A while it is away, normal answers after
 #
@@ -14,6 +15,7 @@
 #
 # MODIFICATION HISTORY:
 #	02-NOV-2026	CLD	X.00-13ECO07: Initial revision.
+#	02-NOV-2026	CLD	X.00-14ECO02: rawreplug - a RAW listener with an absent / unplugged / returned device.
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -22,7 +24,7 @@ ap.add_argument('--gw', default='./build/mbusgw-t2r')
 ap.add_argument('--port', type=int, default=5602)
 ap.add_argument('--secs', type=int, default=30)
 ap.add_argument('--lategd', type=int, default=None, help='late: <lategd> of the serial, the gateway default if omitted')
-ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'all'])
+ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'all'])
 a = ap.parse_args()
 GW = os.path.abspath(a.gw)
 TMP = tempfile.mkdtemp(prefix='t2r_issues_')
@@ -118,10 +120,10 @@ class Slave(threading.Thread):
 
 
 class Gateway:
-    def __init__(self, device, port, iotmo=1000, extra=''):
+    def __init__(self, device, port, iotmo=1000, extra='', lextra=''):
         self.conf = os.path.join(TMP, f'gw{port}.conf')
         self.log = os.path.join(TMP, f'gw{port}.log')
-        open(self.conf, 'w').write(f'''listeners = ( {{ bind = "TCP:127.0.0.1:{port}"; connlm = 8; target = "{device}"; }} );
+        open(self.conf, 'w').write(f'''listeners = ( {{ bind = "TCP:127.0.0.1:{port}"; {lextra or 'connlm = 8;'} target = "{device}"; }} );
 serials = ( {{ device = "{device}"; chars = "115200, 8, N, 1"; iotmo = {iotmo}; rs485 = 0; {extra} }} );
 ''')
         self.p = subprocess.Popen([GW, '/settings=' + self.conf], stdout=open(self.log, 'w'), stderr=subprocess.STDOUT)
@@ -297,7 +299,79 @@ def t_replug():
     return res
 
 
-tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug}
+class Echo(threading.Thread):
+    """A transparent device: every octet comes back."""
+
+    def __init__(self, line):
+        super().__init__(daemon=True)
+        self.line, self.stop = line, False
+        line.slave = self
+        self.start()
+
+    def run(self):
+        while not self.stop:
+            if select.select([self.line.m], [], [], 0.05)[0]:
+                try:
+                    os.write(self.line.m, os.read(self.line.m, 4096))
+                except OSError:
+                    return
+
+
+def t_rawreplug():
+    link = os.path.join(TMP, 'ttyRAW')
+    res = True
+
+    def plug():
+        ln = Line()
+        Echo(ln)
+        os.symlink(ln.name, link + '.new')
+        os.replace(link + '.new', link)
+        return ln
+
+    def unplug(ln):
+        ln.close()
+        os.unlink(link)
+
+    def session(timeout=3):
+        """Return the echo of a probe, b'' for a FIN without data."""
+        sk = socket.create_connection(('127.0.0.1', a.port + 4), timeout=timeout)
+        try:
+            sk.sendall(b'probe\r\n')
+            d = b''
+            while len(d) < 7:
+                c = sk.recv(64)
+                if not c:
+                    break
+                d += c
+            return d, sk
+        except (socket.timeout, ConnectionResetError):
+            return None, sk
+
+    gw = Gateway(link, a.port + 4, lextra='mode = "RAW";')			# Absent at the start
+    d, sk = session(); sk.close()
+    res &= report('rawreplug/absent', d == b'', f'reply {d!r} (a FIN without data expected)')
+    ln = plug()
+    time.sleep(1.5)
+    d, sk = session()
+    res &= report('rawreplug/plugged', d == b'probe\r\n', f'reply {d!r}')
+    unplug(ln)								# Under a running session
+    sk.settimeout(3)
+    try:
+        c = sk.recv(64)
+    except OSError as e:
+        c = repr(e).encode()
+    sk.close()
+    time.sleep(0.5)
+    res &= report('rawreplug/unplugged', c == b'' and gw.count('DEVLOST') == 1, f'session end {c!r}, DEVLOST {gw.count("DEVLOST")}')
+    ln = plug()
+    time.sleep(1.5)
+    d, sk = session(); sk.close()
+    res &= report('rawreplug/back', d == b'probe\r\n', f'reply {d!r}')
+    gw.stop(); unplug(ln)
+    return res
+
+
+tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug}
 rc = all([tests[t]() for t in (tests if a.test == 'all' else [a.test])])
 print(f'logs in {TMP}')
 sys.exit(0 if rc else 1)

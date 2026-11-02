@@ -177,6 +177,9 @@ The rules of the RAW mode:
   cut) is found by the TCP keepalive and dropped in about 1 minute (30 seconds of silence, then 3 probes, 10 seconds apart).
 - **No Time Stamp.** The `ts_*` pseudo device (chapter 6) does not work in the RAW mode.
 - On a start of a session the old octets in the serial port buffers are thrown away.
+- **No serial port --- no session.** If the USB adapter is absent or has been unplugged
+  (`DEVABSENT`, `DEVLOST`, section 3.1), a new client is disconnected at once, without any data,
+  and a running session is closed. When the adapter is back, the client simply connects again.
 
 A note for both modes: the serial input is "binary-clean" since X.00-14. The port does not change
 CR into LF and does not cut the 8th bit any more. Before, an octet `0x0D` could arrive as
@@ -311,7 +314,6 @@ dislikes.**
 | `%T2R-W-IDLETMO, [...] No activity for the past N seconds (idletmo) --- close the connection` | A client has sent nothing for `idletmo` seconds | normal for a client which polls rarely --- it reconnects; to keep the connection, raise `idletmo` of this listener |
 | `%T2R-E-LSNRAWSHR, [listener #NN] --- target <...> is used by the listener on port N too, ...` | A RAW listener wants a serial port which another listener uses | give the RAW listener its own serial port, or make the other listener use another one; or make the RAW listener a MODBUS one |
 | `%T2R-W-RAWBUSY, [...] --- the raw listener is busy and <takeover> is off --- the connection is rejected` | A client is already connected to the RAW port and `takeover = 0` | normal. Disconnect the first client, or set `takeover = 1` |
-| `%T2R-E-TTYPOLLEV, [...] poll()->N, .revents: XXXX --- the serial line has failed` | The serial port broke during a RAW session (a USB adapter was unplugged) | replug the adapter, look at `dmesg \| tail`; the client reconnects and the session starts again |
 | `%T2R-E-TXDRAINTMO, [...] --- the request has not been transmitted in N msec` | The USB adapter took the request but did not send it out; the request gets exception 4 | the adapter or its USB link hangs: `dmesg \| tail`; replug the adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it: the next request tries again |
 | `%T2R-E-DEVLOCKERR` / `DEVBUSY` on every request of one port, the other ports are fine | Another request holds the line and does not end | update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial driver). Before the restart, save what the stuck thread does: `for t in /proc/$(pidof mbusgw-t2r)/task/*; do echo $t $(cat $t/wchan); done` |
 | `%T2R-E-SESSFAIL, [...] --- cannot start a session thread, pthread_create()->11` | Too many TCP clients at once: every client takes a thread, and systemd limits the service (`TasksMax`, 578 on a small board) | find who keeps so many connections open (`ss -tn`); if they are all real, raise the limit: `TasksMax=2048` in the `[Service]` section of the unit, then `systemctl daemon-reload` |
@@ -415,7 +417,6 @@ dislikes.**
 | `RAWBUSY` | W | A new client is refused: the RAW port is busy and `takeover = 0`. Wait until the first client leaves, or set `takeover = 1` |
 | `LSNBADMODE` | E | The `mode` value is unknown; the record is skipped. Write `"MODBUS"` or `"RAW"` |
 | `LSNRAWSHR` | E | The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own |
-| `TTYPOLLEV` | E | The serial port failed during a RAW session (hang-up or error, e.g. a USB adapter was unplugged); the session is closed. Replug the adapter, check `dmesg`; the client can connect again |
 | `LSNRAWOPT` | E | A listeners option is not allowed in this mode (`takeover` in the MODBUS mode); the record is skipped. Remove the option or set `mode = "RAW"` |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*
