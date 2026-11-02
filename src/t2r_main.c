@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.00-13ECO06"
-#define	__REV__		"00.13.06"
+#define	__IDENT__	"X.00-13ECO07"
+#define	__REV__		"00.13.07"
 
 /*
 **++
@@ -161,6 +161,10 @@
 **				mipsel and mips64el (a cross build on Debian 12), the OpenWrt feed openwrt/
 **				(.ipk for 24.10, .apk for 25.12; mips_24kc, mipsel_24kc, aarch64_cortex-a53,
 **				arm_cortex-a7, arm_cortex-a7_neon-vfpv4, x86_64), see T2R-TTY X.00-13ECO06.
+**
+**	02-NOV-2026	CLD	X.00-13ECO07 / REV: 00.13.07 - T2R-TTY: the serial input is binary-clean (ICRNL
+**				and co. are cleared - a 0x0D octet of the answer became 0x0A on a fresh
+**				port, CRC16ERR), the line settles and is flushed after the open.
 **--
 */
 

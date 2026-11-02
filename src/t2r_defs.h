@@ -29,6 +29,9 @@
 **				T2R$_LISTENER got .idletmo and the .sessions counter, T2R$_SESSION - the
 **				back link .listener.
 **
+**	02-NOV-2026	CLD	X.00-13ECO07 / REV: 00.13.07 - Added T2R$K_SETTLE_MSEC (a pause after the
+**				serial port set up).
+**
 **--
 */
 
@@ -94,6 +97,7 @@ enum {
 #define		T2R$K_LISTEN_BACKLOG	64				/* listen() queue of not yet accepted connections */
 #define		T2R$K_NET_TMO_SEC	300				/* A timeout for reading data from network socket */
 #define		T2R$K_ANSTMO_MSEC	1000				/* A default timeout to wait an answer on the RTU leg */
+#define		T2R$K_SETTLE_MSEC	50				/* A pause after the serial port set up, then TCIOFLUSH */
 
 /*
  * Limits for validation of the has been configured parameters of a serial line and a listener

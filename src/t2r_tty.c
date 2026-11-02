@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-13ECO06"
-#define	__REV__		"00.13.06"
+#define	__IDENT__	"X.00-13ECO07"
+#define	__REV__		"00.13.07"
 
 /*
 **++
@@ -74,6 +74,14 @@
 **				at best) - the time stamp pseudo device on the OpenWrt/MIPS boards. The
 **				seconds are shifted as int64_t: time_t of a 32 bits glibc (mipsel, armhf)
 **				is 32 bits, a shift by 48 was undefined - R0, R1 got garbage.
+**
+**	02-NOV-2026	CLD	X.00-13ECO07 / REV: 00.13.07 - s_tty_open(): the input is binary-clean now -
+**				IGNBRK, BRKINT, PARMRK, ISTRIP, INLCR, IGNCR, ICRNL, IEXTEN and ECHONL are
+**				cleared (were inherited from the port: with ICRNL, the default of a fresh
+**				ttyS/ttyUSB after a boot or a replug, a 0x0D octet of the answer became 0x0A -
+**				CRC16ERR on ~3% of the requests, field report); after the set up the line
+**				settles for T2R$K_SETTLE_MSEC and both queues are flushed (the first request
+**				after the start was left unanswered on the FT4232H ports).
 **--
 */
 #include	<time.h>
@@ -785,7 +793,9 @@ int	l_rc;
  *	the RTU communications: the configured rate/data bits (5..8)/parity/stop bits, raw
  *	non-canonical I/O without a software flow control, VMIN = VTIME = 0. If HAVE_TIOCRS485
  *	is defined and T2R$M_SERIAL_RS485 is set, the RS-485 mode is switched on by TIOCGRS485 +
- *	TIOCSRS485; a failure there is not fatal (RS485OFF, the flag is cleared).
+ *	TIOCSRS485; a failure there is not fatal (RS485OFF, the flag is cleared). The input is
+ *	binary-clean (no CR/NL translation, no stripping/marking). At the end the line settles for
+ *	T2R$K_SETTLE_MSEC and both queues are flushed.
  *	Stolen and adopted from LIBMODBUS\MODBUS-RTU.C.
  *
  *   INPUTS:
@@ -809,6 +819,7 @@ static int s_tty_open (
 {
 speed_t l_speed = -1;
 int	l_flags = 0, l_rc;
+struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 	l_flags = O_RDWR | O_NOCTTY | O_NDELAY | O_EXCL;
 
@@ -893,7 +904,10 @@ int	l_flags = 0, l_rc;
 
 
 	/* Raw input */
-	a_serial->tios.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+	a_serial->tios.c_lflag &= ~(ICANON | ECHO | ECHOE | ECHONL | ISIG | IEXTEN);
+
+	/* Binary-clean input: no CR/NL translation, no 8th bit stripping, no BREAK/parity marking */
+	a_serial->tios.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
 
 	/* Hardware flow control is disabled: with an inherited CRTSCTS and CTS low nothing goes out */
 	a_serial->tios.c_cflag &= ~CRTSCTS;
@@ -938,6 +952,13 @@ int	l_flags = 0, l_rc;
 
 		}
 #endif /* HAVE_TIOCRS485 */
+
+	/*
+	 * Let the line settle (an USB-to-serial adapter, the RS-485 transceiver direction) and drop
+	 * whatever has come in or is still queued from the time before the set up.
+	 */
+	nanosleep(&l_settle_ts, NULL);
+	tcflush(a_serial->fd, TCIOFLUSH);
 
 	return	STS$K_SUCCESS;
 }
