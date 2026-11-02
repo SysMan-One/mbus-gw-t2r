@@ -32,6 +32,9 @@
 **	02-NOV-2026	CLD	X.00-13ECO07 / REV: 00.13.07 - Added T2R$K_SETTLE_MSEC (a pause after the
 **				serial port set up).
 **
+**	02-NOV-2026	CLD	X.00-13ECO08 / REV: 00.13.08 - T2R$_SERIAL got .lategd_msec (<lategd>, the guard
+**				window after a failed exchange), added T2R$K_LATEGD_MAX, T2R$K_USBGAP_MSEC.
+**
 **--
 */
 
@@ -98,6 +101,9 @@ enum {
 #define		T2R$K_NET_TMO_SEC	300				/* A timeout for reading data from network socket */
 #define		T2R$K_ANSTMO_MSEC	1000				/* A default timeout to wait an answer on the RTU leg */
 #define		T2R$K_SETTLE_MSEC	50				/* A pause after the serial port set up, then TCIOFLUSH */
+#define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 4	*/
+#define		T2R$K_USBGAP_MSEC	20				/* A gap inside of an answer from an USB adapter: 16 msec
+									   of the FTDI latency_timer plus a margin */
 
 /*
  * Limits for validation of the has been configured parameters of a serial line and a listener
@@ -157,7 +163,8 @@ typedef struct	t2r$_serial {
 
 		int	anstmo_msec,					/* A time to wait an answer for has been sent request */
 			inter_pdu_usec,					/* A delay before and after PDU on RTU */
-			onebyte_time_usec;				/* Estimated time to send byte over serial line in nanoseconds */
+			onebyte_time_usec,				/* Estimated time to send byte over serial line in nanoseconds */
+			lategd_msec;					/* A guard window after a failed exchange: <lategd> */
 
 		uint8_t	ts_unit_nr,
 			ts_fncode;

@@ -75,7 +75,8 @@ listen for TCP clients on every network interface, port 502, and forward them to
 |-----|-----------|---------------|----------------|
 | `device` | **yes** | The serial port file | e.g. `/dev/ttyUSB0` |
 | `chars` | **yes** | The line parameters: `speed, data bits, parity, stop bits` | speed 50..4000000; data bits 5..8; parity `N` (none), `E` (even), `O` (odd); stop bits 1..2 |
-| `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000 | any positive number |
+| `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | any positive number |
+| `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 4; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
 | `rs485` | no | `1` --- ask the kernel to drive the RS-485 direction control (only for ports that support it) | `0` or `1` |
 | `ts_enabled` | no | `1` --- enable the built-in Time Stamp pseudo device (see section 6) | `0` or `1` |
 | `ts_unit` | no | The slave address the pseudo device answers on | 1..247, default 135 |
@@ -226,6 +227,8 @@ dislikes.**
 | `%T2R-E-BADFRAME, [...] !UL octets, allowed [5..256]` | Something arrived, but it is not a sane MODBUS frame | usually the same causes as CRC16ERR; with 400+ octets of garbage --- a foreign, non-MODBUS device on the line |
 | `%T2R-W-FRAMETMO, [...] Frame is not completed in ...` | The answer started but never finished in time | a very slow or hanging device; raise `iotmo`; check the cable |
 | `CRC16ERR`, `BADFRAME` or `FRAMETMO` now and then, on a USB adapter (FTDI) only; a direct `mbpoll` on the same port is fine | The FTDI adapter gives the answer by pieces, once in 16 msec (its `latency_timer`). Since X.00-10 the gateway waits for the whole answer of the usual functions (01-06, 15, 16, 23), but the other functions are still cut | set `latency_timer` to 1 msec --- it also makes every answer faster: `sudo cp /opt/mbusgw-t2r/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/`, then `sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=usb-serial`; check: `cat /sys/bus/usb-serial/devices/ttyUSB0/latency_timer` must print `1` |
+| `%T2R-W-LATEANS, [...] N octets have arrived after the failed exchange (a late answer?) --- dropped` after `NOANSWER` | The device answered, but later than `iotmo`; the answer has been thrown away | raise `iotmo` of this serial port: take it with a margin over the slowest device on the line |
+| `%T2R-W-ECHOMISM, [...] Echo of the write request: address A, value/quantity V (REQ: ...) --- mismatch` | The answer to a write (functions 5, 6, 15, 16) is not the echo of this request: usually a late answer to an earlier request; the client gets exception 4 | raise `iotmo` (see LATEANS); if it happens with a fast device --- two masters on one line |
 | `%T2R-W-EXCRPT, [...] Report exception 4 (SERVER_DEVICE_FAILURE) ...` | The gateway told the TCP client "the serial side failed" | look at the *previous* log line --- it names the real reason (NOANSWER, CRC16ERR, ...) |
 | `%T2R-W-CONNLIMIT, [...] --- the listener has reached its connection limit (N) --- the connection is rejected` | The port already has `connlm` clients connected | if they are all real clients, raise `connlm` of this listener; otherwise find who keeps the connections open: `ss -tn` |
 | `%T2R-W-IDLETMO, [...] No activity for the past N seconds (idletmo) --- close the connection` | A client has sent nothing for `idletmo` seconds | normal for a client which polls rarely --- it reconnects; to keep the connection, raise `idletmo` of this listener |
@@ -322,6 +325,8 @@ dislikes.**
 | `CONNLIMIT` | W | A new TCP client is disconnected at once: the port already has `connlm` clients |
 | `LSNOPTRNG` | E | A listeners option (`connlm`, `idletmo`) is out of range; the record is skipped |
 | `TXDRAINTMO` | E | The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4 |
+| `ECHOMISM` | W | The answer to a write request is not its echo (another address or value); the request gets exception 4 |
+| `LATEANS` | W | After a failed request something came from the line within `lategd` --- a late answer; it is dropped |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*
 

@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-13ECO07"
-#define	__REV__		"00.13.07"
+#define	__IDENT__	"X.00-13ECO08"
+#define	__REV__		"00.13.08"
 
 /*
 **++
@@ -82,10 +82,20 @@
 **				CRC16ERR on ~3% of the requests, field report); after the set up the line
 **				settles for T2R$K_SETTLE_MSEC and both queues are flushed (the first request
 **				after the start was left unanswered on the FT4232H ports).
+**
+**	02-NOV-2026	CLD	X.00-13ECO08 / REV: 00.13.08 - A late answer went to the next request with the
+**				success status (field report: the device answers a bit later than <iotmo>;
+**				the slave, the function and the length matched): s_tty_rtu_rx() checks the
+**				echo of a write request (FC 05, 06, 0F, 10: the address and the value or the
+**				quantity) - ECHOMISM; s_tty_flush() drains the line for the <lategd> guard
+**				window (was a fixed t3.5 - the late answer came after it), stops early
+**				after a quiet gap once something has been read, stops on POLLHUP/POLLERR/
+**				POLLNVAL (was a busy loop on a dead descriptor), reports LATEANS.
 **--
 */
 #include	<time.h>
 #include	<stdio.h>
+#include	<string.h>
 #include	<stdlib.h>
 #include	<errno.h>
 #include	<unistd.h>
@@ -421,7 +431,9 @@ int	l_qty;
  *	   fails BADFRAME/CRC16ERR). Octets beyond the expected length are dropped, a full
  *	   buffer stops the reading (RXBUFFULL).
  *	4. Check the frame length, the CRC16, and that the slave and the function code match
- *	   the request.
+ *	   the request; a normal answer to a write request (FC 05, 06, 0F, 10) must be the echo
+ *	   of its address and value/quantity - a late answer to a previous request of the same
+ *	   kind is caught so.
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line
@@ -435,7 +447,7 @@ int	l_qty;
  *	a_resp_pdu:	.data/.len - the response PDU, the CRC16 trailer is stripped off
  *
  *   RETURNS:
- *	STS$K_SUCCESS, or NOANSWER, TTYSYSERR, RXNODATA, BADFRAME, CRC16ERR, RESPMISM
+ *	STS$K_SUCCESS, or NOANSWER, TTYSYSERR, RXNODATA, BADFRAME, CRC16ERR, RESPMISM, ECHOMISM
  */
 static int	s_tty_rtu_rx (
 	const T2R$_SERIAL	*a_serial,
@@ -578,6 +590,34 @@ uint8_t	*l_data;
 		|| (l_req_pdu->fncode != (l_resp_pdu->fncode & (~MODBUS$M_FN_EXCEPTION))) )
 		return	$PUTMSG_FAO(T2R$__RESPMISM, a_serial->fd, a_serial->devname, l_req_pdu->slave, l_resp_pdu->slave,
 				l_req_pdu->fncode, l_resp_pdu->fncode);
+
+	/*
+	 * A write is answered by the echo of its address and value/quantity (4 octets after the
+	 * function code). The fields are assembled octet-by-octet: they are at odd offsets.
+	 */
+	if ( !(l_resp_pdu->fncode & MODBUS$M_FN_EXCEPTION) )
+		{
+		switch ( l_req_pdu->fncode )
+			{
+			case	MODBUS$K_FN_WRITE_SINGLE_COIL:
+			case	MODBUS$K_FN_WRITE_SINGLE_REGISTER:
+			case	MODBUS$K_FN_WRITE_MULTIPLE_COILS:
+			case	MODBUS$K_FN_WRITE_MULTIPLE_REGISTERS:
+				if ( (a_resp_pdu->len - 2 < (int) sizeof(MODBUS_REQ_T)) || (a_req_pdu->len < (int) sizeof(MODBUS_REQ_T))
+					|| memcmp(a_resp_pdu->data, a_req_pdu->data, sizeof(MODBUS_REQ_T)) )
+					{
+					const uint8_t	*l_rq = (const uint8_t *) a_req_pdu->data;
+
+					return	$PUTMSG_FAO(T2R$__ECHOMISM, a_serial->fd, a_serial->devname,
+							(l_data[2] << 8) | l_data[3], (l_data[4] << 8) | l_data[5],
+							(l_rq[2] << 8) | l_rq[3], (l_rq[4] << 8) | l_rq[5]);
+					}
+				break;
+
+			default:
+				break;
+			}
+		}
 
 	a_resp_pdu->len -= 2;							/* Reduce a length of data for CRC16 */
 
@@ -1212,12 +1252,16 @@ int	l_rc;
 
 
 /*
- *   DESCRIPTION: Drop a has been left garbage from the serial line: tcflush(TCIOFLUSH) the kernel
- *	FIFOs, then read and discard the incoming data for one inter-PDU (t3.5) interval - a fixed
- *	window, it is not restarted by the arriving data.
+ *   DESCRIPTION: Drop a has been left garbage from the serial line after a failed exchange:
+ *	tcflush(TCIOFLUSH) the kernel FIFOs, then read and discard the incoming data for the guard
+ *	window - <lategd>, but not shorter than t3.5. A device which answers a bit later than
+ *	<iotmo> would otherwise give its answer to the next request: the input flush before TX does
+ *	not help, the late answer comes after it. Once something has been read, the window ends
+ *	earlier - after a quiet gap of max(t3.5, T2R$K_USBGAP_MSEC) (an USB adapter delivers an
+ *	answer by chunks). The dropped octets are reported by LATEANS.
  *
  *   INPUTS:
- *	a_serial:	A context of the serial line
+ *	a_serial:	A context of the serial line: .fd, .lategd_msec, .inter_pdu_usec/_ts
  *
  *   IMPLICIT INPUTS:
  *	g_exit_flag
@@ -1226,44 +1270,60 @@ int	l_rc;
  *	NONE
  *
  *   RETURNS:
- *	STS$K_SUCCESS (always; the poll()/read() errors are signalled by TTYSYSWRN)
+ *	STS$K_SUCCESS (always; the poll()/read() errors are signalled by TTYSYSWRN, a hung up or
+ *	invalid descriptor ends the window silently)
  */
 static int	s_tty_flush (
 	const T2R$_SERIAL	*a_serial
 		)
 {
-int	l_rc;
+int	l_rc, l_tmo_msec, l_dropped = 0;
+int64_t	l_usec;
 struct pollfd	l_pfd = {.fd = a_serial->fd, .events = POLLIN};
-struct timespec l_now_ts, l_end_of_pdu_ts;
+struct timespec l_now_ts, l_end_ts, l_quiet_ts, l_gap_ts, l_tmo_ts;
 char	l_buf[MODBUS$SZ_MAXPDU];
 
 
 	tcflush(a_serial->fd, TCIOFLUSH);
 
-	/* Compute a time limit for draining of the line garbage */
-	clock_gettime(CLOCK_MONOTONIC, &l_end_of_pdu_ts);
-	__util$add_time (&l_end_of_pdu_ts, &a_serial->inter_pdu_ts, &l_end_of_pdu_ts);
+	/* The guard window: <lategd>, but not shorter than t3.5 */
+	l_usec = (int64_t) a_serial->lategd_msec * 1000;
+	l_usec = (l_usec > a_serial->inter_pdu_usec) ? l_usec : a_serial->inter_pdu_usec;
+	l_tmo_ts.tv_sec = l_usec / 1000000;
+	l_tmo_ts.tv_nsec = (l_usec % 1000000) * 1000L;
+
+	/* The quiet gap which ends the window after the data: max(t3.5, an USB adapter chunk gap) */
+	l_usec = (a_serial->inter_pdu_usec > T2R$K_USBGAP_MSEC * 1000) ? a_serial->inter_pdu_usec : T2R$K_USBGAP_MSEC * 1000;
+	l_gap_ts.tv_sec = l_usec / 1000000;
+	l_gap_ts.tv_nsec = (l_usec % 1000000) * 1000L;
+
+	clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+	__util$add_time (&l_now_ts, &l_tmo_ts, &l_end_ts);
+	l_quiet_ts = l_end_ts;
+
+	l_tmo_msec = 1 + (a_serial->inter_pdu_usec / 1000);			/* At least 1 msec - poll() granularity */
 
 	while ( !g_exit_flag )
 		{
-		/*
-		 * Get current time and check: did we reach a time limit to read whole PDU ?
-		 *
-		 * 	0	- time1 == time2
-		 *	0 >	- time1 < time2
-		 *	0 <	- time1 > time2
-		 */
 		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
 
-		if ( 0 < (l_rc = __util$cmp_time (&l_now_ts, &l_end_of_pdu_ts)) )
+		if ( (0 < __util$cmp_time (&l_now_ts, &l_end_ts)) || (0 < __util$cmp_time (&l_now_ts, &l_quiet_ts)) )
 			break;
 
+		if ( 0 > (l_rc = poll(&l_pfd, 1, l_tmo_msec)) )
+			{
+			if ( errno == EINTR )
+				continue;
 
-		if ( 0 > (l_rc = poll(&l_pfd, 1, 1 + a_serial->inter_pdu_usec / 1000)) )
 			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "poll()", l_rc, errno);
-		else	if ( !l_rc)
+			break;
+			}
+
+		if ( !l_rc )
 			continue;
 
+		if ( l_pfd.revents & (POLLHUP | POLLERR | POLLNVAL) )		/* A dead descriptor - nothing to wait for */
+			break;
 
 		if ( 0 > (l_rc = read(a_serial->fd, l_buf, sizeof(l_buf))) )
 			{
@@ -1273,7 +1333,18 @@ char	l_buf[MODBUS$SZ_MAXPDU];
 			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "read()", l_rc, errno);
 			break;
 			}
+
+		if ( !l_rc )
+			continue;
+
+		l_dropped += l_rc;
+
+		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);			/* Restart the quiet gap */
+		__util$add_time (&l_now_ts, &l_gap_ts, &l_quiet_ts);
 		}
+
+	if ( l_dropped )
+		$PUTMSG_FAO(T2R$__LATEANS, a_serial->fd, a_serial->devname, l_dropped);
 
 	return	STS$K_SUCCESS;
 }

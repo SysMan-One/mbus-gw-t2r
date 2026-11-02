@@ -21,6 +21,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--gw', default='./build/mbusgw-t2r')
 ap.add_argument('--port', type=int, default=5602)
 ap.add_argument('--secs', type=int, default=30)
+ap.add_argument('--lategd', type=int, default=None, help='late: <lategd> of the serial, the gateway default if omitted')
 ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'all'])
 a = ap.parse_args()
 GW = os.path.abspath(a.gw)
@@ -183,7 +184,7 @@ def t_icrnl():
 def t_late():
     line = Line()
     Slave(line, delay=lambda: random.uniform(0.180, 0.240))		# iotmo 200: some answers are late by up to 40 msec
-    gw = Gateway(line.name, a.port + 1, iotmo=200)
+    gw = Gateway(line.name, a.port + 1, iotmo=200, extra='' if a.lategd is None else f'lategd = {a.lategd};')
     stats = {'ok': 0, 'exc': 0, 'foreign_w': 0, 'foreign_r': 0}
     lk = threading.Lock()
 
@@ -215,7 +216,8 @@ def t_late():
     [t.start() for t in th]
     [t.join() for t in th]
     gw.stop(); line.close()
-    return report('late', stats['foreign_w'] + stats['foreign_r'] == 0,
+    expect = stats['foreign_w'] + stats['foreign_r'] == 0 if a.lategd != 0 else stats['foreign_w'] == 0	# lategd 0: the echo check only
+    return report('late', expect,
                   f'{stats}, NOANSWER {gw.count("NOANSWER")}, ECHOMISM {gw.count("ECHOMISM")}, LATEANS {gw.count("LATEANS")}')
 
 

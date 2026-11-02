@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.00-13ECO07"
-#define	__REV__		"00.13.07"
+#define	__IDENT__	"X.00-13ECO08"
+#define	__REV__		"00.13.08"
 
 /*
 **++
@@ -165,6 +165,13 @@
 **	02-NOV-2026	CLD	X.00-13ECO07 / REV: 00.13.07 - T2R-TTY: the serial input is binary-clean (ICRNL
 **				and co. are cleared - a 0x0D octet of the answer became 0x0A on a fresh
 **				port, CRC16ERR), the line settles and is flushed after the open.
+**
+**	02-NOV-2026	CLD	X.00-13ECO08 / REV: 00.13.08 - A late answer is not given to the next request
+**				(field report: ~100 successful answers with the foreign data in 90 sec with
+**				the device answering at iotmo +- 15%): the echo of a write request (FC 05,
+**				06, 0F, 10) is checked (ECHOMISM), after a failed exchange the line is
+**				drained for the <lategd> guard window (the new <serials> option, msec,
+**				default <iotmo> / 4, 0 - t3.5 only as before; LATEANS).
 **--
 */
 
@@ -315,7 +322,8 @@ static int s_settings_find_n_get_serial (
 /*
  *  DESCRIPTION: Process the <serials> section: mandatory <device>, <chars> ("baud, databits,
  *	parity, stopbits", range checked); optional <rs485>, <iotmo> (the answer timeout, msec,
- *	a non-positive value is ignored), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>.
+ *	a non-positive value is ignored), <lategd> (the guard window after a failed exchange, msec,
+ *	0..T2R$K_LATEGD_MAX, default <iotmo> / 4), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>.
  *	Compute the octet time and t3.5, init the device lock, fill the global table of serial
  *	devices (at most T2R$K_MAX_SERIALS records). An ill-formed record is rejected with a
  *	diagnostic, processing is continued from the next one.
@@ -459,6 +467,19 @@ char	l_chars[64];
 
 		if ( config_setting_lookup_int(l_args, "iotmo", &l_int) && (0 < l_int) )
 			l_serial->anstmo_msec = l_int;
+
+		l_serial->lategd_msec = l_serial->anstmo_msec / 4;		/* The guard window after a failed exchange */
+
+		if ( config_setting_lookup_int(l_args, "lategd", &l_int) )
+			{
+			if ( (l_int < 0) || (l_int > T2R$K_LATEGD_MAX) )
+				{
+				$PUTMSG_FAO(T2R$__SERRANGE, i, l_serial->devname, "lategd (msec)", l_int, 0, T2R$K_LATEGD_MAX);
+				continue;
+				}
+
+			l_serial->lategd_msec = l_int;
+			}
 
 		/* A time to shift out a single octet: start + data + parity + stop bits */
 		l_serial->onebyte_time_usec = (1000000 * (1 + l_serial->databits

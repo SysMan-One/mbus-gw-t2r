@@ -41,6 +41,10 @@
 **	14-OCT-2026	RRL	X.00-13ECO02 / REV: 00.13.02 - NETPOLLEV is a WARNING (was ERROR): a TCP client
 **				which resets its connections (a restart of the polling program) is not a
 **				failure of the gateway.
+**
+**	02-NOV-2026	CLD	X.00-13ECO08 / REV: 00.13.08 - Added ECHOMISM (the echo of a write request does
+**				not match it) and LATEANS (octets have arrived in the guard window after a
+**				failed exchange - a late answer).
 **--
 */
 
@@ -147,6 +151,8 @@ $DEF_MSG(T2R, ERROR,	DEVBUSY,			"[#!SL:<!AZ>] --- cannot be allocated for exclus
 $DEF_MSG(T2R, WARN,	CONNLIMIT,		"[#!SL] !%I:!UW --- the listener has reached its connection limit (!UL) --- the connection is rejected") \
 $DEF_MSG(T2R, ERROR,	LSNOPTRNG,		"[listener #!2ZL] --- !AZ !SL is out of range [!SL..!SL]") \
 $DEF_MSG(T2R, ERROR,	TXDRAINTMO,		"[#!SL:<!AZ>] --- the request has not been transmitted in !UL msec, !SL octets are dropped") \
+$DEF_MSG(T2R, WARN,	ECHOMISM,		"[#!SL:<!AZ>] Echo of the write request: address !UL, value/quantity !UL (REQ: !UL, !UL) --- mismatch") \
+$DEF_MSG(T2R, WARN,	LATEANS,			"[#!SL:<!AZ>] !UL octets have arrived after the failed exchange (a late answer?) --- dropped") \
 
 
 
