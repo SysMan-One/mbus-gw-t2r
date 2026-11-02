@@ -15,7 +15,7 @@
 # MODIFICATION HISTORY:
 #	02-NOV-2026	CLD	X.00-13ECO07: Initial revision.
 #
-import argparse, os, pty, random, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
+import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--gw', default='./build/mbusgw-t2r')
@@ -57,6 +57,9 @@ class Line:
         self.name = os.ttyname(self.s)
 
     def close(self):
+        if getattr(self, 'slave', None):	# A read() blocked in another thread keeps the master open: stop it first
+            self.slave.stop = True
+            self.slave.join()
         for fd in (self.m, self.s):
             try:
                 os.close(fd)
@@ -70,12 +73,15 @@ class Slave(threading.Thread):
     def __init__(self, line, regs=None, delay=None):
         super().__init__(daemon=True)
         self.line, self.regs, self.delay = line, dict(regs or {}), delay
-        self.answered = 0
+        self.answered, self.stop = 0, False
+        line.slave = self
         self.start()
 
     def run(self):
         buf = b''
-        while True:
+        while not self.stop:
+            if not select.select([self.line.m], [], [], 0.05)[0]:
+                continue
             try:
                 d = os.read(self.line.m, 512)
             except OSError:

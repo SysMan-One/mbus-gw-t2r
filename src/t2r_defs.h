@@ -35,6 +35,10 @@
 **	02-NOV-2026	CLD	X.00-13ECO08 / REV: 00.13.08 - T2R$_SERIAL got .lategd_msec (<lategd>, the guard
 **				window after a failed exchange), added T2R$K_LATEGD_MAX, T2R$K_USBGAP_MSEC.
 **
+**	02-NOV-2026	CLD	X.00-13ECO09 / REV: 00.13.09 - T2R$_SERIAL got .nodev and .reopen_ts (the device
+**				is absent or lost, the next reopen attempt), added T2R$K_REOPEN_MSEC,
+**				T2R$K_CHECK_MSEC and t2r$tty_check().
+**
 **--
 */
 
@@ -101,6 +105,8 @@ enum {
 #define		T2R$K_NET_TMO_SEC	300				/* A timeout for reading data from network socket */
 #define		T2R$K_ANSTMO_MSEC	1000				/* A default timeout to wait an answer on the RTU leg */
 #define		T2R$K_SETTLE_MSEC	50				/* A pause after the serial port set up, then TCIOFLUSH */
+#define		T2R$K_REOPEN_MSEC	1000				/* An absent or lost device is reopened this often	*/
+#define		T2R$K_CHECK_MSEC	1000				/* The idle lines are checked for a hangup this often	*/
 #define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 4	*/
 #define		T2R$K_USBGAP_MSEC	20				/* A gap inside of an answer from an USB adapter: 16 msec
 									   of the FTDI latency_timer plus a margin */
@@ -165,6 +171,9 @@ typedef struct	t2r$_serial {
 			inter_pdu_usec,					/* A delay before and after PDU on RTU */
 			onebyte_time_usec,				/* Estimated time to send byte over serial line in nanoseconds */
 			lategd_msec;					/* A guard window after a failed exchange: <lategd> */
+
+		int	nodev;						/* The device is absent or lost: .fd = -1, reopen by .devname */
+	struct timespec	reopen_ts;					/* CLOCK_MONOTONIC of the next reopen attempt */
 
 		uint8_t	ts_unit_nr,
 			ts_fncode;
@@ -238,6 +247,7 @@ void	t2r$rtu_print (const char *a__mod, const char *a__fi, const int a__li,
 int	t2r$tty_open(T2R$_SERIAL *);
 int	t2r$tty_close(T2R$_SERIAL *);
 int	t2r$tty_exec_req(T2R$_SERIAL *, void *a_req_dsc, void *a_resp_dsc, uint8_t *a_excode);
+int	t2r$tty_check(T2R$_SERIAL *);
 
 #ifdef __cplusplus
 }

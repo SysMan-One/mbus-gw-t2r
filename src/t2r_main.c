@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.00-13ECO08"
-#define	__REV__		"00.13.08"
+#define	__IDENT__	"X.00-13ECO09"
+#define	__REV__		"00.13.09"
 
 /*
 **++
@@ -172,6 +172,12 @@
 **				06, 0F, 10) is checked (ECHOMISM), after a failed exchange the line is
 **				drained for the <lategd> guard window (the new <serials> option, msec,
 **				default <iotmo> / 4, 0 - t3.5 only as before; LATEANS).
+**
+**	02-NOV-2026	CLD	X.00-13ECO09 / REV: 00.13.09 - A replugged USB adapter is reopened by its name
+**				(field report: EIO forever, exception 4 to everybody until the restart): a
+**				device which has gone is closed at once (DEVLOST), reopened every second,
+**				also on an idle line; the requests get exception 10 meanwhile; a device
+**				absent at the start does not stop its listener (DEVABSENT).
 **--
 */
 

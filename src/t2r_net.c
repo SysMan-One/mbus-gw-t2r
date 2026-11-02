@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"X.00-13ECO01"
-#define	__REV__		"00.13.01"
+#define	__IDENT__	"X.00-13ECO09"
+#define	__REV__		"00.13.09"
 
 /*
 **++
@@ -68,6 +68,12 @@
 **
 **	14-OCT-2026	RRL	X.00-13ECO01 / REV: 00.13.01 - t2r$net_stop_listeners(): DEVCLSERR was signalled
 **				twice - t2r$tty_close() signals it itself.
+**
+**	02-NOV-2026	CLD	X.00-13ECO09 / REV: 00.13.09 - A listener is not skipped when its device is absent at
+**				the start (DEVABSENT: it is opened later); the listener thread calls
+**				t2r$tty_check() for every serial every T2R$K_CHECK_MSEC (a replugged USB
+**				adapter of an idle line is closed and reopened); no REQFAIL for exception 10
+**				(the device is absent - DEVLOST/DEVABSENT has told it once, not per request).
 **--
 */
 
@@ -395,7 +401,7 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 					break;
 
 
-				if ( l_excode )
+				if ( l_excode && (l_excode != MODBUS$K_EXCEPTION_GW_NO_PATH) )
 					$PUTMSG_FAO(T2R$__REQFAIL, l_session->sd, l_excode, l_excode);
 
 				if ( !(1 & (l_rc = t2r$rtu_pdu_2_mbap (&l_rtu_resp_dsc, &l_netbuf_dsc)) ) )
@@ -502,19 +508,35 @@ struct sockaddr_in	l_sk = {0};
 socklen_t l_slen;
 T2R$_SESSION	*l_session;
 pthread_t	l_tid;
+struct timespec	l_now_ts, l_check_ts = {0};
+const struct timespec l_period_ts = {.tv_sec = T2R$K_CHECK_MSEC / 1000, .tv_nsec = (T2R$K_CHECK_MSEC % 1000) * 1000000L};
 
 	while ( !g_exit_flag )
 		{
 		/*
 		 * Wait for any new TCP-connection request on all ports ...
 		 */
-		if ( 0 > (l_rc = poll(s_pfd_lsnr, g_listeners_nr, 5000)) )
+		if ( 0 > (l_rc = poll(s_pfd_lsnr, g_listeners_nr, T2R$K_CHECK_MSEC)) )
 			{
 			if ( errno == EINTR )
 				continue;
 
 			$PUTMSG_FAO(T2R$__SYSERR, "poll(listeners)", l_rc, errno);
 			break;								/* A persistent error would give a busy loop */
+			}
+
+		/*
+		 * The serial lines: a hangup of an idle one (an USB adapter has gone), the reopen of an
+		 * absent one - see t2r$tty_check().
+		 */
+		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+
+		if ( 0 <= __util$cmp_time (&l_now_ts, &l_check_ts) )
+			{
+			__util$add_time (&l_now_ts, &l_period_ts, &l_check_ts);
+
+			for (int i = 0; i < g_serials_nr; i++ )
+				t2r$tty_check (&g_serials[i]);
 			}
 
 		if ( !l_rc )
@@ -701,9 +723,10 @@ pthread_t	l_tid;
 
 		/*
 		 * A target device is opened BEFORE the socket is published to the poll() array:
-		 * we do not want to accept clients for a leg which does not work.
+		 * we do not want to accept clients for a leg which does not work. An absent device
+		 * (DEVABSENT: an USB adapter not plugged in yet) is not fatal - it is opened later.
 		 */
-		if ( !(1 & (l_rc = t2r$tty_open (l_listener->serial))) )
+		if ( !(1 & (l_rc = t2r$tty_open (l_listener->serial))) && (l_rc != T2R$__DEVABSENT) )
 			{
 			close(l_sd);							/* Don't leak the descriptor */
 			$PUTMSG_FAO(T2R$__TGTOPNERR, &l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), l_listener->serial->devname);

@@ -45,6 +45,9 @@
 **	02-NOV-2026	CLD	X.00-13ECO08 / REV: 00.13.08 - Added ECHOMISM (the echo of a write request does
 **				not match it) and LATEANS (octets have arrived in the guard window after a
 **				failed exchange - a late answer).
+**
+**	02-NOV-2026	CLD	X.00-13ECO09 / REV: 00.13.09 - Added DEVLOST (the device has gone: EIO/ENODEV/
+**				ENXIO, a hangup) and DEVABSENT (the device cannot be opened, it is retried).
 **--
 */
 
@@ -153,6 +156,8 @@ $DEF_MSG(T2R, ERROR,	LSNOPTRNG,		"[listener #!2ZL] --- !AZ !SL is out of range [
 $DEF_MSG(T2R, ERROR,	TXDRAINTMO,		"[#!SL:<!AZ>] --- the request has not been transmitted in !UL msec, !SL octets are dropped") \
 $DEF_MSG(T2R, WARN,	ECHOMISM,		"[#!SL:<!AZ>] Echo of the write request: address !UL, value/quantity !UL (REQ: !UL, !UL) --- mismatch") \
 $DEF_MSG(T2R, WARN,	LATEANS,			"[#!SL:<!AZ>] !UL octets have arrived after the failed exchange (a late answer?) --- dropped") \
+$DEF_MSG(T2R, ERROR,	DEVLOST,			"[#!SL:<!AZ>] !AZ, errno: !SL --- the device is lost, it will be reopened every !UL msec") \
+$DEF_MSG(T2R, WARN,	DEVABSENT,		"Device <!AZ> is absent --- it will be opened every !UL msec, the requests get exception 10 (GATEWAY_PATH_UNAVAILABLE) meanwhile") \
 
 
 

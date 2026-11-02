@@ -92,6 +92,28 @@ message, for example:
 
 The record number (`#00`) counts from zero, in the order the records appear in the file.
 
+**USB adapters: unplugging is fine.** Since X.00-13ECO09 the gateway lives through a replug of a
+USB-to-serial adapter (or a hub reset):
+
+- the gateway notices that the adapter has gone (`%T2R-E-DEVLOST`) --- also when nobody is
+  polling --- and closes the port at once;
+- it tries to open the port again by its name every second; while the adapter is away, the
+  clients get the exception **10** (`GATEWAY_PATH_UNAVAILABLE`), not 4;
+- when the adapter is back, `%T2R-S-DEVREADY` is printed and the work goes on; no restart is needed;
+- if the adapter is not there when the gateway starts, its TCP port is opened anyway
+  (`%T2R-W-DEVABSENT`), and the port starts to work when the adapter appears.
+
+**Use a permanent name.** The kernel gives the numbers `ttyUSB0`, `ttyUSB1`, ... in the order the
+adapters appear, so after a replug the same adapter may get another number. Put a permanent
+name into `device` (and into `target` of the listener) instead:
+
+- the name by the USB socket: `ls -l /dev/serial/by-path/` --- for example
+  `/dev/serial/by-path/platform-xhci-hcd.0-usb-0:1.1:1.0-port0` (for a 4-port FT4232H the
+  ports differ by the `:1.0`, `:1.1`, `:1.2`, `:1.3` part);
+- or your own name made by a udev rule, for example `/dev/rs485-1`:
+  `SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-xhci-hcd.0-usb-0:1.1:1.0", SYMLINK+="rs485-1"`
+  in `/etc/udev/rules.d/99-rs485.rules` (see `udevadm info /dev/ttyUSB0` for the values).
+
 ### 3.2. The `listeners` section --- one record per TCP port
 
 | Key | Required? | What it means | Allowed values |
@@ -218,7 +240,10 @@ dislikes.**
 
 | You see | What it means | What to do |
 |---------|---------------|------------|
-| `%T2R-E-DEVOPNERR, Cannot open the device </dev/ttyUSB0>, errno: 2` | errno 2 = the file does not exist: the adapter is unplugged or the name is wrong | `dmesg \| tail` after plugging the adapter; fix `device` in the settings |
+| `%T2R-E-DEVOPNERR, Cannot open the device </dev/ttyUSB0>, errno: 2` | errno 2 = the file does not exist: the adapter is unplugged or the name is wrong | `dmesg \| tail` after plugging the adapter; fix `device` in the settings. Since X.00-13ECO09 the TCP port is opened anyway (`DEVABSENT`), the device is tried every second |
+| `%T2R-E-DEVLOST, [...] tcflush(), errno: 5 --- the device is lost, it will be reopened every 1000 msec` (or `writev()`, `read()`, `hangup`) | The USB adapter has gone: unplugged, a hub reset, a power dip; the clients get the exception 10 | nothing, if it comes back: `DEVREADY` follows. If not: `dmesg \| tail`; check the cable and the power; if it came back under another `ttyUSB` number, use a permanent name (section 3.1) |
+| `%T2R-W-DEVABSENT, Device <...> is absent --- it will be opened every 1000 msec ...` | At the start the serial port could not be opened (the line above says why); its TCP port works and answers the exception 10 | plug in the adapter --- `DEVREADY` follows; or fix `device` in the settings |
+| The client gets the exception `0x0A` (10) | The serial port of this TCP port is absent or lost (see `DEVLOST`, `DEVABSENT`) | see `DEVLOST` above |
 | the same, `errno: 13` | Permission denied | run with `sudo` or add yourself to the `dialout` group |
 | the same, `errno: 16` | The port is busy: another program holds it | find it: `sudo fuser /dev/ttyUSB0`; stop it |
 | `%T2R-E-NOANSWER, [...] Did not get an answer in 1000 msec` | The request went out, nothing came back | 1) wrong slave address in the client's request; 2) wrong wiring (swap A/B of RS-485); 3) wrong speed/parity --- re-check `chars`; 4) the device is simply off |
@@ -277,7 +302,7 @@ dislikes.**
 | `NETPOLLEV` | W | A TCP connection broke: the client reset it (e.g. the polling program was restarted); the connection is closed |
 | `SESSFAIL` | E | No thread for a new TCP client: too many connections at once (see Troubleshooting); the client is dropped |
 | `LSNRABRT` | W | A TCP listener is stopped --- normal at the gateway exit |
-| `TGTOPNERR` | E | A TCP port is not opened because its serial port cannot be opened; the previous line says why |
+| `TGTOPNERR` | E | A TCP port is not opened because its serial port cannot be set up; the previous line says why. An absent device does not stop the TCP port since X.00-13ECO09 (see `DEVABSENT`) |
 | `NOLSNRUP` | E | Not a single TCP port could be opened; the gateway stops |
 | `NOROOM` | E | An answer does not fit into the buffer --- an internal error, please report it |
 | `MBAPLEN` | E | The MBAP length field does not match the received data; the request is rejected |
@@ -326,6 +351,8 @@ dislikes.**
 | `LSNOPTRNG` | E | A listeners option (`connlm`, `idletmo`) is out of range; the record is skipped |
 | `TXDRAINTMO` | E | The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4 |
 | `ECHOMISM` | W | The answer to a write request is not its echo (another address or value); the request gets exception 4 |
+| `DEVLOST` | E | The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile |
+| `DEVABSENT` | W | The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second |
 | `LATEANS` | W | After a failed request something came from the line within `lategd` --- a late answer; it is dropped |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*

@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-13ECO08"
-#define	__REV__		"00.13.08"
+#define	__IDENT__	"X.00-13ECO09"
+#define	__REV__		"00.13.09"
 
 /*
 **++
@@ -91,6 +91,19 @@
 **				window (was a fixed t3.5 - the late answer came after it), stops early
 **				after a quiet gap once something has been read, stops on POLLHUP/POLLERR/
 **				POLLNVAL (was a busy loop on a dead descriptor), reports LATEANS.
+**
+**	02-NOV-2026	CLD	X.00-13ECO09 / REV: 00.13.09 - A replugged USB adapter is reopened by its name
+**				(field report: EIO forever on the old descriptor, every request got exception
+**				4 until the restart, and the returned adapter got another ttyUSB number as the
+**				old descriptor kept the old one busy). EIO/ENODEV/ENXIO from tcflush()/
+**				writev()/read() and POLLHUP/POLLERR/POLLNVAL close the descriptor at once
+**				(s_tty_lost(), DEVLOST, no tcsetattr() on a dead device); s_tty_reopen() tries
+**				to open it again every T2R$K_REOPEN_MSEC from t2r$tty_exec_req() and from the
+**				new t2r$tty_check() (an idle line: a hangup is noticed and the device is
+**				reopened without any request); meanwhile the requests get exception 10
+**				(GATEWAY_PATH_UNAVAILABLE) without the per-request EXCRPT. t2r$tty_open(): a
+**				device absent at the start is not fatal any more (DEVABSENT, the listener is
+**				up). s_tty_open() got a_quiet: the reopen attempts do not signal.
 **--
 */
 #include	<time.h>
@@ -118,6 +131,11 @@
 
 
 extern int	g_exit_flag, g_trace;
+
+/* Signal a condition unless a_quiet is set; the condition value is the result either way */
+#define	$SIGQ(a_quiet, a_sts, ...)	((a_quiet) ? (a_sts) : $PUTMSG_FAO(a_sts, __VA_ARGS__))
+
+static const struct timespec	s_reopen_ts = {.tv_sec = T2R$K_REOPEN_MSEC / 1000, .tv_nsec = (T2R$K_REOPEN_MSEC % 1000) * 1000000L};
 
 
 
@@ -189,6 +207,66 @@ int	l_rc;
 		return	$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "pthread_mutex_unlock()", l_rc, errno);
 
 	return	STS$K_SUCCESS;
+}
+
+
+
+/*
+ *   DESCRIPTION: Is it the errno of a device which has gone (an USB adapter unplugged, a hub reset)?
+ *
+ *   INPUTS:
+ *	a_errno:	An errno value
+ *
+ *   OUTPUTS:
+ *	NONE
+ *
+ *   RETURNS:
+ *	1 - EIO, ENODEV or ENXIO; 0 - anything else
+ */
+static inline int s_tty_gone_errno (
+		int	a_errno
+		)
+{
+	return	(a_errno == EIO) || (a_errno == ENODEV) || (a_errno == ENXIO);
+}
+
+
+/*
+ *   DESCRIPTION: The device has gone: close the descriptor at once - the old descriptor keeps the
+ *	old ttyUSB number busy, the returned adapter would get another one - and schedule the reopen
+ *	by the device name. The terminal attributes are not restored: there is nothing to restore
+ *	them on, a tcsetattr(TCSAFLUSH) there could block. Must be called under the device lock.
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line
+ *	a_why:		What has failed, for the message
+ *	a_errno:	The errno of the failure, 0 - a hangup reported by poll()
+ *
+ *   OUTPUTS:
+ *	a_serial:	.fd = -1, .nodev = 1, .reopen_ts = now + T2R$K_REOPEN_MSEC
+ *
+ *   RETURNS:
+ *	T2R$__DEVLOST (signalled)
+ */
+static int	s_tty_lost (
+		T2R$_SERIAL	*a_serial,
+	const char		*a_why,
+		int		a_errno
+		)
+{
+int	l_fd = a_serial->fd;
+struct timespec l_now_ts;
+
+	if ( 0 <= a_serial->fd )
+		close(a_serial->fd);
+
+	a_serial->fd = -1;
+	a_serial->nodev = 1;
+
+	clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+	__util$add_time (&l_now_ts, &s_reopen_ts, &a_serial->reopen_ts);
+
+	return	$PUTMSG_FAO(T2R$__DEVLOST, l_fd, a_serial->devname, a_why, a_errno, T2R$K_REOPEN_MSEC);
 }
 
 
@@ -283,14 +361,15 @@ struct timespec	l_now_ts, l_end_ts, l_deadline_ts, l_tmo_ts, l_step_ts = {.tv_ns
  *	NONE
  *
  *   RETURNS:
- *	STS$K_SUCCESS, T2R$__XMITERR, T2R$__XMITSHORT, T2R$__TXDRAINTMO
+ *	STS$K_SUCCESS, T2R$__XMITERR, T2R$__XMITSHORT, T2R$__TXDRAINTMO,
+ *	T2R$__DEVLOST	- the device has gone (EIO/ENODEV/ENXIO), it is closed - see s_tty_lost()
  */
 static int	s_tty_rtu_tx (
-	const T2R$_SERIAL	*a_serial,
+		T2R$_SERIAL	*a_serial,
 		T2R$_DESC	*a_req_pdu
 		)
 {
-int	l_rc, l_len;
+int	l_rc, l_len, l_errno;
 uint16_t l_crc;
 uint8_t	l_crcbuf[2];
 enum {	IOV$K_PDU, IOV$K_CRC, IOV$K_MAX};
@@ -321,7 +400,12 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 	 * perfectly correct frame.
 	 */
 	if ( 0 > (l_rc = tcflush(a_serial->fd, TCIFLUSH)) )
-		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, errno);
+		{
+		if ( s_tty_gone_errno (l_errno = errno) )
+			return	s_tty_lost (a_serial, "tcflush()", l_errno);
+
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, l_errno);
+		}
 
 
 											/* Predelay ... */
@@ -331,7 +415,11 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 	clock_gettime(CLOCK_MONOTONIC, &l_start_ts);					/* The air time is counted from here */
 
 	if ( 0 > (l_rc = writev(a_serial->fd, l_iov,  IOV$K_MAX)) )
-		l_rc = $PUTMSG_FAO(T2R$__XMITERR, a_serial->fd, a_serial->devname, l_len, l_rc, errno);
+		{
+		if ( s_tty_gone_errno (l_errno = errno) )
+			l_rc = s_tty_lost (a_serial, "writev()", l_errno);
+		else	l_rc = $PUTMSG_FAO(T2R$__XMITERR, a_serial->fd, a_serial->devname, l_len, l_rc, l_errno);
+		}
 	else if ( l_rc != l_len )
 		l_rc = $PUTMSG_FAO(T2R$__XMITSHORT, a_serial->fd, a_serial->devname, l_rc, l_len, errno);
 	else	{
@@ -447,15 +535,16 @@ int	l_qty;
  *	a_resp_pdu:	.data/.len - the response PDU, the CRC16 trailer is stripped off
  *
  *   RETURNS:
- *	STS$K_SUCCESS, or NOANSWER, TTYSYSERR, RXNODATA, BADFRAME, CRC16ERR, RESPMISM, ECHOMISM
+ *	STS$K_SUCCESS, or NOANSWER, TTYSYSERR, RXNODATA, BADFRAME, CRC16ERR, RESPMISM, ECHOMISM,
+ *	DEVLOST (a hangup or EIO/ENODEV/ENXIO: the device is closed - see s_tty_lost())
  */
 static int	s_tty_rtu_rx (
-	const T2R$_SERIAL	*a_serial,
+		T2R$_SERIAL	*a_serial,
 		const T2R$_DESC	*a_req_pdu,
 		T2R$_DESC	*a_resp_pdu
 		)
 {
-int	l_rc, l_tmo_msec, l_space, l_explen, l_normlen;
+int	l_rc, l_tmo_msec, l_space, l_explen, l_normlen, l_errno;
 uint16_t	l_crc, l_crc_rcvd;
 struct pollfd	l_pfd = {.fd = a_serial->fd, .events = POLLIN};
 struct timespec	l_now_ts, l_silence_ts, l_deadline_ts;
@@ -477,6 +566,8 @@ uint8_t	*l_data;
 		}
 	else if ( !l_rc )
 		return	$PUTMSG_FAO(T2R$__NOANSWER, a_serial->fd, a_serial->devname, a_serial->anstmo_msec);
+	else if ( l_pfd.revents & (POLLHUP | POLLERR | POLLNVAL) )
+		return	s_tty_lost (a_serial, "poll() hangup", 0);
 
 	/*
 	 * An upper limit for the whole frame: we never stay here longer than the answer timeout.
@@ -528,14 +619,20 @@ uint8_t	*l_data;
 		if ( !l_rc )
 			continue;						/* Nothing yet - let the t3.5 check to decide */
 
+		if ( l_pfd.revents & (POLLHUP | POLLERR | POLLNVAL) )
+			return	s_tty_lost (a_serial, "poll() hangup", 0);
+
 		if ( 0 > (l_rc = read(a_serial->fd, a_resp_pdu->data + a_resp_pdu->len, l_space)) )
 			{
 									/* The port is opened with O_NDELAY: these three
 									   errno-s are a normal flow, not a failure	*/
-			if ( (errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR) )
+			if ( ((l_errno = errno) == EAGAIN) || (l_errno == EWOULDBLOCK) || (l_errno == EINTR) )
 				continue;
 
-			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", l_rc, errno);
+			if ( s_tty_gone_errno (l_errno) )
+				return	s_tty_lost (a_serial, "read()", l_errno);
+
+			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", l_rc, l_errno);
 			}
 
 		if ( !l_rc )
@@ -841,6 +938,7 @@ int	l_rc;
  *   INPUTS:
  *	a_serial:	A context of the serial line; .devname and the line parameters (.baud,
  *			.databits, .parity, .stopbits, .flags) must be filled by the caller
+ *	a_quiet:	1 - the failures are not signalled (the periodic reopen of an absent device)
  *
  *   OUTPUTS:
  *	a_serial:	.fd - a descriptor of the has been opened device (-1 on a failure),
@@ -854,7 +952,8 @@ int	l_rc;
  *	T2R$__DEVSYSERR	- tcgetattr()/cfset*speed()/tcsetattr() failed (the descriptor is closed)
  */
 static int s_tty_open (
-			       T2R$_SERIAL	*a_serial
+			       T2R$_SERIAL	*a_serial,
+				int		a_quiet
 			       )
 {
 speed_t l_speed = -1;
@@ -868,13 +967,13 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 #endif
 
 	if ( 0 > (a_serial->fd = open(a_serial->devname, l_flags)) )
-		return	$PUTMSG_FAO(T2R$__DEVOPNERR, a_serial->devname, errno);
+		return	$SIGQ(a_quiet, T2R$__DEVOPNERR, a_serial->devname, errno);
 
 	memset(&a_serial->savedtios, 0, sizeof(struct termios));
 
 	if ( (l_rc = tcgetattr(a_serial->fd , &a_serial->savedtios)) )
 		return	close(a_serial->fd), a_serial->fd = -1,
-			$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "tcgetattr()", l_rc, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "tcgetattr()", l_rc, errno);
 
 	a_serial->tios = a_serial->savedtios;						/* Make local copy */
 
@@ -887,11 +986,11 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 	if ( 0 > ( l_rc = cfsetispeed(&a_serial->tios, l_speed)) )			/* Set line rate */
 		return	close(a_serial->fd ), a_serial->fd = -1,
-			$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "cfsetispeed()", l_rc, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "cfsetispeed()", l_rc, errno);
 
 	if ( 0 > ( l_rc = cfsetospeed(&a_serial->tios, l_speed)) )			/* Set line rate */
 		return	close(a_serial->fd ), a_serial->fd = -1,
-			$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "cfsetospeed()", l_rc, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "cfsetospeed()", l_rc, errno);
 
 
 	/* C_CFLAG      Control options
@@ -964,7 +1063,7 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 	if ( tcsetattr(a_serial->fd, TCSANOW, &a_serial->tios) < 0 )
 		return	close(a_serial->fd), a_serial->fd = -1,
-			$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "tcsetattr()", -1, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "tcsetattr()", -1, errno);
 
 
 #ifdef HAVE_TIOCRS485
@@ -1177,17 +1276,21 @@ uint8_t		*l_valptr;
 /*
  *   DESCRIPTION: Under the device lock, open and set up the serial line if it is not initialized
  *	yet; on success the state becomes READY and DEVREADY is signalled. An already initialized
- *	device is left as is (DEVINIT).
+ *	device is left as is (DEVINIT). A device which cannot be opened (the USB adapter is not
+ *	plugged in yet) is taken as absent: the state becomes READY with .nodev set, DEVABSENT is
+ *	signalled, the device is reopened by s_tty_reopen() later.
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line
  *
  *   OUTPUTS:
- *	a_serial:	.state = READY on success; .fd/.savedtios/.tios/.flags - see s_tty_open()
+ *	a_serial:	.state = READY; .fd/.savedtios/.tios/.flags - see s_tty_open(); .nodev,
+ *			.reopen_ts - for an absent device
  *
  *   RETURNS:
  *	T2R$__DEVINIERR	- the device lock is not taken
  *	T2R$__DEVINIT	- the device is already initialized (a success-level code)
+ *	T2R$__DEVABSENT	- the device cannot be opened now, it will be retried (a warning)
  *	otherwise	- the s_tty_open() status
  */
 int	t2r$tty_open (
@@ -1201,11 +1304,22 @@ int	l_rc;
 
 	if ( a_serial->state > T2R$K_STATE_IDLE )
 		l_rc = $PUTMSG_FAO(T2R$__DEVINIT, a_serial->devname);
-	else if ( 1 & (l_rc = s_tty_open (a_serial)) )					/* The state is changed ONLY on success */
+	else if ( 1 & (l_rc = s_tty_open (a_serial, 0)) )
 		{
 		a_serial->state = T2R$K_STATE_READY;
 		$PUTMSG_FAO(T2R$__DEVREADY, a_serial->devname, a_serial->baud, a_serial->anstmo_msec,
 			a_serial->inter_pdu_usec);
+		}
+	else	{									/* Absent: the listener works, the device */
+		struct timespec l_now_ts;						/* is reopened by s_tty_reopen()		*/
+
+		a_serial->state = T2R$K_STATE_READY;
+		a_serial->nodev = 1;
+
+		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+		__util$add_time (&l_now_ts, &s_reopen_ts, &a_serial->reopen_ts);
+
+		l_rc = $PUTMSG_FAO(T2R$__DEVABSENT, a_serial->devname, T2R$K_REOPEN_MSEC);
 		}
 
 	s_tty_unlock (a_serial);
@@ -1353,12 +1467,101 @@ char	l_buf[MODBUS$SZ_MAXPDU];
 
 
 /*
+ *   DESCRIPTION: Reopen an absent or lost device by its name, not more often than once in
+ *	T2R$K_REOPEN_MSEC. The attempts are quiet; a success is signalled by DEVREADY. Must be
+ *	called under the device lock.
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line: .nodev, .reopen_ts, .devname
+ *
+ *   OUTPUTS:
+ *	a_serial:	.nodev = 0 and .fd/.tios - on success; .reopen_ts - the next attempt
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS	- the device is there (was not lost, or has just been reopened)
+ *	T2R$__DEVABSENT	- not yet (not signalled)
+ */
+static int	s_tty_reopen (
+		T2R$_SERIAL	*a_serial
+		)
+{
+struct timespec l_now_ts;
+
+	if ( !a_serial->nodev )
+		return	STS$K_SUCCESS;
+
+	clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+
+	if ( 0 > __util$cmp_time (&l_now_ts, &a_serial->reopen_ts) )
+		return	T2R$__DEVABSENT;
+
+	__util$add_time (&l_now_ts, &s_reopen_ts, &a_serial->reopen_ts);
+
+	if ( !(1 & s_tty_open (a_serial, 1)) )
+		return	T2R$__DEVABSENT;
+
+	a_serial->nodev = 0;
+
+	$PUTMSG_FAO(T2R$__DEVREADY, a_serial->devname, a_serial->baud, a_serial->anstmo_msec, a_serial->inter_pdu_usec);
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ *   DESCRIPTION: A periodic check of an idle serial line (is called by the listener thread every
+ *	T2R$K_CHECK_MSEC): a hangup of the descriptor (POLLHUP/POLLERR/POLLNVAL - the USB adapter
+ *	has gone) closes it at once, so that the returned adapter gets its old ttyUSB number back,
+ *	and an absent device is reopened without waiting for a request. A line which is busy with a
+ *	request is skipped: the request sees the failure itself.
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line
+ *
+ *   OUTPUTS:
+ *	a_serial:	see s_tty_lost(), s_tty_reopen()
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS, T2R$__DEVLOST, T2R$__DEVABSENT
+ */
+int	t2r$tty_check (
+		T2R$_SERIAL	*a_serial
+		)
+{
+int	l_rc = STS$K_SUCCESS;
+struct pollfd	l_pfd = {.fd = a_serial->fd, .events = POLLIN};
+
+	if ( a_serial->state == T2R$K_STATE_IDLE )				/* Not used by any listener, or closed */
+		return	STS$K_SUCCESS;
+
+	if ( pthread_mutex_trylock(&a_serial->lock) )
+		return	STS$K_SUCCESS;
+
+	if ( a_serial->nodev )
+		l_rc = s_tty_reopen (a_serial);
+	else	{
+		l_pfd.fd = a_serial->fd;
+
+		if ( (0 < poll(&l_pfd, 1, 0)) && (l_pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) )
+			l_rc = s_tty_lost (a_serial, "hangup on the idle line", 0);
+		}
+
+	s_tty_unlock (a_serial);
+
+	return	l_rc;
+}
+
+
+
+/*
  *   DESCRIPTION: Execute a single MODBUS request-answer transaction on the RTU leg. The serial
  *	device is taken for an exclusive use for the whole transaction. A request to the has been
  *	configured Time Stamp pseudo device (T2R$M_SERIAL_ADDTS is set and the unit, the function
  *	and the start register match) is answered locally, without the lock and without touching
  *	the line; a bad quantity is answered by the ILLEGAL_DATA_ADDRESS exception. On an RTU I/O
- *	error the line is flushed and a SERVER_DEVICE_FAILURE exception PDU is formed.
+ *	error the line is flushed and a SERVER_DEVICE_FAILURE exception PDU is formed. An absent or
+ *	lost device (see s_tty_reopen(), s_tty_lost()) gets the GW_NO_PATH (10) exception, without
+ *	EXCRPT: DEVLOST/DEVABSENT has told it once.
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line
@@ -1379,7 +1582,7 @@ int	t2r$tty_exec_req (
 			uint8_t	*a_excode
 			)
 {
-int	l_rc, l_rcv;
+int	l_rc, l_rcv, l_nodev;
 T2R$_DESC	*l_req_dsc = a_req_dsc, *l_resp_dsc = a_resp_dsc;
 MODBUS_REQ_T	*l_req_pdu;
 
@@ -1408,19 +1611,27 @@ MODBUS_REQ_T	*l_req_pdu;
 		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
 
 
-	if ( 1 & (l_rc = s_tty_rtu_tx (a_serial, l_req_dsc)) )
+	if ( !(1 & (l_rc = s_tty_reopen (a_serial))) )
+		;								/* Absent: not reopened yet */
+	else if ( 1 & (l_rc = s_tty_rtu_tx (a_serial, l_req_dsc)) )
 		l_rc = s_tty_rtu_rx (a_serial, l_req_dsc, l_resp_dsc);
 
 
-	if ( !(1 & l_rc) )
+	if ( !(1 & l_rc) && !a_serial->nodev )
 		{
 		s_tty_flush (a_serial);
 		$IFTRACE(g_trace, "[#%d:<%s>] --- do flush on I/O error", a_serial->fd, a_serial->devname);
 		}
 
+	l_nodev = a_serial->nodev;
 	s_tty_unlock (a_serial);
 
-	if ( !(1 & l_rc) )
+	if ( !(1 & l_rc) && l_nodev )
+		{
+		l_rc = s_make_exception_resp(a_req_dsc, a_resp_dsc, *a_excode = MODBUS$K_EXCEPTION_GW_NO_PATH);
+		$IFTRACE(g_trace, "[#-1:<%s>] --- the device is absent, exception %d", a_serial->devname, *a_excode);
+		}
+	else if ( !(1 & l_rc) )
 		{
 		l_rc = s_make_exception_resp(a_req_dsc, a_resp_dsc, *a_excode = l_rcv = MODBUS$K_EXCEPTION_SERVER_DEVICE_FAILURE);
 
