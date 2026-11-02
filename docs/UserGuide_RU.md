@@ -180,8 +180,8 @@ $ mbpoll -a 1 -r 1 -c 3 -1 127.0.0.1 -p 502
 Пакету больше ничего не нужно, сеть роутеру не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_0.13.6-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_0.13.6-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk
 ```
 
 Файлы лежат не там, где на Debian: программа — `/usr/sbin/mbusgw-t2r`, файл настроек —

@@ -34,6 +34,10 @@
 #	28-OCT-2026	RRL	X.00-13ECO05: the version follows the release (the .deb packages).
 #
 #	28-OCT-2026	RRL	X.00-13ECO06: 4.2 On OpenWrt (the .ipk/.apk packages, the procd service).
+#
+#	02-NOV-2026	CLD	X.00-13ECO09 (November 2026 edition): lategd, iotmo with a margin, a replug of an
+#				USB adapter and the permanent device names (3.1); the troubleshooting rows and
+#				the codes ECHOMISM, LATEANS, DEVLOST, DEVABSENT, exception 10; ICRNL on old releases.
 #--
 import sys
 
@@ -64,9 +68,9 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'X.00-13ECO06'
-PUBDATE_EN = 'October 2026'
-PUBDATE_RU = 'Октябрь 2026'
+VERSION   = 'X.00-13ECO09'
+PUBDATE_EN = 'November 2026'
+PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
 
 # ----------------------------------------------------------------------------------------------
@@ -516,7 +520,12 @@ def s_pack_en ():
 			('device', 'yes', 'The serial port file, e.g. /dev/ttyUSB0.'),
 			('chars', 'yes', 'The line parameters: speed, data bits, parity, stop bits. '
 				'Speed 50..4000000; data bits 5..8; parity N (none), E (even), O (odd); stop bits 1..2.'),
-			('iotmo', 'no', 'How long to wait for the answer of the device, milliseconds. Default 1000.'),
+			('iotmo', 'no', 'How long to wait for the answer of the device, milliseconds. Default 1000. '
+				'Take it with a margin over the slowest device on the line: an answer which comes later is lost.'),
+			('lategd', 'no', 'After a failed request (no answer, a broken answer) listen to the line for this many '
+				'milliseconds more and throw away what comes (LATEANS): a late answer must not go to the next '
+				'request. Costs time only after a failure: a request to a dead device takes iotmo + lategd. '
+				'0..60000, default iotmo / 4; 0 --- only the 3.5 character pause, as before X.00-13ECO08.'),
 			('rs485', 'no', '1 --- ask the kernel to drive the RS-485 direction control '
 				'(only for the ports which support it). Default 0.'),
 			('ts_enabled', 'no', '1 --- enable the Time Stamp pseudo device (Chapter 5). Default 0.'),
@@ -527,6 +536,17 @@ def s_pack_en ():
 		 P('If a record is wrong, the gateway skips it and says why --- with the allowed range '
 		   'right in the message:'),
 		 C('%T2R-E-SERRANGE, [serial #00:</dev/ttyUSB0>] --- speed (baud) 31 is out of range [50..4000000]'),
+		 P('<b>USB adapters: unplugging is fine.</b> Since X.00-13ECO09 the gateway notices that the adapter has '
+		   'gone (DEVLOST) --- also when nobody is polling --- and closes the port at once. It tries to open the '
+		   'port again by its name every second; meanwhile the clients get the exception 10 '
+		   '(GATEWAY_PATH_UNAVAILABLE), not 4. When the adapter is back, DEVREADY is printed and the work goes '
+		   'on, no restart is needed. An adapter absent at the start does not stop its TCP port (DEVABSENT).'),
+		 P('<b>Use a permanent name.</b> The kernel numbers ttyUSB0, ttyUSB1, ... in the order the adapters '
+		   'appear, so after a replug the same adapter may get another number. Put a permanent name into device '
+		   '(and into target of the listener): the name by the USB socket from ls -l /dev/serial/by-path/ '
+		   '(the ports of a 4-port FT4232H differ by the :1.0 ... :1.3 part), or your own name made by a udev rule:'),
+		 C('SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-xhci-hcd.0-usb-0:1.1:1.0", SYMLINK+="rs485-1"'),
+		 P('in /etc/udev/rules.d/99-rs485.rules gives /dev/rs485-1 (see udevadm info /dev/ttyUSB0 for the values).'),
 		 H2('3.2.  The listeners Section'),
 		 tbl(['Key', 'Required', 'Meaning and the allowed values'], [
 			('bind', 'yes', 'Where to listen: TCP:&lt;IP address&gt;:&lt;port&gt;. The port is 1..65535; '
@@ -579,8 +599,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_0.13.6-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_0.13.6-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -624,7 +644,15 @@ def s_pack_en ():
 		 H2('7.1.  The Symptom, the Cause, the Action'),
 		 tbl(['You see', 'It means / what to do'], [
 			('%T2R-E-DEVOPNERR, ... errno: 2', 'The port file does not exist: the adapter is unplugged '
-				'or the name is wrong. Run dmesg | tail after plugging; fix device in the settings.'),
+				'or the name is wrong. Run dmesg | tail after plugging; fix device in the settings. Since '
+				'X.00-13ECO09 the TCP port is opened anyway (DEVABSENT), the device is tried every second.'),
+			('%T2R-E-DEVLOST, ...', 'The USB adapter has gone (unplugged, a hub reset, a power dip); the clients '
+				'get the exception 10. Nothing to do if it comes back: DEVREADY follows. If not: dmesg | tail, '
+				'the cable, the power; if it came back under another ttyUSB number, use a permanent name (3.1).'),
+			('%T2R-W-DEVABSENT, ...', 'At the start the serial port could not be opened (the line above says '
+				'why); its TCP port works and answers the exception 10. Plug in the adapter, or fix device.'),
+			('The client gets the exception 0x0A (10)', 'The serial port of this TCP port is absent or lost: '
+				'see DEVLOST, DEVABSENT.'),
 			('%T2R-E-DEVOPNERR, ... errno: 13', 'Permission denied. Run with sudo, or add yourself '
 				'to the dialout group.'),
 			('%T2R-E-DEVOPNERR, ... errno: 16', 'The port is busy. Find the holder: '
@@ -635,6 +663,9 @@ def s_pack_en ():
 			('%T2R-E-CRC16ERR, ...', 'The octets arrive damaged: 1) chars does not match the device '
 				'(the most common!); 2) the line noise --- the grounding, the termination, the cable '
 				'length; 3) two masters on one line.'),
+			('CRC16ERR on a part of the requests after a reboot or a replug', 'A gateway older than '
+				'X.00-13ECO07 kept the CR-to-NL translation (icrnl) of a fresh port: an octet 0x0D became 0x0A. '
+				'Update; for an old gateway: ExecStartPre=/bin/stty -F /dev/ttyUSB0 raw (one per port) in the unit.'),
 			('%T2R-E-BADFRAME, ...', 'Something arrived, but it is not a sane MODBUS frame: usually '
 				'the same causes as CRC16ERR; 400+ octets of garbage mean a foreign, non-MODBUS '
 				'device on the line.'),
@@ -647,6 +678,12 @@ def s_pack_en ():
 				'latency_timer must print 1.'),
 			('%T2R-W-FRAMETMO, ...', 'The answer started but never finished: a very slow or hanging '
 				'device. Raise iotmo; check the cable.'),
+			('%T2R-W-LATEANS, ... after NOANSWER', 'The device answered, but later than iotmo; the answer '
+				'has been thrown away. Raise iotmo with a margin over the slowest device on the line.'),
+			('%T2R-W-ECHOMISM, ...', 'The answer to a write (functions 5, 6, 15, 16) is not the echo of this '
+				'request: usually a late answer to an earlier one (raise iotmo); with a fast device --- two '
+				'masters on one line; on every write to one device --- the device does not echo as the '
+				'specification wants: the write is done but reported as failed, tell us the model.'),
 			('%T2R-W-EXCRPT, ... (SERVER_DEVICE_FAILURE)', 'The gateway told the client "the serial '
 				'side failed". The real reason is in the previous log line (NOANSWER, CRC16ERR ...).'),
 			('%T2R-W-CONNLIMIT, ...', 'The port already has connlm clients. If they are all real, raise '
@@ -716,7 +753,7 @@ def s_pack_en ():
 			('NETPOLLEV', 'W', 'A TCP connection broke: the client reset it (e.g. the polling program was restarted); the connection is closed.'),
 			('SESSFAIL', 'E', 'No thread for a new TCP client: too many connections at once (see Troubleshooting); the client is dropped.'),
 			('LSNRABRT', 'W', 'A TCP listener is stopped — normal at the gateway exit.'),
-			('TGTOPNERR', 'E', 'A TCP port is not opened because its serial port cannot be opened; the previous line says why.'),
+			('TGTOPNERR', 'E', 'A TCP port is not opened because its serial port cannot be set up; the previous line says why. An absent device does not stop the TCP port since X.00-13ECO09 (DEVABSENT).'),
 			('NOLSNRUP', 'E', 'Not a single TCP port could be opened; the gateway stops.'),
 			('NOROOM', 'E', 'An answer does not fit into the buffer — an internal error, please report it.'),
 			('MBAPLEN', 'E', 'The MBAP length field does not match the received data; the request is rejected.'),
@@ -764,6 +801,10 @@ def s_pack_en ():
 			('CONNLIMIT', 'W', 'A new TCP client is disconnected at once: the port already has connlm clients.'),
 			('LSNOPTRNG', 'E', 'A listeners option (connlm, idletmo) is out of range; the record is skipped.'),
 			('TXDRAINTMO', 'E', 'The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4.'),
+			('ECHOMISM', 'W', 'The answer to a write request is not its echo (another address or value); the request gets exception 4.'),
+			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
+			('DEVLOST', 'E', 'The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile.'),
+			('DEVABSENT', 'W', 'The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second.'),
 		 ], [26*mm, 10*mm, 127*mm], a_mono_cols=(0,)),
 		 H2('7.3.  If Nothing Helps'),
 		 P('Collect and attach to your question: 1) the full start-up log with /trace (from '
@@ -906,7 +947,12 @@ def s_pack_ru ():
 			('chars', 'да', 'Параметры линии: скорость, биты данных, чётность, стоп-биты. '
 				'Скорость 50..4000000; биты данных 5..8; чётность N (нет), E (чётная), O (нечётная); '
 				'стоп-биты 1..2.'),
-			('iotmo', 'нет', 'Сколько ждать ответа устройства, миллисекунды. По умолчанию 1000.'),
+			('iotmo', 'нет', 'Сколько ждать ответа устройства, миллисекунды. По умолчанию 1000. '
+				'Берите с запасом относительно самого медленного устройства на линии: опоздавший ответ теряется.'),
+			('lategd', 'нет', 'После неудачного запроса (нет ответа, битый ответ) ещё столько миллисекунд слушать '
+				'линию и выбрасывать всё, что пришло (LATEANS): опоздавший ответ не должен уйти следующему запросу. '
+				'Время тратится только после сбоя: запрос к неработающему устройству занимает iotmo + lategd. '
+				'0..60000, по умолчанию iotmo / 4; 0 — только пауза в 3,5 символа, как до X.00-13ECO08.'),
 			('rs485', 'нет', '1 — просить ядро управлять направлением RS-485 (только для портов, '
 				'которые это умеют). По умолчанию 0.'),
 			('ts_enabled', 'нет', '1 — включить псевдоустройство меток времени (глава 5). По умолчанию 0.'),
@@ -917,6 +963,17 @@ def s_pack_ru ():
 		 P('Если запись неправильная, шлюз пропускает её и говорит почему — с допустимым '
 		   'диапазоном прямо в сообщении:'),
 		 C('%T2R-E-SERRANGE, [serial #00:</dev/ttyUSB0>] --- speed (baud) 31 is out of range [50..4000000]'),
+		 P('<b>USB-адаптеры: переподключать можно.</b> С X.00-13ECO09 шлюз замечает, что адаптер пропал '
+		   '(DEVLOST) — даже когда никто не опрашивает устройство — и сразу закрывает порт. Раз в секунду он '
+		   'пытается открыть порт снова по имени; пока адаптера нет, клиенты получают исключение 10 '
+		   '(GATEWAY_PATH_UNAVAILABLE), а не 4. Когда адаптер вернулся, в журнале DEVREADY и работа '
+		   'продолжается, перезапуск не нужен. Если адаптера нет при старте, TCP-порт всё равно открывается (DEVABSENT).'),
+		 P('<b>Используйте постоянное имя.</b> Ядро раздаёт номера ttyUSB0, ttyUSB1, ... в порядке появления '
+		   'адаптеров, и после переподключения тот же адаптер может получить другой номер. Пишите в device (и в '
+		   'target листенера) постоянное имя: имя по USB-разъёму из ls -l /dev/serial/by-path/ (порты '
+		   '4-портового FT4232H отличаются частью :1.0 ... :1.3) или своё имя через правило udev:'),
+		 C('SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-xhci-hcd.0-usb-0:1.1:1.0", SYMLINK+="rs485-1"'),
+		 P('в /etc/udev/rules.d/99-rs485.rules даёт /dev/rs485-1 (значения смотрите в udevadm info /dev/ttyUSB0).'),
 		 H2('3.2.  Раздел listeners'),
 		 tbl(['Ключ', 'Обяз.', 'Значение и допустимые величины'], [
 			('bind', 'да', 'Где слушать: TCP:&lt;IP-адрес&gt;:&lt;порт&gt;. Порт 1..65535; '
@@ -967,8 +1024,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_0.13.6-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_0.13.6-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1008,7 +1065,14 @@ def s_pack_ru ():
 		 H2('7.1.  Симптом, причина, действие'),
 		 tbl(['Вы видите', 'Что это значит / что делать'], [
 			('%T2R-E-DEVOPNERR, ... errno: 2', 'Файла порта нет: адаптер выдернут или имя '
-				'неверное. Выполните dmesg | tail после втыкания; поправьте device в настройках.'),
+				'неверное. Выполните dmesg | tail после втыкания; поправьте device в настройках. С X.00-13ECO09 TCP-порт всё равно открывается (DEVABSENT), устройство пробуется раз в секунду.'),
+			('%T2R-E-DEVLOST, ...', 'USB-адаптер пропал (выдернут, сброс хаба, просадка питания); клиенты '
+				'получают исключение 10. Если вернётся — ничего делать не нужно, следом будет DEVREADY. Если нет: '
+				'dmesg | tail, кабель, питание; если вернулся под другим номером ttyUSB — постоянное имя (3.1).'),
+			('%T2R-W-DEVABSENT, ...', 'При старте последовательный порт не открылся (почему — в строке выше); '
+				'его TCP-порт работает и отвечает исключением 10. Подключите адаптер или поправьте device.'),
+			('Клиент получает исключение 0x0A (10)', 'Последовательного порта этого TCP-порта нет или он '
+				'пропал: см. DEVLOST, DEVABSENT.'),
 			('%T2R-E-DEVOPNERR, ... errno: 13', 'Нет прав доступа. Запустите под sudo или '
 				'добавьте себя в группу dialout.'),
 			('%T2R-E-DEVOPNERR, ... errno: 16', 'Порт занят. Найдите держателя: '
@@ -1019,6 +1083,9 @@ def s_pack_ru ():
 			('%T2R-E-CRC16ERR, ...', 'Байты приходят повреждёнными: 1) chars не совпадает с '
 				'устройством (самое частое!); 2) помехи — земля, терминаторы, длина кабеля; '
 				'3) два мастера на одной линии.'),
+			('CRC16ERR на части запросов после перезагрузки или переподключения', 'Шлюз старше '
+				'X.00-13ECO07 оставлял у свежего порта замену CR на NL (icrnl): байт 0x0D становился 0x0A. '
+				'Обновитесь; для старого шлюза: ExecStartPre=/bin/stty -F /dev/ttyUSB0 raw (на каждый порт) в юните.'),
 			('%T2R-E-BADFRAME, ...', 'Что-то пришло, но это не осмысленный MODBUS-кадр: обычно '
 				'те же причины, что у CRC16ERR; 400+ октетов мусора — на линии чужое, '
 				'не-MODBUS устройство.'),
@@ -1031,6 +1098,12 @@ def s_pack_ru ():
 				'latency_timer должна напечатать 1.'),
 			('%T2R-W-FRAMETMO, ...', 'Ответ начался, но не завершился: очень медленное или '
 				'зависшее устройство. Увеличьте iotmo; проверьте кабель.'),
+			('%T2R-W-LATEANS, ... после NOANSWER', 'Устройство ответило, но позже iotmo; ответ выброшен. '
+				'Увеличьте iotmo с запасом относительно самого медленного устройства на линии.'),
+			('%T2R-W-ECHOMISM, ...', 'Ответ на запись (функции 5, 6, 15, 16) — не эхо этого запроса: обычно '
+				'опоздавший ответ на предыдущий (увеличьте iotmo); если устройство быстрое — два мастера на '
+				'линии; если на каждой записи в одно устройство — оно отвечает не эхом, как требует '
+				'спецификация: запись выполнена, но считается неудачной, сообщите нам модель.'),
 			('%T2R-W-EXCRPT, ... (SERVER_DEVICE_FAILURE)', 'Шлюз сообщил клиенту «на '
 				'последовательной стороне сбой». Настоящая причина — в предыдущей строке журнала '
 				'(NOANSWER, CRC16ERR ...).'),
@@ -1096,7 +1169,7 @@ def s_pack_ru ():
 			('NETPOLLEV', 'W', 'TCP-соединение оборвалось: клиент сбросил его (например, перезапустили программу опроса); соединение закрывается.'),
 			('SESSFAIL', 'E', 'Нет потока для нового TCP-клиента: слишком много соединений сразу (см. Траблшутинг); клиент сбрасывается.'),
 			('LSNRABRT', 'W', 'TCP-порт закрыт — при остановке шлюза это нормально.'),
-			('TGTOPNERR', 'E', 'TCP-порт не открыт, потому что не открылся его последовательный порт; причина — в строке выше.'),
+			('TGTOPNERR', 'E', 'TCP-порт не открыт, потому что не удалось подготовить его последовательный порт; причина — в строке выше. С X.00-13ECO09 отсутствие устройства TCP-порт не останавливает (DEVABSENT).'),
 			('NOLSNRUP', 'E', 'Не открылся ни один TCP-порт; шлюз останавливается.'),
 			('NOROOM', 'E', 'Ответ не помещается в буфер — внутренняя ошибка, сообщите о ней.'),
 			('MBAPLEN', 'E', 'Поле длины MBAP не совпадает с принятыми данными; запрос отклоняется.'),
@@ -1144,6 +1217,10 @@ def s_pack_ru ():
 			('CONNLIMIT', 'W', 'Новый TCP-клиент сразу отключён: у порта уже connlm клиентов.'),
 			('LSNOPTRNG', 'E', 'Параметр listeners (connlm, idletmo) вне диапазона; запись пропускается.'),
 			('TXDRAINTMO', 'E', 'Адаптер не передал запрос в линию вовремя; запрос сброшен и получает исключение 4.'),
+			('ECHOMISM', 'W', 'Ответ на запрос записи — не его эхо (другой адрес или значение); запрос получает исключение 4.'),
+			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),
+			('DEVLOST', 'E', 'Последовательный порт пропал (выдернут USB-адаптер); он закрыт и открывается снова раз в секунду, запросы пока получают исключение 10.'),
+			('DEVABSENT', 'W', 'При старте последовательный порт не открылся; TCP-порт всё равно работает, порт открывается раз в секунду.'),
 		 ], [26*mm, 11*mm, 126*mm], a_mono_cols=(0,)),
 		 H2('7.3.  Если ничего не помогло'),
 		 P('Соберите и приложите к вопросу: 1) полный журнал запуска с /trace (от REVISNF до '
