@@ -38,6 +38,11 @@
 #	02-NOV-2026	CLD	X.00-13ECO09 (November 2026 edition): lategd, iotmo with a margin, a replug of an
 #				USB adapter and the permanent device names (3.1); the troubleshooting rows and
 #				the codes ECHOMISM, LATEANS, DEVLOST, DEVABSENT, exception 10; ICRNL on old releases.
+#
+#	03-NOV-2026	CLD	X.00-14ECO02 (November 2026 edition, the 2nd issue): the RAW (transparent) listener mode (3.3),
+#				the keys mode and takeover, the codes RAWSTART, RAWSTOP, RAWKICK, RAWBUSY, LSNBADMODE, LSNRAWSHR,
+#				LSNRAWOPT; the binary-clean serial input; a Linux program as a RAW client (serial2net);
+#				the packages in the examples are 0.14.2.
 #--
 import sys
 
@@ -68,7 +73,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'X.00-13ECO09'
+VERSION   = 'X.00-14ECO02'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -557,12 +562,65 @@ def s_pack_en ():
 				'disconnected at once (CONNLIMIT). Default 32, range 1..512.'),
 			('idletmo', 'no', 'A client which sends nothing for this many seconds is disconnected (IDLETMO). '
 				'Default 60, range 1..86400.'),
+			('mode', 'no', 'What the listener does: "MODBUS" (the default) is the MODBUS TCP to RTU gateway, '
+				'"RAW" is a transparent stream of octets (see 3.3). Capital or small letters do not matter; '
+				'any other word is an error (LSNBADMODE).'),
+			('takeover', 'no', 'RAW only. 1 (the default): a new client kicks the current client out (RAWKICK). '
+				'0: a new client is rejected while another one is connected (RAWBUSY). In the MODBUS mode '
+				'this key is an error (LSNRAWOPT).'),
 			('iotmo', 'no', 'Reserved, not used yet.'),
 		 ], [30*mm, 18*mm, 115*mm], a_mono_cols=(0,)),
 		 P('Port <b>502</b> is the standard MODBUS TCP port, but on Linux the ports below 1024 '
 		   'need the root privileges. If you do not want to run as root, take e.g. '
-		   '<font face="Mono">5502</font> and point your client there. Several listeners may '
-		   'share one target: the gateway serializes their requests.')],
+		   '<font face="Mono">5502</font> and point your client there. Several MODBUS listeners may '
+		   'share one target: the gateway serializes their requests. In the RAW mode two defaults are '
+		   'different: connlm may only be 1, and idletmo is 86400 (not 60). A RAW listener needs its serial '
+		   'port for itself.'),
+		 H2('3.3.  The RAW (Transparent) Mode'),
+		 P('In the MODBUS mode the gateway understands MODBUS. In the RAW mode it does <b>not</b>. It just '
+		   'carries octets from the TCP client to the serial line and from the serial line to the client. '
+		   'It changes nothing. This is a "virtual COM port over the network".'),
+		 P('Typical use: a Windows PC has a program for some old device. The program wants a COM port. '
+		   'You install a COM-over-TCP program on the PC (it makes a virtual COM port and connects it to '
+		   'the gateway by TCP). The program thinks it works with a real COM port. The device can speak '
+		   '<b>any</b> serial protocol, not only MODBUS.'),
+		 C('[Program on the PC] --- virtual COM --- TCP --->\n'
+		   '        [mbusgw-t2r, mode RAW] --- serial line ---> [Device]'),
+		 P('A settings example:'),
+		 C('listeners = (\n'
+		   '    { bind = "TCP:0.0.0.0:4001"; mode = "RAW"; target = "/dev/ttyUSB1"; }\n'
+		   ');\n'
+		   'serials = (\n'
+		   '    { device = "/dev/ttyUSB1"; chars = "19200, 8, E, 1"; flow = "NONE"; iotmo = 1000; }\n'
+		   ');'),
+		 P('The rules of the RAW mode:'),
+		 P('&bull; <b>One client at a time.</b> connlm may only be 1.'),
+		 P('&bull; <b>A new client takes over</b> (takeover = 1, the default). The old connection is closed, '
+		   'the new one gets the line; the log says RAWKICK. With takeover = 0 the old client stays and the '
+		   'new one is refused (RAWBUSY).'),
+		 P('&bull; <b>The serial port is only for this listener.</b> No other listener, MODBUS or RAW, may use '
+		   'the same target (LSNRAWSHR; the order of the records does not matter). MODBUS listeners may still '
+		   'share a port among themselves.'),
+		 P('&bull; <b>The speed and the parity are taken from the gateway</b>, from the serials record. If the '
+		   'program on the PC sets another speed on its virtual COM port, this is <b>not</b> passed to the '
+		   'line. Set the right chars in the serials record.'),
+		 P('&bull; <b>A long silence is normal.</b> The default idletmo is 86400 seconds (one day). A client '
+		   'which is dead (the PC crashed, the cable was cut) is found by the TCP keepalive and dropped in '
+		   'about 1 minute (30 seconds of silence, then 3 probes, 10 seconds apart).'),
+		 P('&bull; <b>No Time Stamp.</b> The ts_* pseudo device (Chapter 5) does not work in the RAW mode. '
+		   'On a start of a session the old octets in the serial port buffers are thrown away.'),
+		 P('&bull; <b>No serial port --- no session.</b> If the USB adapter is absent or has been unplugged '
+		   '(DEVABSENT, DEVLOST, 3.1), a new client is disconnected at once, without any data, and a running '
+		   'session is closed. When the adapter is back, the client simply connects again.'),
+		 P('<b>A Linux program as the client.</b> The pseudo-serial driver serial2net (NaPi Lab, X.00-08ECO1 '
+		   'and newer) creates /dev/ser2net00, /dev/ser2net01 and so on, and carries everything written there '
+		   'to a TCP peer as it is. Point the peer to a RAW listener (p_ser2net_peer="127.0.0.1:4001"), and any '
+		   'program which wants a serial device (mbpoll -m rtu, minicom, pyserial) works with the remote line '
+		   'as with a local port. The speed is still taken from the serials record of the gateway. Tested: '
+		   '1 MiB each way in blocks with CRC32 (no loss), four ports at once with mbpoll, 115200.'),
+		 P('A note for both modes: the serial input is "binary-clean" since X.00-14. The port does not change '
+		   'CR into LF and does not cut the 8th bit any more. Before, an octet 0x0D could arrive as 0x0A on a '
+		   'port with the default settings.')],
 		# --- Chapter 4 ---
 		[H1('Chapter 4.  Running the Gateway'),
 		 P('By hand, in a terminal (the messages go straight to the screen):'),
@@ -599,8 +657,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_0.14.2-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_0.14.2-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -690,6 +748,10 @@ def s_pack_en ():
 				'connlm of this listener; otherwise find who keeps the connections: ss -tn.'),
 			('%T2R-W-IDLETMO, ...', 'A client has sent nothing for idletmo seconds. Normal for a client which '
 				'polls rarely --- it reconnects; to keep the connection, raise idletmo.'),
+			('%T2R-E-LSNRAWSHR, ...', 'A RAW listener wants a serial port which another listener uses. Give the '
+				'RAW listener a serial port of its own, or make it a MODBUS listener.'),
+			('%T2R-W-RAWBUSY, ...', 'A client is already connected to the RAW port and takeover = 0. Normal: '
+				'disconnect the first client, or set takeover = 1.'),
 			('%T2R-E-TXDRAINTMO, ...', 'The USB adapter took the request but did not send it out; the '
 				'request gets exception 4. The adapter or its USB link hangs: dmesg | tail; replug the '
 				'adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it.'),
@@ -776,7 +838,7 @@ def s_pack_en ():
 			('LSNRANGE', 'E', 'The TCP port number is out of range [1..65535].'),
 			('LSNBADADDR', 'E', 'The IP address in bind is not a valid IPv4 address.'),
 			('LSNNOTGT', 'E', 'The target of a listener is not in the serials section; the record is skipped.'),
-			('LSNADDED', 'I', 'A listeners record is accepted; the address, the port and the target are shown.'),
+			('LSNADDED', 'I', 'A listeners record is accepted; the address, the port, the target, the limits and the mode are shown (the text ends with ", Mode: MODBUS", ", Mode: RAW" or ", Mode: RAW (takeover)").'),
 			('NOLSNRS', 'E', 'Not a single listeners record survived the validation; the gateway stops.'),
 			('CFGPARSE', 'E', 'The settings file cannot be read or has a syntax error; the file name and the line are shown.'),
 			('SIGERR', 'E', 'A signal handler cannot be set — an internal error, please report it.'),
@@ -799,7 +861,14 @@ def s_pack_en ():
 			('DEVNOTINI', 'W', 'Closing a serial port which was never opened — harmless.'),
 			('DEVBUSY', 'E', 'The serial line cannot be taken for a request; the request gets exception 4.'),
 			('CONNLIMIT', 'W', 'A new TCP client is disconnected at once: the port already has connlm clients.'),
-			('LSNOPTRNG', 'E', 'A listeners option (connlm, idletmo) is out of range; the record is skipped.'),
+			('LSNOPTRNG', 'E', 'A listeners option (connlm, idletmo, takeover) is out of range (in the RAW mode connlm may only be 1); the record is skipped.'),
+			('RAWSTART', 'I', 'A RAW session has started: the client address and the serial port are shown. Nothing to do.'),
+			('RAWSTOP', 'I', 'A RAW session has ended; shows how many octets went to the line and how many came from the line. Nothing to do --- the numbers help to see if the data flowed at all.'),
+			('RAWKICK', 'W', 'A new client took the RAW port over (takeover = 1): the old connection is shut down. If this happens again and again by itself, two programs fight for one port --- stop one of them or set takeover = 0.'),
+			('RAWBUSY', 'W', 'A new client is refused: the RAW port is busy and takeover = 0. Wait until the first client leaves, or set takeover = 1.'),
+			('LSNBADMODE', 'E', 'The mode value is unknown; the record is skipped. Write "MODBUS" or "RAW".'),
+			('LSNRAWSHR', 'E', 'The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own.'),
+			('LSNRAWOPT', 'E', 'A listeners option is not allowed in this mode (takeover in the MODBUS mode); the record is skipped. Remove the option or set mode = "RAW".'),
 			('TXDRAINTMO', 'E', 'The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4.'),
 			('ECHOMISM', 'W', 'The answer to a write request is not its echo (another address or value); the request gets exception 4.'),
 			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
@@ -984,12 +1053,66 @@ def s_pack_ru ():
 				'сразу отключается (CONNLIMIT). По умолчанию 32, диапазон 1..512.'),
 			('idletmo', 'нет', 'Клиент, который ничего не присылает столько секунд, отключается (IDLETMO). '
 				'По умолчанию 60, диапазон 1..86400.'),
+			('mode', 'нет', 'Что делает слушатель: "MODBUS" (по умолчанию) — шлюз MODBUS TCP в RTU, "RAW" — '
+				'прозрачный поток октетов (см. 3.3). Заглавные или строчные буквы — не важно; любое другое '
+				'слово — ошибка (LSNBADMODE).'),
+			('takeover', 'нет', 'Только для RAW. 1 (по умолчанию): новый клиент вытесняет текущего (RAWKICK). '
+				'0: пока подключён другой клиент, новый отклоняется (RAWBUSY). В режиме MODBUS этот ключ — '
+				'ошибка (LSNRAWOPT).'),
 			('iotmo', 'нет', 'Зарезервирован, пока не используется.'),
 		 ], [30*mm, 14*mm, 119*mm], a_mono_cols=(0,)),
 		 P('Порт <b>502</b> — стандартный порт MODBUS TCP, но в Linux порты ниже 1024 требуют '
 		   'прав root. Не хотите работать под root — возьмите, например, '
-		   '<font face="Mono">5502</font> и укажите его в клиенте. Несколько listeners могут '
-		   'разделять один target: шлюз выстроит их запросы в очередь.')],
+		   '<font face="Mono">5502</font> и укажите его в клиенте. Несколько MODBUS-слушателей могут '
+		   'разделять один target: шлюз выстроит их запросы в очередь. В режиме RAW два умолчания другие: '
+		   'connlm может быть только 1, а idletmo равен 86400 (не 60). RAW-слушателю последовательный порт '
+		   'нужен целиком.'),
+		 H2('3.3.  Режим RAW (прозрачный)'),
+		 P('В режиме MODBUS шлюз понимает MODBUS. В режиме RAW — <b>нет</b>. Он просто переносит октеты от '
+		   'TCP-клиента в последовательную линию и из линии клиенту. Ничего не меняет. Это «виртуальный '
+		   'COM-порт по сети».'),
+		 P('Типичный случай: на ПК с Windows есть программа для старого прибора. Программе нужен COM-порт. '
+		   'Вы ставите на ПК программу «COM через TCP» (она создаёт виртуальный COM-порт и соединяет его со '
+		   'шлюзом по TCP). Программа думает, что работает с настоящим COM-портом. Прибор может говорить на '
+		   '<b>любом</b> последовательном протоколе, не только на MODBUS.'),
+		 C('[Программа на ПК] --- виртуальный COM --- TCP --->\n'
+		   '        [mbusgw-t2r, режим RAW] --- линия ---> [Прибор]'),
+		 P('Пример настроек:'),
+		 C('listeners = (\n'
+		   '    { bind = "TCP:0.0.0.0:4001"; mode = "RAW"; target = "/dev/ttyUSB1"; }\n'
+		   ');\n'
+		   'serials = (\n'
+		   '    { device = "/dev/ttyUSB1"; chars = "19200, 8, E, 1"; flow = "NONE"; iotmo = 1000; }\n'
+		   ');'),
+		 P('Правила режима RAW:'),
+		 P('&bull; <b>Один клиент за раз.</b> connlm может быть только 1.'),
+		 P('&bull; <b>Новый клиент вытесняет старого</b> (takeover = 1, по умолчанию). Старое соединение '
+		   'закрывается, линию получает новый; в журнале будет RAWKICK. При takeover = 0 старый клиент '
+		   'остаётся, а новому отказывают (RAWBUSY).'),
+		 P('&bull; <b>Последовательный порт — только для этого слушателя.</b> Ни один другой слушатель, '
+		   'MODBUS или RAW, не может брать тот же target (LSNRAWSHR; порядок записей не важен). '
+		   'MODBUS-слушатели по-прежнему могут делить порт между собой.'),
+		 P('&bull; <b>Скорость и чётность берутся из шлюза</b>, из записи serials. Если программа на ПК ставит '
+		   'у своего виртуального COM-порта другую скорость, в линию это <b>не</b> передаётся. Задайте верный '
+		   'chars в записи serials.'),
+		 P('&bull; <b>Долгое молчание — это нормально.</b> idletmo по умолчанию — 86400 секунд (сутки). '
+		   'Мёртвого клиента (ПК упал, кабель оборван) находит TCP keepalive, и его отбрасывают примерно за '
+		   '1 минуту (30 секунд тишины, потом 3 пробы с шагом 10 секунд).'),
+		 P('&bull; <b>Меток времени нет.</b> Псевдоустройство ts_* (глава 5) в режиме RAW не работает. '
+		   'В начале сессии старые октеты в буферах последовательного порта выбрасываются.'),
+		 P('&bull; <b>Нет последовательного порта — нет сеанса.</b> Если USB-адаптера нет или его выдернули '
+		   '(DEVABSENT, DEVLOST, 3.1), новый клиент сразу отключается, без данных, а идущий сеанс '
+		   'закрывается. Когда адаптер вернётся, клиент просто подключается снова.'),
+		 P('<b>Программа в Linux как клиент.</b> Драйвер псевдопоследовательного порта serial2net (NaPi Lab, '
+		   'X.00-08ECO1 и новее) создаёт /dev/ser2net00, /dev/ser2net01 и так далее и переносит всё, что туда '
+		   'записано, как есть на TCP-партнёра. Направьте партнёра на RAW-слушатель '
+		   '(p_ser2net_peer="127.0.0.1:4001"), и любая программа, которой нужен последовательный порт '
+		   '(mbpoll -m rtu, minicom, pyserial), работает с удалённой линией как с местным портом. Скорость по-'
+		   'прежнему берётся из записи serials шлюза. Проверено: 1 МиБ в каждую сторону блоками с CRC32 '
+		   '(без потерь), четыре порта одновременно с mbpoll, 115200.'),
+		 P('Замечание для обоих режимов: начиная с X.00-14 вход последовательного порта «бинарно чистый». '
+		   'Порт больше не превращает CR в LF и не обрезает 8-й бит. Раньше октет 0x0D мог прийти как 0x0A на '
+		   'порту с настройками по умолчанию.')],
 		[H1('Глава 4.  Запуск шлюза'),
 		 P('Вручную, в терминале (сообщения идут прямо на экран):'),
 		 C('$ /opt/mbusgw-t2r/sbin/mbusgw-t2r /settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf'),
@@ -1024,8 +1147,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_0.14.2-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_0.14.2-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1111,6 +1234,10 @@ def s_pack_ru ():
 				'connlm этого слушателя; иначе найдите, кто держит соединения: ss -tn.'),
 			('%T2R-W-IDLETMO, ...', 'Клиент ничего не присылал idletmo секунд. Нормально для клиента, который '
 				'опрашивает редко — он переподключится; чтобы держать соединение, увеличьте idletmo.'),
+			('%T2R-E-LSNRAWSHR, ...', 'RAW-слушатель хочет последовательный порт, который занят другим слушателем. '
+				'Дайте RAW-слушателю отдельный порт или сделайте его MODBUS-слушателем.'),
+			('%T2R-W-RAWBUSY, ...', 'К RAW-порту уже подключён клиент, а takeover = 0. Нормально: отключите '
+				'первого клиента или поставьте takeover = 1.'),
 			('%T2R-E-TXDRAINTMO, ...', 'USB-адаптер принял запрос, но не передал его в линию; запрос получает '
 				'исключение 4. Адаптер или его USB-связь зависли: dmesg | tail; переподключите адаптер или '
 				'перезагрузите плату. С X.00-13ECO01 линия из-за этого не блокируется.'),
@@ -1192,7 +1319,7 @@ def s_pack_ru ():
 			('LSNRANGE', 'E', 'Номер TCP-порта вне диапазона [1..65535].'),
 			('LSNBADADDR', 'E', 'IP-адрес в bind — не правильный адрес IPv4.'),
 			('LSNNOTGT', 'E', 'Устройства из target нет в разделе serials; запись пропускается.'),
-			('LSNADDED', 'I', 'Запись listeners принята; показаны адрес, порт и устройство.'),
+			('LSNADDED', 'I', 'Запись listeners принята; показаны адрес, порт, устройство, ограничения и режим (текст заканчивается на ", Mode: MODBUS", ", Mode: RAW" или ", Mode: RAW (takeover)").'),
 			('NOLSNRS', 'E', 'Ни одна запись listeners не прошла проверку; шлюз останавливается.'),
 			('CFGPARSE', 'E', 'Файл настроек не читается или с синтаксической ошибкой; показаны имя файла и строка.'),
 			('SIGERR', 'E', 'Не удалось установить обработчик сигнала — внутренняя ошибка, сообщите о ней.'),
@@ -1215,7 +1342,14 @@ def s_pack_ru ():
 			('DEVNOTINI', 'W', 'Закрытие порта, который не открывался — безвредно.'),
 			('DEVBUSY', 'E', 'Последовательную линию не удалось занять под запрос; запрос получает исключение 4.'),
 			('CONNLIMIT', 'W', 'Новый TCP-клиент сразу отключён: у порта уже connlm клиентов.'),
-			('LSNOPTRNG', 'E', 'Параметр listeners (connlm, idletmo) вне диапазона; запись пропускается.'),
+			('LSNOPTRNG', 'E', 'Параметр listeners (connlm, idletmo, takeover) вне диапазона (в режиме RAW connlm может быть только 1); запись пропускается.'),
+			('RAWSTART', 'I', 'RAW-сессия началась: показаны адрес клиента и последовательный порт. Делать ничего не нужно.'),
+			('RAWSTOP', 'I', 'RAW-сессия закончилась; показано, сколько октетов ушло в линию и сколько пришло из линии. Делать ничего не нужно — по цифрам видно, шли ли данные вообще.'),
+			('RAWKICK', 'W', 'Новый клиент занял RAW-порт (takeover = 1): старое соединение закрыто. Если это само повторяется снова и снова, две программы борются за один порт — остановите одну из них или поставьте takeover = 0.'),
+			('RAWBUSY', 'W', 'Новому клиенту отказано: RAW-порт занят, а takeover = 0. Подождите, пока первый клиент уйдёт, или поставьте takeover = 1.'),
+			('LSNBADMODE', 'E', 'Значение mode неизвестно; запись пропускается. Пишите "MODBUS" или "RAW".'),
+			('LSNRAWSHR', 'E', 'Последовательный порт RAW-слушателя занят другим слушателем; запись пропускается. Дайте RAW-слушателю свой порт.'),
+			('LSNRAWOPT', 'E', 'Параметр listeners не разрешён в этом режиме (takeover в режиме MODBUS); запись пропускается. Уберите параметр или поставьте mode = "RAW".'),
 			('TXDRAINTMO', 'E', 'Адаптер не передал запрос в линию вовремя; запрос сброшен и получает исключение 4.'),
 			('ECHOMISM', 'W', 'Ответ на запрос записи — не его эхо (другой адрес или значение); запрос получает исключение 4.'),
 			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),

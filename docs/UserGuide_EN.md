@@ -181,6 +181,13 @@ The rules of the RAW mode:
   (`DEVABSENT`, `DEVLOST`, section 3.1), a new client is disconnected at once, without any data,
   and a running session is closed. When the adapter is back, the client simply connects again.
 
+**A Linux program as the client.** The pseudo-serial driver `serial2net` (NaPi Lab, X.00-08ECO1 and
+newer) creates `/dev/ser2net00`, `/dev/ser2net01` and so on and carries everything written there to a TCP peer as it is.
+Point the peer to a RAW listener (`p_ser2net_peer="127.0.0.1:4001"`), and any program which wants a
+serial device (`mbpoll -m rtu`, `minicom`, `pyserial`) works with the remote line as with a local
+port. The speed is still taken from the `serials` record of the gateway. Tested: 1 MiB each way in
+blocks with CRC32 (no loss), four ports at once with `mbpoll`, 115200.
+
 A note for both modes: the serial input is "binary-clean" since X.00-14. The port does not change
 CR into LF and does not cut the 8th bit any more. Before, an octet `0x0D` could arrive as
 `0x0A` on a port with the default settings.
@@ -236,8 +243,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_0.14.2-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_0.14.2-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the

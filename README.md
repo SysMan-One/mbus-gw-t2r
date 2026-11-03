@@ -228,7 +228,7 @@ statically. The package puts the gateway to `/opt/mbusgw-t2r/` and the systemd u
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_0.13.9-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_0.14.2-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -250,8 +250,8 @@ OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_0.13.9-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_0.13.9-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_0.14.2-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_0.14.2-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`
@@ -377,8 +377,37 @@ Limits and rules:
    cable) is dropped by the TCP keepalive in about 1 minute (30 s idle + 3 probes x 10 s).
  - The Time Stamp pseudo device (`ts_*`) is not used in the RAW mode.
 
+**A Linux program as the client.** The pseudo-serial driver `serial2net` (NaPi Lab, X.00-08ECO1 and
+newer) creates `/dev/ser2net00`, `/dev/ser2net01` and so on and carries everything written there to a TCP peer as it is.
+Point the peer to a RAW listener (`p_ser2net_peer="127.0.0.1:4001"`), and any program which wants a
+serial device (`mbpoll -m rtu`, `minicom`, `pyserial`) works with the remote line as with a local
+port. The speed is still taken from the `serials` record of the gateway. Tested: 1 MiB each way in
+blocks with CRC32 (no loss), four ports at once with `mbpoll`, 115200.
+
 Since X.00-14 the serial input is binary-clean in **both** modes (no CR/NL translation, no 8th bit
 stripping): before, an octet 0x0D could arrive as 0x0A on a port with the default settings.
+
+## Coding style
+
+The source is written in the OpenVMS C style (the "VMS style"). A patch is expected to follow it:
+
+ - **Layout:** Whitesmiths braces (a brace on its own line, indented together with the body; the
+   braces of a routine body are not indented). Only tabs (8 columns), no spaces. Lines up to 192 columns.
+ - **Prefixes:** `g_` global, `l_` local, `s_` static (routines too), `a_` routine arguments, `m_` bit
+   masks, `v_` bit fields. Variables are declared at the top of the block, grouped by type
+   (`stdint.h` types).
+ - **Names:** `$` separates the words of macros and constants (`T2R$K_BAUD_MAX`, `T2R$K_SETTLE_MSEC`).
+   A structure is declared with the `_t` tag suffix and gets a VMS name.
+ - **Every file** starts with `__MODULE__`, `__IDENT__` and `__REV__` (`X.00-14ECO02` is
+   `00.14.02`), then a VMS-style header: the facility, the abstract, the modification history, and
+   for every routine the inputs, outputs, implicit inputs and outputs, and the return value.
+ - **Messages** go only through the message macros of the StarLet library (`$LOG_FAO`,
+   `$PUTMSG_FAO` and the project wrapper over them) with the codes of the message catalogue, never
+   through `printf`, `perror` or `syslog`. A routine returns a status (the low bit is the success),
+   results go back through output parameters, and a failed C library call logs `errno`.
+   The tests and the text of `/HELP` are exempt.
+ - **Documentation** is written in two languages, Russian and English, for a beginner, with a
+   troubleshooting row for every message code.
 
 ## Authors and acknowledgment
 Developer: Ruslan (AKA : The BadAss SysMan) Laishev
