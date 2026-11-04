@@ -243,8 +243,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_0.14.2-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_0.14.2-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.0.0-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.0.0-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the

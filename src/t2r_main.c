@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.00-14ECO02"
-#define	__REV__		"00.14.02"
+#define	__IDENT__	"V.01-00"
+#define	__REV__		"01.00.00"
 
 /*
 **++
@@ -191,6 +191,9 @@
 **	02-NOV-2026	CLD	X.00-14ECO02 / REV: 00.14.02 - Rebased onto X.00-13ECO09: a RAW session reopens an
 **				absent or lost serial device at its start and ends at once if it is still
 **				not there; a failed line closes the device (DEVLOST, was TTYPOLLEV).
+**
+**	04-NOV-2026	CLD	V.01-00 / REV: 01.00.00 - The first release (package version 1.0.0); the field
+**				test line X.00 is closed; no code changes since X.00-14ECO02.
 **--
 */
 

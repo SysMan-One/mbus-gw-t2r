@@ -227,7 +227,7 @@ glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ub
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_0.14.2-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.0.0-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -249,8 +249,8 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 сеть роутеру для установки не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_0.14.2-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_0.14.2-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.0.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.0.0-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 Пакет ставит шлюз в `/usr/sbin/mbusgw-t2r`, настройки — в `/etc/mbusgw-t2r/`, службу procd —
