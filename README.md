@@ -238,7 +238,25 @@ The configuration files are conffiles: an upgrade keeps the tuned ones. The work
 `cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
 
 The `.deb` for **mipsel** and **mips64el** (`v0.13.6` and later) is a cross build for Debian 12
-(Debian 13 has no MIPS ports); it is installed the same way.
+(Debian 13 has no MIPS ports); it is installed the same way. The same holds for the `.deb` for
+**armhf** and **mips** (big endian) of the releases after the one with the `.rpm` packages below;
+Debian 12 has no `mips` any more, so that `.deb` is not for a Debian install but for an embedded
+rootfs with glibc 2.34 or newer. It is only started under qemu-user before the release.
+
+The `.rpm` packages (RHEL/Rocky 9, Fedora, openSUSE and the like; glibc 2.34 or newer) are
+attached to the releases made after this text was written: `x86_64`, `aarch64`, `armv7hl`, `mips`,
+`mipsel` and `mips64el`. The layout is the same as of the `.deb`; the configuration files are
+`%config(noreplace)`, the unit is installed disabled:
+
+```
+$ sudo dnf install ./mbusgw-t2r-1.0.0-1.x86_64.rpm
+$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo systemctl enable --now mbusgw-t2r
+```
+
+`x86_64` and `aarch64` are installed and started on Fedora and Rocky Linux 9 before the release.
+Locally: `cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G RPM`
+(needs `rpmbuild`; for a cross build give `-DT2R_RPM_ARCH=<rpm architecture>`).
 
 ####	OpenWrt packages (GitHub Releases)
 

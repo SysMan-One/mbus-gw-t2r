@@ -237,7 +237,25 @@ $ sudo systemctl enable --now mbusgw-t2r
 `cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
 
 Пакеты `.deb` для **mipsel** и **mips64el** (`v0.13.6` и новее) — кросс-сборка для Debian 12
-(в Debian 13 портов MIPS нет); ставятся так же.
+(в Debian 13 портов MIPS нет); ставятся так же. То же относится к `.deb` для **armhf** и **mips**
+(big-endian) в релизах после того, где появились `.rpm` (см. ниже); в Debian 12 архитектуры `mips`
+уже нет, так что этот `.deb` предназначен не для установки Debian, а для встраиваемого rootfs с
+glibc 2.34 или новее. Перед релизом он лишь запускается под qemu-user.
+
+Пакеты `.rpm` (RHEL/Rocky 9, Fedora, openSUSE и подобные; glibc 2.34 или новее) прикладываются к
+релизам, сделанным после появления этого текста: `x86_64`, `aarch64`, `armv7hl`, `mips`, `mipsel` и
+`mips64el`. Состав тот же, что у `.deb`; файлы настроек — `%config(noreplace)`, служба ставится
+выключенной:
+
+```
+$ sudo dnf install ./mbusgw-t2r-1.0.0-1.x86_64.rpm
+$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo systemctl enable --now mbusgw-t2r
+```
+
+`x86_64` и `aarch64` перед релизом устанавливаются и запускаются на Fedora и Rocky Linux 9.
+Локально: `cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G RPM`
+(нужен `rpmbuild`; для кросс-сборки добавьте `-DT2R_RPM_ARCH=<архитектура rpm>`).
 
 ####	Пакеты для OpenWrt (GitHub Releases)
 
