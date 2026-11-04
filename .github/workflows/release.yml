@@ -37,13 +37,17 @@
 #
 #	29-OCT-2026	RRL	The OpenWrt build with V=sc: with V=s the SDK runs make of CMake with no
 #				VERBOSE=1, the compile lines (-DHAVE_TIOCRS485) are not in the logs.
+#
+#	04-NOV-2026	CLD	V.01-00: the tag may be V<MM>.<NN>.<E> too (V01.00.0 -> the package version 1.0.0):
+#				V is a product version, X (v<VERSION>) is a field test one; the leading zeros of
+#				the fields are dropped for the package version and the Release title.
 #--
 
 name: release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'V*']
   workflow_dispatch:
     inputs:
       tag:
@@ -314,7 +318,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [test, deb-cross, openwrt-test]
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.tag, 'v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || startsWith(inputs.tag, 'v') || startsWith(inputs.tag, 'V')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -333,6 +337,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          # The tag is v<VERSION> (the field test X) or V<MM>.<NN>.<E> (the product V.01-00 -> V01.00.0):
+          # the package version is the tag without the prefix and without the leading zeros of the fields
+          VER=$(echo "${TAG#[vV]}" | sed -E 's/(^|\.)0+([0-9])/\1\2/g')
           ident=$(sed -n 's/^#define[[:space:]]*__IDENT__[[:space:]]*"\(.*\)"/\1/p' src/src/t2r_main.c)
           test -n "$ident"
           for l in EN RU; do
@@ -342,15 +349,15 @@ jobs:
             -o "$PWD/mbusgw-t2r-$ident.tar.gz" HEAD
           ls -l *.deb *.ipk *.apk *.pdf *.tar.gz
           for pkg in *.deb *.ipk *.apk; do      # The tag must be the package version
-            case "$pkg" in mbusgw-t2r_${TAG#v}-*) ;; *) echo "$pkg does not match $TAG"; exit 1;; esac
+            case "$pkg" in mbusgw-t2r_${VER}-*) ;; *) echo "$pkg does not match $TAG"; exit 1;; esac
           done
           sha256sum *.deb *.ipk *.apk *.tar.gz > SHA256SUMS
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS --clobber
           else
-            gh release create "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS --title "mbusgw-t2r ${TAG#v}" --notes-file - <<EOF
-          The .deb for amd64 and arm64 is tested on Debian 12, Debian 13 and Ubuntu 24.04 (any system with glibc >= 2.34 should do); for mipsel and mips64el it is built for Debian 12. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`. Install: \`sudo apt install ./mbusgw-t2r_${TAG#v}-1_<arch>.deb\`.
+            gh release create "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS --title "mbusgw-t2r ${VER}" --notes-file - <<EOF
+          The .deb for amd64 and arm64 is tested on Debian 12, Debian 13 and Ubuntu 24.04 (any system with glibc >= 2.34 should do); for mipsel and mips64el it is built for Debian 12. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`. Install: \`sudo apt install ./mbusgw-t2r_${VER}-1_<arch>.deb\`.
 
-          OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${TAG#v}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${TAG#v}-*_<arch>.apk\`); libconfig and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
+          OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${VER}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${VER}-*_<arch>.apk\`); libconfig and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
           EOF
           fi
