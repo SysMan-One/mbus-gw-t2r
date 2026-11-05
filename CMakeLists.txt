@@ -339,7 +339,7 @@ endif ()
 
 #------------------------------------------------------------------------------------------------------
 #	The .rpm package: 'cpack -G RPM' in the build directory (needs rpmbuild). The same file layout as
-#	of the .deb; the configuration files are %config(noreplace) - rpm keeps the has been tuned ones
+#	of the .deb; the configuration files are %config(noreplace) - rpm keeps the tuned ones
 #	on an upgrade; the unit is installed disabled, the scriptlets are cmake/rpm/{post,preun,postun}.
 #
 #	The dependency scan of rpmbuild is off: the host of a cross build cannot scan a foreign ELF, so
@@ -369,7 +369,7 @@ set (CPACK_RPM_USER_FILELIST
 if (T2R_SYSTEMD_UNIT)
 	list (APPEND CPACK_RPM_USER_FILELIST "%attr(0644,root,root) /usr/lib/systemd/system/mbusgw-t2r.service")
 endif ()
-set (CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/lib/systemd;/usr/lib/systemd/system")
+set (CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/lib/systemd;/usr/lib/systemd/system;/opt")
 
 #	A cross build names the architecture of the package (x86_64, armv7hl, aarch64, mips, mipsel,
 #	mips64el) - CPack takes the one of the build host otherwise. The binary is of a foreign
