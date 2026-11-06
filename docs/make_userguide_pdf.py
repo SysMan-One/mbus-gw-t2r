@@ -47,7 +47,7 @@
 #	04-NOV-2026	CLD	V.01-00 (the first release): the version on the cover, the packages in the examples are 1.0.0.
 #
 #	06-NOV-2026	CLD	X.01-01: 4.3 mbus-ctl (watching and controlling a running gateway), the options /control
-#				and /check, the codes CTLREADY .. CTLRESETN; the version on the cover.
+#				and /check, the codes CTLREADY .. CTLRESETN (the version on the cover is not changed yet).
 #--
 import sys
 
@@ -78,7 +78,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'X.01-01'
+VERSION   = 'V.01-00'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'

@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"X.01-01"
-#define	__REV__		"01.01.00"
+#define	__IDENT__	"V.01-00"
+#define	__REV__		"01.00.00"
 
 /*
 **++
@@ -198,7 +198,9 @@
 **	04-NOV-2026	CLD	V.01-00 / REV: 01.00.00 - The first release (package version 1.0.0); the field
 **				test line X.00 is closed; no code changes since X.00-14ECO02.
 **
-**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The control channel and the mbus-ctl utility (see T2R-CTL
+**	06-NOV-2026	CLD	(not numbered yet: IDENT/REV stay V.01-00 until the number of the line after V.01-00
+**				is chosen; T2R-NET, T2R-CTL and MBUS-CTL are X.01-01 as the modules)
+**				The control channel and the mbus-ctl utility (see T2R-CTL
 **				and MBUS-CTL): the new /CONTROL=<path> option (default T2R$K_CTL_SOCK, NONE -
 **				off), the channel is opened after the listeners are up and closed at the exit;
 **				the new /CHECK option (parse the settings, CHECKOK, exit) - RESTART GATEWAY runs
