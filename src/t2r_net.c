@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"X.00-14"
-#define	__REV__		"00.14.00"
+#define	__IDENT__	"X.01-01"
+#define	__REV__		"01.01.00"
 
 /*
 **++
@@ -80,6 +80,14 @@
 **				listener - a new client takes the line over (shutdown() of the old socket,
 **				RAWKICK) or is rejected when <takeover> is 0 (RAWBUSY); the RAW sockets get
 **				the TCP keepalive (a dead client is dropped in ~1 minute).
+**
+**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The registry of the live sessions for the control channel
+**				(T2R-CTL): s_net_sess_add()/s_net_sess_del(), t2r$net_sess_walk(),
+**				t2r$net_sess_count(); a session is registered before its thread starts and
+**				leaves the registry BEFORE close() of its socket (the same rule as .rawsess);
+**				the sessions count the requests, answers, errors and octets, the listeners -
+**				the accepted and rejected connections; a session reset by the operator does
+**				not report NETPOLLEV. The data path is not changed otherwise.
 **--
 */
 
@@ -112,6 +120,146 @@ extern int		g_serials_nr;
 static struct pollfd	s_pfd_lsnr[T2R$K_MAX_LISTENERS];			/* Initialized in t2r$net_start_listeners() */
 
 static const	int	s_one = 1;
+
+/*
+ * The registry of the live sessions: a doubly linked list under a mutex. The dispatcher adds a session
+ * before its thread starts, the session removes itself before close() of its socket - so a holder of
+ * the lock always sees an open descriptor of a live session (and may shutdown() it, see T2R-CTL).
+ */
+static pthread_mutex_t	s_sess_lock = PTHREAD_MUTEX_INITIALIZER;
+static T2R$_SESSION	*s_sess_head;						/* The newest session first		*/
+static uint32_t		s_sess_seq;						/* The last given session id		*/
+static int		s_sess_nr;						/* Sessions in the registry		*/
+
+
+
+/*
+ *   DESCRIPTION: Put a new session into the registry and give it the next session id. Is called by the
+ *	dispatcher thread before the session thread is started.
+ *
+ *   INPUTS:
+ *	a_session:	A session context
+ *
+ *   OUTPUTS:
+ *	a_session:	.id, .reg_next, .reg_prev
+ *
+ *   IMPLICIT OUTPUTS:
+ *	s_sess_head, s_sess_seq, s_sess_nr
+ *
+ *   RETURNS:
+ *	NONE
+ */
+static void	s_net_sess_add (
+		T2R$_SESSION	*a_session
+		)
+{
+	pthread_mutex_lock(&s_sess_lock);
+
+	a_session->id = ++s_sess_seq;
+	a_session->reg_prev = NULL;
+
+	if ( (a_session->reg_next = s_sess_head) )
+		s_sess_head->reg_prev = a_session;
+
+	s_sess_head = a_session;
+	s_sess_nr++;
+
+	pthread_mutex_unlock(&s_sess_lock);
+}
+
+
+
+/*
+ *   DESCRIPTION: Remove a session from the registry. Must be called BEFORE close() of its socket: the
+ *	control thread does shutdown() of a registered session's descriptor under the same lock.
+ *
+ *   INPUTS:
+ *	a_session:	A session context
+ *
+ *   IMPLICIT OUTPUTS:
+ *	s_sess_head, s_sess_nr
+ *
+ *   RETURNS:
+ *	NONE
+ */
+static void	s_net_sess_del (
+		T2R$_SESSION	*a_session
+		)
+{
+	pthread_mutex_lock(&s_sess_lock);
+
+	if ( a_session->reg_prev )
+		a_session->reg_prev->reg_next = a_session->reg_next;
+	else	s_sess_head = a_session->reg_next;
+
+	if ( a_session->reg_next )
+		a_session->reg_next->reg_prev = a_session->reg_prev;
+
+	a_session->reg_next = a_session->reg_prev = NULL;
+	s_sess_nr--;
+
+	pthread_mutex_unlock(&s_sess_lock);
+}
+
+
+
+/*
+ *   DESCRIPTION: Call a routine for every live session, the newest one first, under the registry lock.
+ *	The routine may read the session and shutdown() its socket, it must not close() the socket,
+ *	free the session or block for long: the dispatcher and the sessions wait for the lock meanwhile.
+ *	A non-success status of the routine stops the walk.
+ *
+ *   INPUTS:
+ *	a_rtn:		A routine to call: a_rtn(<session>, <a_arg>)
+ *	a_arg:		An argument to be passed to the routine
+ *
+ *   IMPLICIT INPUTS:
+ *	s_sess_head
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS, or the status of the routine which has stopped the walk
+ */
+int	t2r$net_sess_walk (
+		int	(*a_rtn) (T2R$_SESSION *a_session, void *a_arg),
+		void	*a_arg
+		)
+{
+int	l_rc = STS$K_SUCCESS;
+
+	pthread_mutex_lock(&s_sess_lock);
+
+	for (T2R$_SESSION *l_session = s_sess_head; l_session; l_session = l_session->reg_next)
+		{
+		if ( !(1 & (l_rc = a_rtn(l_session, a_arg))) )
+			break;
+		}
+
+	pthread_mutex_unlock(&s_sess_lock);
+
+	return	l_rc;
+}
+
+
+
+/*
+ *   DESCRIPTION: Return the number of the live sessions (RESTART waits them to end).
+ *
+ *   IMPLICIT INPUTS:
+ *	s_sess_nr
+ *
+ *   RETURNS:
+ *	the number of the sessions in the registry
+ */
+int	t2r$net_sess_count (void)
+{
+int	l_nr;
+
+	pthread_mutex_lock(&s_sess_lock);
+	l_nr = s_sess_nr;
+	pthread_mutex_unlock(&s_sess_lock);
+
+	return	l_nr;
+}
 
 
 /*
@@ -149,6 +297,7 @@ T2R$_DESC	*l_netbuf_dsc = a_session->netbuf_dsc;
 
 	l_netbuf_dsc->len += l_rc;							/* Adjust count of data in the buffer */
 	a_session->datalen -= l_rc;							/* Adjust data to be read at next iteration ? */
+	a_session->nrx += (uint64_t) l_rc;						/* SHOW CONNECTIONS */
 
 
 	return	STS$K_SUCCESS;
@@ -193,6 +342,7 @@ T2R$_DESC	*l_netbuf_dsc = a_session->netbuf_dsc;
 
 
 	a_session->datalen += l_rc;							/* Adjust data to be send at next iteration ? */
+	a_session->ntx += (uint64_t) l_rc;						/* SHOW CONNECTIONS */
 
 	return	STS$K_SUCCESS;
 }
@@ -317,14 +467,14 @@ static int	s_net_raw_session (
 		)
 {
 int	l_rc;
-uint64_t	l_n2t = 0, l_t2n = 0;
 T2R$_LISTENER	*l_listener = a_session->listener;
 
 	$PUTMSG_FAO(T2R$__RAWSTART, a_session->sd, &a_session->sk.sin_addr, ntohs(a_session->sk.sin_port), a_session->target->devname);
 
-	l_rc = t2r$tty_raw_relay (a_session->target, a_session->sd, l_listener->idletmo, &l_n2t, &l_t2n);
+	/* The relay updates the counters as it goes: SHOW CONNECTIONS sees them live */
+	l_rc = t2r$tty_raw_relay (a_session->target, a_session->sd, l_listener->idletmo, &a_session->nrx, &a_session->ntx);
 
-	$PUTMSG_FAO(T2R$__RAWSTOP, a_session->sd, a_session->target->devname, l_n2t, l_t2n);
+	$PUTMSG_FAO(T2R$__RAWSTOP, a_session->sd, a_session->target->devname, a_session->nrx, a_session->ntx);
 
 	pthread_mutex_lock(&l_listener->rawlock);
 
@@ -444,6 +594,8 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 						{
 						$MBAP_PRINT("Rcvd", l_netbuf_dsc.data, l_netbuf_dsc.len);
 
+						l_session->nreq++;
+
 						l_session->state = T2R$K_STATE_PDU_ENQD;
 						}
 					else	break;
@@ -453,12 +605,21 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 				/* FALLTHRU */					/* A whole MBAP is in the buffer - process it now */
 			case	T2R$K_STATE_PDU_ENQD:
 				if ( !(1 & (l_rc = t2r$mbap_2_rtu_pdu (&l_netbuf_dsc, &l_rtu_req_dsc)) ) )
+					{
+					l_session->nerr++;
 					break;
+					}
 
 
 				if ( !(1 & (l_rc = t2r$tty_exec_req (l_serial, &l_rtu_req_dsc, &l_rtu_resp_dsc, &l_excode))) )
+					{
+					l_session->nerr++;
 					break;
+					}
 
+
+				if ( l_excode )
+					l_session->nerr++;				/* An exception answer is an error too */
 
 				if ( l_excode && (l_excode != MODBUS$K_EXCEPTION_GW_NO_PATH) )
 					$PUTMSG_FAO(T2R$__REQFAIL, l_session->sd, l_excode, l_excode);
@@ -480,6 +641,8 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 				if ( l_session->datalen == l_netbuf_dsc.len )	/* All data is sent to remote TCP client ? */
 					{
 					$MBAP_PRINT("Sent", l_netbuf_dsc.data, l_netbuf_dsc.len);
+
+					l_session->nans++;
 
 					l_pfd.events &= ~POLLOUT;		/* we don't need to check on socket for output */
 					l_session->state = T2R$K_STATE_READY;	/* Do transition to initial state */
@@ -513,7 +676,8 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 			}
 		else if ( l_pfd.revents & (POLLERR | POLLHUP | POLLNVAL) )
 			{
-			$PUTMSG_FAO(T2R$__NETPOLLEV, l_session->sd, l_rc, l_pfd.revents, errno);
+			if ( !l_session->reset )					/* T2R-CTL has told CTLRESET already */
+				$PUTMSG_FAO(T2R$__NETPOLLEV, l_session->sd, l_rc, l_pfd.revents, errno);
 			break;
 			}
 		else if (l_rc)
@@ -526,6 +690,7 @@ l_exit:
 	$PUTMSG_FAO(T2R$__NETDISCN, l_session->sd, &l_session->sk.sin_addr,
 		ntohs(l_session->sk.sin_port));
 
+	s_net_sess_del (l_session);						/* BEFORE close(): see t2r$net_sess_walk() */
 
 	close(l_session->sd);
 	__atomic_sub_fetch(&l_session->listener->sessions, 1, __ATOMIC_RELEASE);	/* Free a slot of <connlm> */
@@ -691,6 +856,7 @@ const struct timespec l_period_ts = {.tv_sec = T2R$K_CHECK_MSEC / 1000, .tv_nsec
 						{
 						$PUTMSG_FAO(T2R$__CONNLIMIT, l_sd, &l_sk.sin_addr, ntohs(l_sk.sin_port), g_listeners[i].connlm);
 						close(l_sd);
+						g_listeners[i].rejected++;
 						continue;
 						}
 
@@ -709,15 +875,19 @@ const struct timespec l_period_ts = {.tv_sec = T2R$K_CHECK_MSEC / 1000, .tv_nsec
 					l_session->sk = l_sk;
 					l_session->target = g_listeners[i].serial;
 					l_session->listener = &g_listeners[i];
+					l_session->start = time(NULL);
 
 					if ( (g_listeners[i].mode == T2R$K_MODE_RAW) && !(1 & s_net_raw_admit(&g_listeners[i], l_session)) )
 						{
 						close(l_sd);
 						free(l_session);
+						g_listeners[i].rejected++;
 						continue;
 						}
 
 					__atomic_add_fetch(&g_listeners[i].sessions, 1, __ATOMIC_ACQ_REL);	/* Before the thread can exit */
+					g_listeners[i].accepted++;
+					s_net_sess_add (l_session);				/* Before the thread can exit too */
 
 											/* Start dedicated thread for session */
 					if ( (l_rc = pthread_create(&l_tid, NULL, s_net_session, l_session)) )
@@ -731,6 +901,7 @@ const struct timespec l_period_ts = {.tv_sec = T2R$K_CHECK_MSEC / 1000, .tv_nsec
 
 						pthread_mutex_unlock(&g_listeners[i].rawlock);
 
+						s_net_sess_del (l_session);			/* BEFORE close() */
 						close(l_sd);
 						__atomic_sub_fetch(&g_listeners[i].sessions, 1, __ATOMIC_RELEASE);
 						free(l_session);
@@ -834,6 +1005,7 @@ pthread_t	l_tid;
 	for (int i = 0; i < g_listeners_nr; i++)
 		{
 		l_listener = &g_listeners[i];
+		l_listener->fd = -1;						/* Not started (yet): SHOW GATEWAY */
 
 
 		if ( 0 > (l_sd = socket(AF_INET, ((l_listener->proto == IPPROTO_UDP) ? SOCK_DGRAM : SOCK_STREAM), 0)) )

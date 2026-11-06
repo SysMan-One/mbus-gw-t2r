@@ -56,6 +56,11 @@
 **	02-NOV-2026	CLD	X.00-14ECO02 / REV: 00.14.02 - TTYPOLLEV is dropped (a failed line of a RAW session
 **				is DEVLOST now); never released, no code is shifted in a released catalogue.
 **				DEVABSENT names what the RAW clients get (a disconnect) - the text only.
+**
+**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The control channel and the mbus-ctl utility: added CTLREADY,
+**				CTLOFF, CTLBUSY, CTLERR, CTLSYSWRN, CTLRESET, CTLRESTART, CTLCHKFAIL, CHECKOK,
+**				RESTARTING, EXECERR (the gateway) and CTLNOGW, CTLANSERR, CTLBADANS, CTLWAIT,
+**				CTLBACK, CTLNOBACK, CTLRESETN (mbus-ctl, it shares the catalogue).
 **--
 */
 
@@ -173,6 +178,25 @@ $DEF_MSG(T2R, WARN,	RAWBUSY,			"[#!SL] !%I:!UW --- the raw listener is busy and 
 $DEF_MSG(T2R, ERROR,	LSNBADMODE,		"[listener #!2ZL] --- unknown <mode> value <!AZ>, use MODBUS or RAW") \
 $DEF_MSG(T2R, ERROR,	LSNRAWSHR,		"[listener #!2ZL] --- target <!AZ> is used by the listener on port !UW too, a RAW listener needs the serial line for itself") \
 $DEF_MSG(T2R, ERROR,	LSNRAWOPT,		"[listener #!2ZL] --- <!AZ> is not allowed in the !AZ mode") \
+\
+$DEF_MSG(T2R, SUCCESS,	CTLREADY,		"Control channel <!AZ> --- is ready") \
+$DEF_MSG(T2R, INFO,	CTLOFF,			"Control channel is disabled by /CONTROL=NONE") \
+$DEF_MSG(T2R, WARN,	CTLBUSY,			"Control channel <!AZ> is served by another running gateway --- this one goes on without the control channel") \
+$DEF_MSG(T2R, WARN,	CTLERR,			"Control channel <!AZ> !AZ->!SL, errno: !SL --- the gateway goes on without the control channel") \
+$DEF_MSG(T2R, WARN,	CTLSYSWRN,		"Control channel: !AZ->!SL, errno: !SL") \
+$DEF_MSG(T2R, INFO,	CTLRESET,		"[#!SL] !%I:!UW (connection !UL) --- is reset by the operator") \
+$DEF_MSG(T2R, INFO,	CTLRESTART,		"RESTART GATEWAY by the operator: the settings are good --- restarting") \
+$DEF_MSG(T2R, ERROR,	CTLCHKFAIL,		"RESTART GATEWAY is refused: the settings check has failed (status !SL) --- the gateway goes on as it is") \
+$DEF_MSG(T2R, SUCCESS,	CHECKOK,			"Settings <!AZ> --- are good: !UL serial(s), !UL listener(s)") \
+$DEF_MSG(T2R, INFO,	RESTARTING,		"Restarting <!AZ> with the same command line (!UL connection(s) still alive)") \
+$DEF_MSG(T2R, FATAL,	EXECERR,			"Restart: execv(<!AZ>)->!SL, errno: !SL --- the gateway stops") \
+$DEF_MSG(T2R, ERROR,	CTLNOGW,			"Cannot reach the gateway by <!AZ>, errno: !SL --- is it running? Is it the right /SOCKET?") \
+$DEF_MSG(T2R, ERROR,	CTLANSERR,		"The gateway says: !AZ") \
+$DEF_MSG(T2R, ERROR,	CTLBADANS,		"Ill-formed answer of the gateway: <!AZ>") \
+$DEF_MSG(T2R, INFO,	CTLWAIT,			"The gateway is restarting, waiting for it at most !UL seconds ...") \
+$DEF_MSG(T2R, SUCCESS,	CTLBACK,			"The gateway has restarted in !UL second(s): pid !UL, !UL listener(s) up") \
+$DEF_MSG(T2R, WARN,	CTLNOBACK,		"The gateway has not come back in !UL seconds --- see its log") \
+$DEF_MSG(T2R, SUCCESS,	CTLRESETN,		"!UL connection(s) reset") \
 
 
 

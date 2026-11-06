@@ -6,7 +6,12 @@
 #	The local changes (the settings file, TasksMax, ...) go to a drop-in, not here:
 #		$ sudo systemctl edit mbusgw-t2r
 #
+#	The control utility talks to the gateway over /var/run/mbusgw-t2r.sock:
+#		$ sudo /opt/mbusgw-t2r/sbin/mbus-ctl SHOW CONNECTIONS
+#
 #	CREATION DATE: 28-OCT-2026
+#
+#	06-NOV-2026	CLD	X.01-01: ExecReload= by mbus-ctl RESTART GATEWAY.
 #--
 [Unit]
 Description=MODBUS TCP to RTU gateway (mbusgw-t2r)
@@ -17,6 +22,8 @@ After=network.target
 Type=simple
 ExecStart=/opt/mbusgw-t2r/sbin/mbusgw-t2r --settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 Restart=on-failure
+# 'systemctl reload': the gateway checks its settings and restarts itself (the same PID), see mbus-ctl
+ExecReload=/opt/mbusgw-t2r/sbin/mbus-ctl RESTART GATEWAY /NOWAIT
 RestartSec=5
 
 [Install]

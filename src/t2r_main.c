@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-00"
-#define	__REV__		"01.00.00"
+#define	__IDENT__	"X.01-01"
+#define	__REV__		"01.01.00"
 
 /*
 **++
@@ -28,6 +28,9 @@
 **			/TRACE			- enable extensible debug diagnostic output
 **			/LOGFILE=<file>		- a file name for the logfile
 **			/LOGSIZE=<number>	- a maximum size of the logfile in octets
+**			/CONTROL=<path>		- the control channel socket (mbus-ctl), NONE - off;
+**						  default /var/run/mbusgw-t2r.sock
+**			/CHECK			- check the settings and exit (the exit status says)
 **
 **  MODIFICATION HISTORY:
 **
@@ -194,6 +197,16 @@
 **
 **	04-NOV-2026	CLD	V.01-00 / REV: 01.00.00 - The first release (package version 1.0.0); the field
 **				test line X.00 is closed; no code changes since X.00-14ECO02.
+**
+**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The control channel and the mbus-ctl utility (see T2R-CTL
+**				and MBUS-CTL): the new /CONTROL=<path> option (default T2R$K_CTL_SOCK, NONE -
+**				off), the channel is opened after the listeners are up and closed at the exit;
+**				the new /CHECK option (parse the settings, CHECKOK, exit) - RESTART GATEWAY runs
+**				it first; an accepted RESTART raises <g_restart_flag>: main() waits the sessions
+**				to end (T2R$K_CTL_DRAIN_SEC at most), closes the listeners and the lines and
+**				every descriptor above stderr, then execv("/proc/self/exe") with the saved
+**				command line - the same PID, so systemd and procd see nothing (RESTARTING,
+**				EXECERR). g_t2r_ident/g_t2r_rev/g_start_time are given to T2R-CTL.
 **--
 */
 
@@ -255,12 +268,21 @@ static	EMSG_RECORD_DESC __t2r_msgs_desc__  = {
 
 ASC	g_logfspec = {0, {0}},
 	g_confspec = {0, {0}},
-	g_settings = {0, {0}}
+	g_settings = {0, {0}},
+	g_ctlsock = {$ASCINI(T2R$K_CTL_SOCK)}				/* /CONTROL=<path>, NONE - off		*/
 	;
 
 
 int	g_exit_flag = 0,						/* Global flag 'all must to be stop'	*/
+	g_restart_flag = 0,						/* RESTART GATEWAY: re-exec after the exit	*/
+	g_check = 0,							/* /CHECK: check the settings and exit	*/
 	g_trace = 0;							/* A flag to produce extensible logging	*/
+
+time_t	g_start_time;							/* SHOW GATEWAY: the uptime		*/
+const char g_t2r_ident[] = __IDENT__,					/* SHOW GATEWAY: the revision		*/
+	g_t2r_rev[] = __REV__;
+
+static char	**s_argv;						/* A copy of the command line: RESTART	*/
 
 int	g_logsize = 0							/* A size in octets of the log file */
 	;
@@ -293,6 +315,8 @@ static const OPTS g_optstbl [] =					/* General CLI options		*/
 	{{$ASCINI("logsize")},	&g_logsize, 0,			OPTS$K_INT},
 
 	{{$ASCINI("settings")},	&g_settings,  ASC$K_SZ,		OPTS$K_STR},
+	{{$ASCINI("control")},	&g_ctlsock,  ASC$K_SZ,		OPTS$K_STR},
+	{{$ASCINI("check")},	&g_check, 0,			OPTS$K_OPT},
 
 	OPTS_NULL
 };
@@ -306,6 +330,8 @@ const char	help [] = { "Usage:\n" \
 	"\t/TRACE             enable extensible diagnostic output\n" \
 	"\t/LOGFILE=<file>    a specification of file to accept logging\n" \
 	"\t/LOGSIZE=<number>  a maximum size of file in octets\n" \
+	"\t/CONTROL=<path>    the control socket for mbus-ctl, NONE - off (default " T2R$K_CTL_SOCK ")\n" \
+	"\t/CHECK             check the settings file and exit\n" \
 
 	"\n\tExample of usage:\n\t $ %s -config=t2r_config.conf /settings=t2r_settings.conf /trace\n" };
 
@@ -1001,6 +1027,83 @@ const int siglist [] = {SIGTERM, SIGINT, SIGUSR1, SIGQUIT, 0 };
 
 
 /*
+ *   DESCRIPTION: Keep a copy of the command line for the RESTART: the strings of argv[] may be
+ *	touched by the options parser.
+ *
+ *   INPUTS:
+ *	argc, argv:	The command line
+ *
+ *   IMPLICIT OUTPUTS:
+ *	s_argv
+ *
+ *   RETURNS:
+ *	NONE (no copy - no RESTART, s_argv stays NULL)
+ */
+static void	s_save_argv (
+		int	argc,
+		char	**argv
+		)
+{
+	if ( !(s_argv = calloc((size_t) argc + 1, sizeof(char *))) )
+		return;
+
+	for (int i = 0; i < argc; i++)
+		{
+		if ( !(s_argv[i] = strdup(argv[i])) )
+			{
+			free(s_argv);
+			s_argv = NULL;
+			return;
+			}
+		}
+}
+
+
+
+/*
+ *   DESCRIPTION: RESTART GATEWAY, the second half (T2R-CTL has checked the settings and raised the
+ *	flags): wait the sessions to see <g_exit_flag> and end (T2R$K_CTL_DRAIN_SEC at most), close the
+ *	listeners and the lines, close every descriptor above stderr (nothing is marked close-on-exec,
+ *	a leftover listening socket would fail the bind() of the new image), then execv() the same
+ *	program with the same command line. The PID stays the same: systemd and procd see nothing.
+ *
+ *   IMPLICIT INPUTS:
+ *	s_argv, g_logfspec
+ *
+ *   RETURNS:
+ *	only on a failure: EXECERR
+ */
+static int	s_restart (void)
+{
+int	l_rc, l_maxfd;
+
+	for (int i = 0; (i < T2R$K_CTL_DRAIN_SEC * 10) && t2r$net_sess_count(); i++)
+		usleep(100000);
+
+	t2r$net_stop_listeners ();
+
+	if ( !s_argv )
+		return	$PUTMSG_FAO(T2R$__EXECERR, "/proc/self/exe", -1, ENOMEM);
+
+	$PUTMSG_FAO(T2R$__RESTARTING, "/proc/self/exe", t2r$net_sess_count());
+
+	if ( 0 >= (l_maxfd = (int) sysconf(_SC_OPEN_MAX)) || (l_maxfd > 65536) )
+		l_maxfd = 65536;
+
+	for (int fd = STDERR_FILENO + 1; fd < l_maxfd; fd++)
+		close(fd);
+
+	l_rc = execv("/proc/self/exe", s_argv);
+
+	if ( $ASCLEN(&g_logfspec) )						/* The log file has been closed above */
+		__util$deflog($ASCPTR(&g_logfspec), NULL);
+
+	return	$PUTMSG_FAO(T2R$__EXECERR, "/proc/self/exe", l_rc, errno);
+}
+
+
+
+/*
  *   DESCRIPTION: Main entry point of the program: init the message catalogue, show the revision
  *	banner, parse the command line, switch the logging to /LOGFILE if it is given (the banner
  *	is repeated there), load and validate the settings, establish the signal handling, start
@@ -1026,6 +1129,8 @@ int	main(int argc, char **argv)
 {
 int l_rc = 0;
 
+	g_start_time = time(NULL);
+	s_save_argv(argc, argv);
 
 	__util$inimsg(&__t2r_msgs_desc__);
 
@@ -1051,17 +1156,26 @@ int l_rc = 0;
 	if ( !(1 & s_config_validation()) )
 		return	$PUTMSG_FAO(T2R$__CFGABORT), EXIT_FAILURE;
 
+	if ( g_check )								/* /CHECK: that is all */
+		return	$PUTMSG_FAO(T2R$__CHECKOK, $ASCPTR(&g_settings), g_serials_nr, g_listeners_nr), EXIT_SUCCESS;
 
 
 	s_init_sig_handler ();
 
 	if ( (1 & (l_rc = t2r$net_start_listeners ())) )
 		{
+		t2r$ctl_start ($ASCPTR(&g_ctlsock));				/* A failure is not fatal: no control only */
+
 		while ( !g_exit_flag)
 			{
 			for (int delay = 3;  (delay = sleep(delay)); );
 			}
-		l_rc = t2r$net_stop_listeners ();
+
+		t2r$ctl_stop ();
+
+		if ( g_restart_flag )
+			l_rc = s_restart ();					/* Returns only on a failure */
+		else	l_rc = t2r$net_stop_listeners ();
 		}
 
 	$PUTMSG_FAO(T2R$__EXITST, g_exit_flag, l_rc);

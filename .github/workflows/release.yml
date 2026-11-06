@@ -41,6 +41,8 @@
 #	04-NOV-2026	CLD	V.01-00: the tag may be V<MM>.<NN>.<E> too (V01.00.0 -> the package version 1.0.0):
 #				V is a product version, X (v<VERSION>) is a field test one; the leading zeros of
 #				the fields are dropped for the package version and the Release title.
+#
+#	06-NOV-2026	CLD	X.01-01: the installed packages (.deb, .ipk/.apk) must carry a working mbus-ctl.
 #--
 
 name: release
@@ -143,6 +145,7 @@ jobs:
           out=$(/opt/mbusgw-t2r/sbin/mbusgw-t2r 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q 'REVISNF'
+          /opt/mbusgw-t2r/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
           apt-get remove --yes mbusgw-t2r
 
   deb-cross:
@@ -311,6 +314,8 @@ jobs:
           out=$(/usr/sbin/mbusgw-t2r 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q 'REVISNF'
+          test -x /usr/sbin/mbus-ctl
+          /usr/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
           if ls /pkg/*.ipk > /dev/null 2>&1; then opkg remove mbusgw-t2r; else apk del mbusgw-t2r; fi
           EOF
           docker run --rm --platform linux/${{ matrix.arch }} -v "$PWD/pkg:/pkg" openwrt/rootfs:${{ matrix.arch }}-openwrt-${{ matrix.release }} /bin/sh /pkg/test.sh

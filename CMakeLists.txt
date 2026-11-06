@@ -63,6 +63,10 @@
 #				architecture of the package (mipsel, mips64el) - CPack takes the one of
 #				the build host otherwise. The OpenWrt packages are built from openwrt/.
 #
+#	06-NOV-2026	CLD	X.01-01: The control utility mbus-ctl (src/mbus_ctl.c) is built and installed
+#				next to the gateway (sbin/), the gateway got the module src/t2r_ctl.c (the
+#				control channel); the .deb gets mbus-ctl by the same install() rule.
+#
 #	USAGE (see README.md for the whole installation sequence):
 #		$ mkdir ./build && cd ./build
 #		$ cmake ../ -DCMAKE_BUILD_TYPE=Release
@@ -205,15 +209,25 @@ set ( T2R_SOURCES                                               # TOOTOO Router
 	src/t2r_main.c
 	src/t2r_modbus.h
 	src/t2r_modbus.c
+	src/t2r_ctl.c
 )
 
 
 add_executable ( ${T2R_TARGET} ${T2R_SOURCES})
 target_link_libraries( ${T2R_TARGET} StarLet::starlet pthread rt ${T2R_LIBCONFIG_LINK})
 
+#
+#   mbus-ctl - the monitoring and control utility: talks to the gateway over its local control socket
+#   (see src/t2r_ctl.c); it shares the message catalogue (src/t2r_msgs.h) with the gateway.
+#
+set ( T2R_CTL_TARGET    "mbus-ctl" )
+
+add_executable ( ${T2R_CTL_TARGET} src/mbus_ctl.c src/t2r_msgs.h src/t2r_defs.h)
+target_link_libraries( ${T2R_CTL_TARGET} StarLet::starlet pthread)
+
 
 #------------------------------------------------------------------------------------------------------
-#	Installation:	sbin/mbusgw-t2r
+#	Installation:	sbin/mbusgw-t2r, sbin/mbus-ctl
 #			etc/mbusgw-t2r/*.conf	- the existing configuration files are never overwritten
 #						  (etc/*.conf under /opt/: the tree is self-contained)
 #			share/doc/mbusgw-t2r/	- README, BLOCKNOTE, the reference copies of the configs,
@@ -225,7 +239,7 @@ else ()
 	set (T2R_CONFDIR "${CMAKE_INSTALL_FULL_SYSCONFDIR}/mbusgw-t2r")
 endif ()
 
-install (TARGETS ${T2R_TARGET}
+install (TARGETS ${T2R_TARGET} ${T2R_CTL_TARGET}
 	RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 

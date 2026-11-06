@@ -43,6 +43,12 @@
 **				T2R$K_RAW_* constants, T2R$_LISTENER got .mode, .takeover and the current
 **				raw session (.rawsess under .rawlock), t2r$tty_raw_relay().
 **
+**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The control channel (T2R-CTL, mbus-ctl): T2R$_SESSION got
+**				the registry links, a session id, the connect time and the counters
+**				(requests, answers, errors, octets), the .reset mark; T2R$_LISTENER got the
+**				.accepted/.rejected counters; added T2R$K_CTL_* constants, t2r$net_sess_walk(),
+**				t2r$ctl_start(), t2r$ctl_stop().
+**
 **--
 */
 
@@ -114,6 +120,17 @@ enum {
 #define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 4	*/
 #define		T2R$K_USBGAP_MSEC	20				/* A gap inside of an answer from an USB adapter: 16 msec
 									   of the FTDI latency_timer plus a margin */
+
+/*
+ * The control channel (T2R-CTL): a local AF_UNIX socket, one text request line per connection,
+ * see src/t2r_ctl.c and the mbus-ctl utility.
+ */
+#define		T2R$K_CTL_SOCK		"/var/run/mbusgw-t2r.sock"	/* The default path: /CONTROL=<path> or NONE	*/
+#define		T2R$K_CTL_MODE		0660				/* Socket rights: the owner and the group only	*/
+#define		T2R$K_CTL_LINESZ	256				/* The longest request line			*/
+#define		T2R$K_CTL_TMO_MSEC	5000				/* A client must send its line in this time	*/
+#define		T2R$K_CTL_POLL_MSEC	1000				/* <g_exit_flag> check interval			*/
+#define		T2R$K_CTL_DRAIN_SEC	10				/* RESTART: wait the sessions to end at most	*/
 
 /*
  * The RAW (transparent) mode of a listener: octets are relayed as is between a single TCP client
@@ -214,6 +231,8 @@ typedef struct	t2r$_listener {
 			sessions,					/* Active sessions, __atomic_*() only */
 			mode,						/* T2R$K_MODE_MODBUS or T2R$K_MODE_RAW */
 			takeover;					/* RAW: a new client kicks the current one */
+	uint32_t	accepted,					/* Connections accepted / rejected since the start, */
+			rejected;					/* written by the dispatcher thread only	*/
 	struct sockaddr_in sk;						/* Socket address structure: TCP, 0.0.0.0:502 */
 		char target[T2R$K_TTY_DEVNAME + 1];			/* "COM1", "/dev/ttyS0" */
 
@@ -241,11 +260,33 @@ typedef struct	t2r$__session {
 
 	T2R$_SERIAL	*target;
 	T2R$_LISTENER	*listener;					/* The listener which has accepted the session */
+
+	/*
+	 * The registry of the live sessions (T2R-NET, see t2r$net_sess_walk()): what the control channel
+	 * shows and resets. The counters have a single writer - the session's own thread - and are only
+	 * read by the control thread under the registry lock: no atomics (a 32-bit CPU has no cheap 64-bit
+	 * ones), a torn read may at worst glitch a displayed number once.
+	 */
+	struct t2r$__session *reg_next,					/* The registry list, under the registry lock	*/
+			*reg_prev;
+		uint32_t id;						/* A session id: 1, 2, 3 ... never reused	*/
+		time_t	start;						/* CLOCK_REALTIME of the accept()		*/
+		int	reset;						/* Is reset by the operator (RESET CONNECTIONS)	*/
+		uint64_t nreq,						/* MODBUS: whole requests received		*/
+			nans,						/* MODBUS: answers sent (exceptions too)	*/
+			nerr,						/* MODBUS: exception answers + failed requests	*/
+			nrx,						/* Octets from the client (RAW: to the line)	*/
+			ntx;						/* Octets to the client (RAW: from the line)	*/
 } T2R$_SESSION;
 
 
 int	t2r$net_start_listeners (void);
 int	t2r$net_stop_listeners (void);
+int	t2r$net_sess_walk (int (*a_rtn) (T2R$_SESSION *a_session, void *a_arg), void *a_arg);
+int	t2r$net_sess_count (void);
+
+int	t2r$ctl_start (const char *a_path);
+int	t2r$ctl_stop (void);
 
 
 extern	int	g_trace;							/* Declared in T2R-MAIN, is used by the dump macros */
