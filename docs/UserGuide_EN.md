@@ -208,6 +208,8 @@ Useful options:
 | `/trace` | Verbose tracing: every request and answer is dumped in hex. Priceless for the first run |
 | `/logfile=<file>` | Write the log to a file instead of the screen |
 | `/logsize=<octets>` | Rotate the log file when it grows above this size |
+| `/control=<file>` | The socket file for `mbus-ctl` (section 4.3), `NONE` --- none |
+| `/check` | Only check the settings file and exit (section 4.3) |
 
 A healthy start looks like this (shortened):
 
@@ -260,6 +262,73 @@ install. Tune the settings file, then switch the service on and start it:
 The last command shows the messages of the gateway (they go to the system log). The USB
 serial adapter needs its kernel module: `kmod-usb-serial-ftdi`, `kmod-usb-serial-ch341` or
 `kmod-usb-serial-cp210x`, by the chip of the adapter.
+
+### 4.3. Watching and controlling a running gateway: mbus-ctl
+
+`mbus-ctl` is a small program next to the gateway (`/opt/mbusgw-t2r/sbin/mbus-ctl`, on OpenWrt
+`/usr/sbin/mbus-ctl`). It asks the running gateway what it is doing, and it can disconnect a
+client or restart the gateway. It talks to the gateway through a socket **file** on the same
+computer, `/var/run/mbusgw-t2r.sock`. Nothing is opened to the network. Only root and the group of
+the gateway may use the file (rights `0660`), so type `sudo` in front of it.
+
+| Command | What you get |
+|---------|--------------|
+| `mbus-ctl show connections` | Who is connected to which TCP port, since when, how many requests, answers, errors and octets |
+| `mbus-ctl show connections /continuous` | The same, redrawn every 2 seconds until `Ctrl+C` (`/continuous=5` --- every 5 seconds) |
+| `mbus-ctl show lines` | The serial ports: the device, the speed, the timeouts, `OPEN` or `ABSENT`, how many clients use it |
+| `mbus-ctl show gateway` | The version, the PID, how long it is up, the settings file, the TCP ports |
+| `mbus-ctl reset connection 7` | Disconnect the client with `Id` 7 (from `show connections`) |
+| `mbus-ctl reset connection 10.0.0.7` | Disconnect all the clients from this address (`10.0.0.7:44770` --- just one) |
+| `mbus-ctl reset connection /all` | Disconnect all the clients |
+| `mbus-ctl restart gateway` | Check the settings file and restart the gateway with it |
+| `mbus-ctl help` | The list of the commands |
+
+You may shorten the words: `sho conn /cont`, `sho lin`, `sho gw`, `reset conn 7`, `restart gw`.
+`SERIALS` is the same as `LINES`, `GW` is the same as `GATEWAY`. Only `res` is too short: it can be
+`RESET` or `RESTART`.
+
+```
+$ sudo mbus-ctl sho conn
+Connections of the MODBUS gateway at 07-NOV-2026 00:07:44
+
+Listener #0  0.0.0.0:502  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s), accepted 2, rejected 0
+      Id   Sd  Client                 Connected             Duration    Requests   Answers  Errors    Bytes in   Bytes out
+       1    8  10.0.0.7:44770         07-NOV-2026 00:07:44  00:00:00           7         7       0          84          91
+       2    9  10.0.0.9:44772         07-NOV-2026 00:07:44  00:00:00           3         3       0          36          33
+
+Total: 2 connection(s)
+```
+
+`Id` is the number of the connection for `reset`. `Sd` is the number in `[#8]` of the log lines of
+this client. `Errors` are the answers with a MODBUS exception plus the requests which broke the
+connection. For a RAW port the columns are `To line` and `From line`.
+
+**restart gateway** step by step:
+
+1. The gateway checks the settings file in a separate process (`mbusgw-t2r /settings=<file> /check`).
+2. If the file has an error, nothing is restarted. You see the error line, for example
+   `%T2R-E-CFGPARSE, ... syntax error`, the gateway works on with the old settings. Fix the file and
+   try again.
+3. If the file is good, the gateway disconnects the clients, closes the ports and starts itself
+   again with the same command line. The PID stays the same: systemd and procd see nothing.
+4. `mbus-ctl` waits until the gateway answers again and prints `%T2R-S-CTLBACK`. It takes 3--15
+   seconds. The clients connect again by themselves.
+
+With systemd, `sudo systemctl reload mbusgw-t2r` does the same. After an upgrade of the package
+use `systemctl restart` (the .deb does it for you): `restart gateway` starts the program file
+which is running now.
+
+Two more options of the gateway:
+
+| Option | Meaning |
+|--------|---------|
+| `/control=<file>` | Another socket file (two gateways on one computer need two files); then `mbus-ctl ... /socket=<file>` |
+| `/control=NONE` | No control channel at all |
+| `/check` | Only check the settings file and exit: `%T2R-S-CHECKOK` and exit status 0 --- the file is good |
+
+The gateway understands plain text lines, so you can also ask it by hand with `socat`:
+`echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock`. The answer ends
+with `OK` or with `ERROR <reason>`.
 
 ## 5. Reading the log
 
@@ -425,6 +494,24 @@ dislikes.**
 | `LSNBADMODE` | E | The `mode` value is unknown; the record is skipped. Write `"MODBUS"` or `"RAW"` |
 | `LSNRAWSHR` | E | The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own |
 | `LSNRAWOPT` | E | A listeners option is not allowed in this mode (`takeover` in the MODBUS mode); the record is skipped. Remove the option or set `mode = "RAW"` |
+| `CTLREADY` | S | The control channel for `mbus-ctl` is open; the socket file is shown |
+| `CTLOFF` | I | The control channel is switched off by `/control=NONE`; `mbus-ctl` cannot reach this gateway |
+| `CTLBUSY` | W | Another running gateway already uses this socket file; this one works without the control channel. Give each gateway its own `/control=<file>` |
+| `CTLERR` | W | The socket file cannot be made (the call and errno are shown: 2 = no such directory, 13 = no rights, 88 = the path is not a socket); the gateway works without the control channel |
+| `CTLSYSWRN` | W | A system call of the control channel failed; the gateway keeps working |
+| `CTLRESET` | I | The operator has disconnected this client (`mbus-ctl reset connection`). Nothing to do |
+| `CTLRESTART` | I | The operator has asked to restart (`mbus-ctl restart gateway`), the settings file is good; the gateway restarts |
+| `CTLCHKFAIL` | E | `restart gateway` is refused: the settings file has errors (`mbus-ctl` shows them). The gateway works on with the old settings. Fix the file and try again |
+| `CHECKOK` | S | `/check`: the settings file is good; the numbers of the serial ports and listeners are shown |
+| `RESTARTING` | I | The gateway starts itself again with the same command line; the usual start lines follow |
+| `EXECERR` | F | The restart has failed; the gateway stops. systemd and procd start it again; by hand --- start it again |
+| `CTLNOGW` | E | `mbus-ctl` cannot reach the gateway. errno 2: the gateway is not running or the socket file is another (`/socket=`); 13: no rights --- use `sudo`; 111: the gateway is not running, its old file is left |
+| `CTLANSERR` | E | The gateway has refused the request; its reason is shown |
+| `CTLBADANS` | E | `mbus-ctl` does not understand the answer --- a gateway of another version? Quote the line when asking for help |
+| `CTLWAIT` | I | `mbus-ctl` waits for the restarted gateway |
+| `CTLBACK` | S | The gateway is back after the restart; the time, the PID and the TCP ports up are shown |
+| `CTLNOBACK` | W | The gateway has not answered after the restart in time; read its log (`journalctl -u mbusgw-t2r`, `logread -e mbusgw-t2r`) |
+| `CTLRESETN` | S | `mbus-ctl reset connection` has disconnected this many clients |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*
 

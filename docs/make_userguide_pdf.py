@@ -45,6 +45,9 @@
 #				the packages in the examples are 0.14.2.
 #
 #	04-NOV-2026	CLD	V.01-00 (the first release): the version on the cover, the packages in the examples are 1.0.0.
+#
+#	06-NOV-2026	CLD	X.01-01: 4.3 mbus-ctl (watching and controlling a running gateway), the options /control
+#				and /check, the codes CTLREADY .. CTLRESETN; the version on the cover.
 #--
 import sys
 
@@ -75,7 +78,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'V.01-00'
+VERSION   = 'X.01-01'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -633,6 +636,8 @@ def s_pack_en ():
 				'Priceless at the first run.'),
 			('/logfile=&lt;file&gt;', 'Write the log to a file instead of the screen.'),
 			('/logsize=&lt;octets&gt;', 'Rotate the log file above this size.'),
+			('/control=&lt;file&gt;', 'The socket file for mbus-ctl (section 4.3), NONE --- none.'),
+			('/check', 'Only check the settings file and exit (section 4.3).'),
 		 ], [42*mm, 121*mm], a_mono_cols=(0,)),
 		 P('A healthy start prints (shortened):'),
 		 C('%T2R-I-REVISNF, Rev: T2R X.00-06/aarch64(built at ...) (REV: 00.06.00)\n'
@@ -671,7 +676,47 @@ def s_pack_en ():
 		 P('The last command shows the messages of the gateway (they go to the system log). The USB '
 		   'serial adapter needs its kernel module: <font face="Mono">kmod-usb-serial-ftdi</font>, '
 		   '<font face="Mono">kmod-usb-serial-ch341</font> or <font face="Mono">kmod-usb-serial-cp210x</font>, '
-		   'by the chip of the adapter.')],
+		   'by the chip of the adapter.'),
+		 H2('4.3.  Watching and Controlling a Running Gateway: mbus-ctl'),
+		 P('<font face="Mono">mbus-ctl</font> is a small program next to the gateway '
+		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>, on OpenWrt <font face="Mono">/usr/sbin/mbus-ctl</font>). '
+		   'It asks the running gateway what it is doing, and it can disconnect a client or restart the gateway. '
+		   'It talks to the gateway through a socket <b>file</b> on the same computer, '
+		   '<font face="Mono">/var/run/mbusgw-t2r.sock</font>. Nothing is opened to the network. Only root and the '
+		   'group of the gateway may use the file (rights 0660), so type <font face="Mono">sudo</font> in front of it.'),
+		 tbl(['Command', 'What you get'], [
+			('show connections', 'Who is connected to which TCP port, since when, the requests, answers, errors and octets.'),
+			('show connections /continuous', 'The same, redrawn every 2 seconds until Ctrl/C (/continuous=5 --- every 5 seconds).'),
+			('show lines', 'The serial ports: the device, the speed, the timeouts, OPEN or ABSENT, how many clients use it.'),
+			('show gateway', 'The version, the PID, how long it is up, the settings file, the TCP ports.'),
+			('reset connection 7', 'Disconnect the client with Id 7 (from show connections).'),
+			('reset connection 10.0.0.7', 'Disconnect all the clients from this address (10.0.0.7:44770 --- just one).'),
+			('reset connection /all', 'Disconnect all the clients.'),
+			('restart gateway', 'Check the settings file and restart the gateway with it.'),
+		 ], [58*mm, 105*mm], a_mono_cols=(0,)),
+		 P('You may shorten the words: <font face="Mono">sho conn /cont</font>, <font face="Mono">sho gw</font>, '
+		   '<font face="Mono">reset conn 7</font>, <font face="Mono">restart gw</font>. SERIALS is the same as LINES, '
+		   'GW is the same as GATEWAY. Only <font face="Mono">res</font> is too short: it can be RESET or RESTART.'),
+		 C('$ sudo mbus-ctl sho conn\n'
+		   'Connections of the MODBUS gateway at 07-NOV-2026 00:07:44\n\n'
+		   'Listener #0  0.0.0.0:502  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s)\n'
+		   '    Id  Sd  Client            Connected             Requests  Answers  Errors\n'
+		   '     1   8  10.0.0.7:44770    07-NOV-2026 00:07:44         7        7       0\n'
+		   '     2   9  10.0.0.9:44772    07-NOV-2026 00:07:44         3        3       0\n\n'
+		   'Total: 2 connection(s)'),
+		 P('Id is the number of the connection for reset. Sd is the number in [#8] of the log lines of this client. '
+		   'Errors are the answers with a MODBUS exception plus the requests which broke the connection.'),
+		 P('<b>restart gateway</b> first checks the settings file in a separate process '
+		   '(<font face="Mono">mbusgw-t2r /settings=&lt;file&gt; /check</font>). If the file has an error, nothing is '
+		   'restarted: you see the error line and the gateway works on with the old settings. If the file is good, the '
+		   'gateway disconnects the clients, closes the ports and starts itself again with the same command line. The '
+		   'PID stays the same: systemd and procd see nothing. mbus-ctl waits until the gateway answers again '
+		   '(CTLBACK), in 3--15 seconds. With systemd, <font face="Mono">systemctl reload mbusgw-t2r</font> does the same. '
+		   'After an upgrade of the package use <font face="Mono">systemctl restart</font>.'),
+		 P('The gateway understands plain text lines, so you can also ask it by hand:'),
+		 C('$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock'),
+		 P('Two gateways on one computer need two socket files: <font face="Mono">/control=&lt;file&gt;</font> for the '
+		   'gateway, <font face="Mono">/socket=&lt;file&gt;</font> for mbus-ctl.')],
 		# --- Chapter 5 ---
 		[H1('Chapter 5.  The Time Stamp Pseudo Device'),
 		 P('The gateway can answer <i>by itself</i> --- without touching the line --- to a read '
@@ -876,6 +921,24 @@ def s_pack_en ():
 			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
 			('DEVLOST', 'E', 'The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile.'),
 			('DEVABSENT', 'W', 'The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second.'),
+			('CTLREADY', 'S', 'The control channel for mbus-ctl is open; the socket file is shown.'),
+			('CTLOFF', 'I', 'The control channel is switched off by /control=NONE; mbus-ctl cannot reach this gateway.'),
+			('CTLBUSY', 'W', 'Another running gateway already uses this socket file; this one works without the control channel. Give each gateway its own /control=&lt;file&gt;.'),
+			('CTLERR', 'W', 'The socket file cannot be made (2 = no such directory, 13 = no rights, 88 = not a socket); the gateway works without the control channel.'),
+			('CTLSYSWRN', 'W', 'A system call of the control channel failed; the gateway keeps working.'),
+			('CTLRESET', 'I', 'The operator has disconnected this client (mbus-ctl reset connection). Nothing to do.'),
+			('CTLRESTART', 'I', 'The operator has asked to restart, the settings file is good; the gateway restarts.'),
+			('CTLCHKFAIL', 'E', 'restart gateway is refused: the settings file has errors (mbus-ctl shows them). The gateway works on. Fix the file and try again.'),
+			('CHECKOK', 'S', '/check: the settings file is good.'),
+			('RESTARTING', 'I', 'The gateway starts itself again with the same command line; the usual start lines follow.'),
+			('EXECERR', 'F', 'The restart has failed; the gateway stops. systemd and procd start it again; by hand --- start it again.'),
+			('CTLNOGW', 'E', 'mbus-ctl cannot reach the gateway. errno 2: not running or another socket file (/socket=); 13: no rights --- use sudo; 111: not running, its old file is left.'),
+			('CTLANSERR', 'E', 'The gateway has refused the request; its reason is shown.'),
+			('CTLBADANS', 'E', 'mbus-ctl does not understand the answer --- a gateway of another version? Quote the line.'),
+			('CTLWAIT', 'I', 'mbus-ctl waits for the restarted gateway.'),
+			('CTLBACK', 'S', 'The gateway is back after the restart.'),
+			('CTLNOBACK', 'W', 'The gateway has not answered after the restart in time; read its log.'),
+			('CTLRESETN', 'S', 'mbus-ctl reset connection has disconnected this many clients.'),
 		 ], [26*mm, 10*mm, 127*mm], a_mono_cols=(0,)),
 		 H2('7.3.  If Nothing Helps'),
 		 P('Collect and attach to your question: 1) the full start-up log with /trace (from '
@@ -1124,6 +1187,8 @@ def s_pack_ru ():
 				'Бесценно при первом запуске.'),
 			('/logfile=&lt;файл&gt;', 'Писать журнал в файл вместо экрана.'),
 			('/logsize=&lt;октет&gt;', 'Ротировать файл журнала при превышении размера.'),
+			('/control=&lt;файл&gt;', 'Файл-сокет для mbus-ctl (раздел 4.3), NONE — без него.'),
+			('/check', 'Только проверить файл настроек и выйти (раздел 4.3).'),
 		 ], [42*mm, 121*mm], a_mono_cols=(0,)),
 		 P('Здоровый запуск печатает (сокращённо):'),
 		 C('%T2R-I-REVISNF, Rev: T2R X.00-06/aarch64(built at ...) (REV: 00.06.00)\n'
@@ -1160,7 +1225,47 @@ def s_pack_ru ():
 		 P('Последняя команда показывает сообщения шлюза (они идут в системный журнал). Адаптеру '
 		   'USB-serial нужен модуль ядра: <font face="Mono">kmod-usb-serial-ftdi</font>, '
 		   '<font face="Mono">kmod-usb-serial-ch341</font> или <font face="Mono">kmod-usb-serial-cp210x</font> — '
-		   'по микросхеме адаптера.')],
+		   'по микросхеме адаптера.'),
+		 H2('4.3.  Как смотреть за шлюзом и управлять им: mbus-ctl'),
+		 P('<font face="Mono">mbus-ctl</font> — маленькая программа рядом со шлюзом '
+		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>, на OpenWrt <font face="Mono">/usr/sbin/mbus-ctl</font>). '
+		   'Она спрашивает работающий шлюз, что он делает, а ещё умеет отключить клиента или перезапустить шлюз. '
+		   'Говорит она со шлюзом через <b>файл</b>-сокет на том же компьютере, '
+		   '<font face="Mono">/var/run/mbusgw-t2r.sock</font>. В сеть ничего не открывается. Пользоваться файлом могут '
+		   'только root и группа шлюза (права 0660), поэтому пишите перед командой <font face="Mono">sudo</font>.'),
+		 tbl(['Команда', 'Что вы получите'], [
+			('show connections', 'Кто подключён к какому TCP-порту, с какого времени, запросы, ответы, ошибки и октеты.'),
+			('show connections /continuous', 'То же, с перерисовкой каждые 2 секунды до Ctrl/C (/continuous=5 — каждые 5 секунд).'),
+			('show lines', 'Последовательные порты: устройство, скорость, таймауты, OPEN или ABSENT, сколько клиентов.'),
+			('show gateway', 'Версия, PID, сколько работает, файл настроек, TCP-порты.'),
+			('reset connection 7', 'Отключить клиента с Id 7 (из show connections).'),
+			('reset connection 10.0.0.7', 'Отключить всех клиентов с этого адреса (10.0.0.7:44770 — только одного).'),
+			('reset connection /all', 'Отключить всех клиентов.'),
+			('restart gateway', 'Проверить файл настроек и перезапустить шлюз с ним.'),
+		 ], [58*mm, 105*mm], a_mono_cols=(0,)),
+		 P('Слова можно сокращать: <font face="Mono">sho conn /cont</font>, <font face="Mono">sho gw</font>, '
+		   '<font face="Mono">reset conn 7</font>, <font face="Mono">restart gw</font>. SERIALS — то же, что LINES, '
+		   'GW — то же, что GATEWAY. Слишком коротко только <font face="Mono">res</font>: это и RESET, и RESTART.'),
+		 C('$ sudo mbus-ctl sho conn\n'
+		   'Connections of the MODBUS gateway at 07-NOV-2026 00:07:44\n\n'
+		   'Listener #0  0.0.0.0:502  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s)\n'
+		   '    Id  Sd  Client            Connected             Requests  Answers  Errors\n'
+		   '     1   8  10.0.0.7:44770    07-NOV-2026 00:07:44         7        7       0\n'
+		   '     2   9  10.0.0.9:44772    07-NOV-2026 00:07:44         3        3       0\n\n'
+		   'Total: 2 connection(s)'),
+		 P('Id — номер соединения для reset. Sd — число в [#8] в строках журнала этого клиента. '
+		   'Errors — ответы с исключением MODBUS плюс запросы, на которых соединение оборвалось.'),
+		 P('<b>restart gateway</b> сначала проверяет файл настроек в отдельном процессе '
+		   '(<font face="Mono">mbusgw-t2r /settings=&lt;файл&gt; /check</font>). Если в файле ошибка, ничего не '
+		   'перезапускается: вы видите строку ошибки, шлюз работает дальше со старыми настройками. Если файл хороший, '
+		   'шлюз отключает клиентов, закрывает порты и запускает сам себя заново с той же командной строкой. PID остаётся '
+		   'прежним: systemd и procd ничего не замечают. mbus-ctl ждёт, пока шлюз снова ответит (CTLBACK), 3–15 секунд. '
+		   'Под systemd то же делает <font face="Mono">systemctl reload mbusgw-t2r</font>. После обновления пакета '
+		   'используйте <font face="Mono">systemctl restart</font>.'),
+		 P('Шлюз понимает обычные текстовые строки, поэтому его можно спросить и руками:'),
+		 C('$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock'),
+		 P('Двум шлюзам на одном компьютере нужны два файла-сокета: <font face="Mono">/control=&lt;файл&gt;</font> для '
+		   'шлюза, <font face="Mono">/socket=&lt;файл&gt;</font> для mbus-ctl.')],
 		[H1('Глава 5.  Псевдоустройство меток времени'),
 		 P('Шлюз умеет отвечать <i>сам</i> — не трогая линию — на запрос чтения, посланный на '
 		   'специальный адрес ведомого. Ответ — текущее время машины, на которой работает шлюз. '
@@ -1357,6 +1462,24 @@ def s_pack_ru ():
 			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),
 			('DEVLOST', 'E', 'Последовательный порт пропал (выдернут USB-адаптер); он закрыт и открывается снова раз в секунду, запросы пока получают исключение 10.'),
 			('DEVABSENT', 'W', 'При старте последовательный порт не открылся; TCP-порт всё равно работает, порт открывается раз в секунду.'),
+			('CTLREADY', 'S', 'Канал управления для mbus-ctl открыт; показан файл-сокет.'),
+			('CTLOFF', 'I', 'Канал управления выключен опцией /control=NONE; mbus-ctl до этого шлюза не достучится.'),
+			('CTLBUSY', 'W', 'Этим файлом-сокетом уже пользуется другой работающий шлюз; этот работает без канала управления. Дайте каждому шлюзу свой /control=&lt;файл&gt;.'),
+			('CTLERR', 'W', 'Файл-сокет не создаётся (2 — нет каталога, 13 — нет прав, 88 — там не сокет); шлюз работает без канала управления.'),
+			('CTLSYSWRN', 'W', 'Системный вызов канала управления не удался; шлюз работает дальше.'),
+			('CTLRESET', 'I', 'Оператор отключил этого клиента (mbus-ctl reset connection). Ничего делать не нужно.'),
+			('CTLRESTART', 'I', 'Оператор попросил перезапуск, файл настроек хороший; шлюз перезапускается.'),
+			('CTLCHKFAIL', 'E', 'restart gateway отклонён: в файле настроек ошибки (mbus-ctl их показывает). Шлюз работает дальше. Исправьте файл и повторите.'),
+			('CHECKOK', 'S', '/check: файл настроек хороший.'),
+			('RESTARTING', 'I', 'Шлюз запускает сам себя заново с той же командной строкой; дальше обычные строки запуска.'),
+			('EXECERR', 'F', 'Перезапуск не удался; шлюз останавливается. systemd и procd запустят его снова; вручную — запустите снова.'),
+			('CTLNOGW', 'E', 'mbus-ctl не достучался до шлюза. errno 2: не запущен или другой файл-сокет (/socket=); 13: нет прав — sudo; 111: не запущен, остался старый файл.'),
+			('CTLANSERR', 'E', 'Шлюз отклонил запрос; показана его причина.'),
+			('CTLBADANS', 'E', 'mbus-ctl не понял ответ — шлюз другой версии? Приведите строку.'),
+			('CTLWAIT', 'I', 'mbus-ctl ждёт перезапущенный шлюз.'),
+			('CTLBACK', 'S', 'Шлюз вернулся после перезапуска.'),
+			('CTLNOBACK', 'W', 'Шлюз не ответил после перезапуска вовремя; читайте его журнал.'),
+			('CTLRESETN', 'S', 'mbus-ctl reset connection отключил столько клиентов.'),
 		 ], [26*mm, 11*mm, 126*mm], a_mono_cols=(0,)),
 		 H2('7.3.  Если ничего не помогло'),
 		 P('Соберите и приложите к вопросу: 1) полный журнал запуска с /trace (от REVISNF до '

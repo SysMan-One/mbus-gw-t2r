@@ -182,7 +182,7 @@ What goes where:
 
 | What | Where |
 |------|-------|
-| `mbusgw-t2r` binary | `/opt/mbusgw-t2r/sbin/` |
+| `mbusgw-t2r` binary and the `mbus-ctl` utility | `/opt/mbusgw-t2r/sbin/` |
 | Configuration files | `/opt/mbusgw-t2r/etc/` |
 | Docs and reference copies of the configs | `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/` |
 
@@ -321,6 +321,8 @@ After `make install` both are also in `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/`.
 | logfile=\<fpsec\>	| Set a file name to accept logging output
 | logsize=\<number\>	| Limit size of log file.
 | settings=\<fspec\>	| Provide a rin-time configuration for network stuff and serial devices
+| control=\<path\>	| The control socket for `mbus-ctl` (default `/var/run/mbusgw-t2r.sock`); `NONE` switches the control channel off
+| check			| Check the settings file and exit: the exit status is 0 when it is good (`%T2R-S-CHECKOK`)
 
 
 ##### Settings options
@@ -386,6 +388,72 @@ blocks with CRC32 (no loss), four ports at once with `mbpoll`, 115200.
 
 Since X.00-14 the serial input is binary-clean in **both** modes (no CR/NL translation, no 8th bit
 stripping): before, an octet 0x0D could arrive as 0x0A on a port with the default settings.
+
+### 	Monitoring and control: mbus-ctl
+
+`mbus-ctl` is a small utility installed next to the gateway. It asks a **running** gateway what it
+is doing and gives it a few orders. It talks to the gateway over a local socket file
+(`/var/run/mbusgw-t2r.sock` by default, the `/CONTROL=` option of the gateway): nothing is opened to
+the network. Who may use it is decided by the rights of the socket file: `0660`, the owner and the
+group of the gateway (so `sudo mbus-ctl ...` for a gateway run by the system).
+
+| Command | What it does |
+|---------|--------------|
+| `mbus-ctl SHOW CONNECTIONS [/CONTINUOUS[=<sec>]]` | The TCP clients per listener: the address, the connect time, the requests, answers, errors and octets |
+| `mbus-ctl SHOW LINES` (or `SERIALS`) | The serial lines: the device, the chars, the timeouts, OPEN/ABSENT, how many clients use it |
+| `mbus-ctl SHOW GATEWAY` (or `GW`) | The revision, the PID, the uptime, the settings file, the listeners and their counters |
+| `mbus-ctl RESET CONNECTIONS <id \| a.b.c.d \| a.b.c.d:port>` | Disconnect TCP client(s); the id is the `Id` column of SHOW CONNECTIONS |
+| `mbus-ctl RESET CONNECTIONS /ALL` | Disconnect all the TCP clients |
+| `mbus-ctl RESTART GATEWAY [/WAIT=<sec> \| /NOWAIT]` | Check the settings file, then restart the gateway (it re-reads the settings, opens the listeners and the lines anew) |
+| `mbus-ctl HELP` | The list of the commands |
+
+Every command takes `/SOCKET=<path>` (or `--socket=<path>`) for a gateway with another `/CONTROL=`.
+The words may be shortened as in the DCL: `sho conn /cont`, `sho gw`, `sho ser`, `reset conn 7`,
+`restart gw`. `/CONTINUOUS` redraws the screen every 2 seconds (or `<sec>`) until `Ctrl-C`, and it
+waits for the gateway while it is not there (a restart).
+
+```
+$ sudo /opt/mbusgw-t2r/sbin/mbus-ctl sho conn
+Connections of the MODBUS gateway at 07-NOV-2026 00:07:44
+
+Listener #0  127.0.0.1:45459  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s), accepted 2, rejected 0
+      Id   Sd  Client                 Connected             Duration    Requests   Answers  Errors    Bytes in   Bytes out
+       1    8  127.0.0.1:44770        07-NOV-2026 00:07:44  00:00:00           7         7       0          84          91
+       2    9  127.0.0.1:44772        07-NOV-2026 00:07:44  00:00:00           3         3       0          36          33
+
+Listener #1  127.0.0.1:39779  RAW -> /dev/ttyUSB1  UP, 1 of 1 connection(s), accepted 1, rejected 0
+      Id   Sd  Client                 Connected             Duration    Requests   Answers  Errors     To line   From line
+       3   10  127.0.0.1:57778        07-NOV-2026 00:07:44  00:00:00           -         -       -           5           5
+
+Total: 3 connection(s)
+```
+
+`Sd` is the `[#n]` of the log lines of that client. `Errors` counts the answers with a MODBUS
+exception and the requests which broke the connection.
+
+**RESTART GATEWAY** is safe against a typo: first the gateway runs `mbusgw-t2r /settings=<file> /check`
+(a separate process, the running gateway is not touched); if the file is bad, the restart is refused,
+`mbus-ctl` shows the error lines and the gateway goes on as it is (`%T2R-E-CTLCHKFAIL`). If the file
+is good, the gateway answers, lets the clients go (up to 10 s), closes the listeners and the lines
+and starts **itself** again with the same command line - the same PID, so systemd and procd do not
+even notice. The clients just reconnect. `mbus-ctl` waits until the gateway answers again
+(`%T2R-S-CTLBACK`). `systemctl reload mbusgw-t2r` does the same. The restart runs the program file
+which is running now: after a package upgrade restart the service instead (the .deb does it itself).
+
+The requests are plain text lines, so the gateway can be asked by hand as well - one request per
+connection, the answer ends with `OK` or `ERROR <reason>`:
+
+```
+$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock
+LISTENER lsn=0 bind=0.0.0.0:502 mode=MODBUS target=/dev/ttyUSB0 state=UP connlm=8 idletmo=60 sessions=1 accepted=5 rejected=0
+CONN id=5 sd=8 lsn=0 mode=MODBUS peer=10.0.0.7:50122 since=1762463264 reset=0 req=120 ans=120 err=0 rx=1440 tx=1320
+OK
+```
+
+The requests: `SHOW GATEWAY`, `SHOW LINES`, `SHOW CONNECTIONS`, `RESET CONNECTIONS <id|addr|addr:port|ALL>`,
+`RESTART GATEWAY`, `HELP` (full words, any case). Several gateways on one host: give each its own
+`/CONTROL=<path>`; a second gateway on a busy path works without the control channel
+(`%T2R-W-CTLBUSY`) and never takes the socket of the first one.
 
 ## Coding style
 
