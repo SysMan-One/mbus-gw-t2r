@@ -408,7 +408,7 @@ group of the gateway (so `sudo mbus-ctl ...` for a gateway run by the system).
 | `mbus-ctl HELP` | The list of the commands |
 
 Every command takes `/SOCKET=<path>` (or `--socket=<path>`) for a gateway with another `/CONTROL=`.
-The words may be shortened as in the DCL: `sho conn /cont`, `sho gw`, `sho ser`, `reset conn 7`,
+The words may be shortened: `sho conn /cont`, `sho gw`, `sho ser`, `reset conn 7`,
 `restart gw`. `/CONTINUOUS` redraws the screen every 2 seconds (or `<sec>`) until `Ctrl-C`, and it
 waits for the gateway while it is not there (a restart).
 
@@ -468,7 +468,7 @@ The requests: `SHOW GATEWAY`, `SHOW LINES`, `SHOW CONNECTIONS`, `RESET CONNECTIO
 
 ## Coding style
 
-The source is written in the OpenVMS C style (the "VMS style"). A patch is expected to follow it:
+The source follows one coding style, and a patch is expected to follow it too:
 
  - **Layout:** Whitesmiths braces (a brace on its own line, indented together with the body; the
    braces of a routine body are not indented). Only tabs (8 columns), no spaces. Lines up to 192 columns.
@@ -476,9 +476,9 @@ The source is written in the OpenVMS C style (the "VMS style"). A patch is expec
    masks, `v_` bit fields. Variables are declared at the top of the block, grouped by type
    (`stdint.h` types).
  - **Names:** `$` separates the words of macros and constants (`T2R$K_BAUD_MAX`, `T2R$K_SETTLE_MSEC`).
-   A structure is declared with the `_t` tag suffix and gets a VMS name.
+   A structure is declared with the `_t` tag suffix.
  - **Every file** starts with `__MODULE__`, `__IDENT__` and `__REV__` (`X.00-14ECO02` is
-   `00.14.02`), then a VMS-style header: the facility, the abstract, the modification history, and
+   `00.14.02`), then a header: the facility, the abstract, the modification history, and
    for every routine the inputs, outputs, implicit inputs and outputs, and the return value.
  - **Messages** go only through the message macros of the StarLet library (`$LOG_FAO`,
    `$PUTMSG_FAO` and the project wrapper over them) with the codes of the message catalogue, never
