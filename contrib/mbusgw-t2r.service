@@ -11,7 +11,7 @@
 #
 #	CREATION DATE: 28-OCT-2026
 #
-#	06-NOV-2026	CLD	X.01-01: ExecReload= by mbus-ctl RESTART GATEWAY.
+#	06-NOV-2026	CLD	V.01-01: ExecReload= by mbus-ctl RESTART GATEWAY.
 #--
 [Unit]
 Description=MODBUS TCP to RTU gateway (mbusgw-t2r)

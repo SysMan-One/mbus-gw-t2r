@@ -1,5 +1,5 @@
 #define	__MODULE__	"T2R-CTL"
-#define	__IDENT__	"X.01-01"
+#define	__IDENT__	"V.01-01"
 #define	__REV__		"01.01.00"
 
 /*
@@ -45,7 +45,7 @@
 **
 **  MODIFICATION HISTORY:
 **
-**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - Initial revision.
+**	06-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - Initial revision.
 **
 **--
 */

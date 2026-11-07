@@ -19,7 +19,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # MODIFICATION HISTORY:
-#	06-NOV-2026	CLD	X.01-01: Initial revision.
+#	06-NOV-2026	CLD	V.01-01: Initial revision.
 #
 import argparse, os, pty, re, select, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, threading, time, tty
 

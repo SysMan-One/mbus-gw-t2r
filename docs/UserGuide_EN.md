@@ -245,8 +245,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.0.0-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.0.0-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.1.0-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.1.0-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -265,8 +265,8 @@ serial adapter needs its kernel module: `kmod-usb-serial-ftdi`, `kmod-usb-serial
 
 ### 4.3. Watching and controlling a running gateway: mbus-ctl
 
-`mbus-ctl` is a small program next to the gateway (`/opt/mbusgw-t2r/sbin/mbus-ctl`, on OpenWrt
-`/usr/sbin/mbus-ctl`). It asks the running gateway what it is doing, and it can disconnect a
+`mbus-ctl` is a small program next to the gateway (`/opt/mbusgw-t2r/sbin/mbus-ctl`; the .deb and OpenWrt
+packages put it into PATH as `/usr/sbin/mbus-ctl`). It asks the running gateway what it is doing, and it can disconnect a
 client or restart the gateway. It talks to the gateway through a socket **file** on the same
 computer, `/var/run/mbusgw-t2r.sock`. Nothing is opened to the network. Only root and the group of
 the gateway may use the file (rights `0660`), so type `sudo` in front of it.

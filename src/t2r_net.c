@@ -1,5 +1,5 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"X.01-01"
+#define	__IDENT__	"V.01-01"
 #define	__REV__		"01.01.00"
 
 /*
@@ -81,7 +81,7 @@
 **				RAWKICK) or is rejected when <takeover> is 0 (RAWBUSY); the RAW sockets get
 **				the TCP keepalive (a dead client is dropped in ~1 minute).
 **
-**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The registry of the live sessions for the control channel
+**	06-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The registry of the live sessions for the control channel
 **				(T2R-CTL): s_net_sess_add()/s_net_sess_del(), t2r$net_sess_walk(),
 **				t2r$net_sess_count(); a session is registered before its thread starts and
 **				leaves the registry BEFORE close() of its socket (the same rule as .rawsess);

@@ -46,7 +46,7 @@
 #
 #	04-NOV-2026	CLD	V.01-00 (the first release): the version on the cover, the packages in the examples are 1.0.0.
 #
-#	06-NOV-2026	CLD	X.01-01: 4.3 mbus-ctl (watching and controlling a running gateway), the options /control
+#	06-NOV-2026	CLD	V.01-01: 4.3 mbus-ctl (watching and controlling a running gateway), the options /control
 #				and /check, the codes CTLREADY .. CTLRESETN (the version on the cover is not changed yet).
 #--
 import sys
@@ -78,7 +78,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'V.01-00'
+VERSION   = 'V.01-01'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -664,8 +664,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.0.0-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.0.0-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.1.0-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.1.0-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -679,7 +679,7 @@ def s_pack_en ():
 		   'by the chip of the adapter.'),
 		 H2('4.3.  Watching and Controlling a Running Gateway: mbus-ctl'),
 		 P('<font face="Mono">mbus-ctl</font> is a small program next to the gateway '
-		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>, on OpenWrt <font face="Mono">/usr/sbin/mbus-ctl</font>). '
+		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>; the .deb and OpenWrt packages put it into PATH as <font face="Mono">/usr/sbin/mbus-ctl</font>). '
 		   'It asks the running gateway what it is doing, and it can disconnect a client or restart the gateway. '
 		   'It talks to the gateway through a socket <b>file</b> on the same computer, '
 		   '<font face="Mono">/var/run/mbusgw-t2r.sock</font>. Nothing is opened to the network. Only root and the '
@@ -1214,8 +1214,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.0.0-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.0.0-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.1.0-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.1.0-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1228,7 +1228,7 @@ def s_pack_ru ():
 		   'по микросхеме адаптера.'),
 		 H2('4.3.  Как смотреть за шлюзом и управлять им: mbus-ctl'),
 		 P('<font face="Mono">mbus-ctl</font> — маленькая программа рядом со шлюзом '
-		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>, на OpenWrt <font face="Mono">/usr/sbin/mbus-ctl</font>). '
+		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>; пакеты .deb и OpenWrt кладут её в PATH как <font face="Mono">/usr/sbin/mbus-ctl</font>). '
 		   'Она спрашивает работающий шлюз, что он делает, а ещё умеет отключить клиента или перезапустить шлюз. '
 		   'Говорит она со шлюзом через <b>файл</b>-сокет на том же компьютере, '
 		   '<font face="Mono">/var/run/mbusgw-t2r.sock</font>. В сеть ничего не открывается. Пользоваться файлом могут '

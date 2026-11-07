@@ -43,7 +43,7 @@
 **				T2R$K_RAW_* constants, T2R$_LISTENER got .mode, .takeover and the current
 **				raw session (.rawsess under .rawlock), t2r$tty_raw_relay().
 **
-**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The control channel (T2R-CTL, mbus-ctl): T2R$_SESSION got
+**	06-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The control channel (T2R-CTL, mbus-ctl): T2R$_SESSION got
 **				the registry links, a session id, the connect time and the counters
 **				(requests, answers, errors, octets), the .reset mark; T2R$_LISTENER got the
 **				.accepted/.rejected counters; added T2R$K_CTL_* constants, t2r$net_sess_walk(),

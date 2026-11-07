@@ -63,9 +63,11 @@
 #				architecture of the package (mipsel, mips64el) - CPack takes the one of
 #				the build host otherwise. The OpenWrt packages are built from openwrt/.
 #
-#	06-NOV-2026	CLD	X.01-01: The control utility mbus-ctl (src/mbus_ctl.c) is built and installed
+#	06-NOV-2026	CLD	V.01-01: The control utility mbus-ctl (src/mbus_ctl.c) is built and installed
 #				next to the gateway (sbin/), the gateway got the module src/t2r_ctl.c (the
 #				control channel); the .deb gets mbus-ctl by the same install() rule.
+#				The package (T2R_SYSTEMD_UNIT) adds the symlink /usr/sbin/mbus-ctl, so that the
+#				utility is in PATH.
 #
 #	USAGE (see README.md for the whole installation sequence):
 #		$ mkdir ./build && cd ./build
@@ -279,6 +281,14 @@ option(T2R_SYSTEMD_UNIT "Install the systemd unit (for the .deb package)" OFF)
 
 if (T2R_SYSTEMD_UNIT)
 	install (FILES contrib/mbusgw-t2r.service DESTINATION /usr/lib/systemd/system)
+
+	#  The package puts mbus-ctl into PATH: /usr/sbin/mbus-ctl -> <prefix>/sbin/mbus-ctl
+	#  (the gateway itself is started by the unit and stays under the prefix only)
+	execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink
+		"${CMAKE_INSTALL_FULL_SBINDIR}/${T2R_CTL_TARGET}"
+		"${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link")	# file (CREATE_LINK) is 3.14+
+	install (FILES "${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link"
+		DESTINATION /usr/sbin RENAME ${T2R_CTL_TARGET})
 endif ()
 
 #	'make uninstall': removes everything from install_manifest.txt; the configuration files

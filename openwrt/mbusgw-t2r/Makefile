@@ -19,7 +19,7 @@
 #
 #	MODIFICATION HISTORY:
 #
-#	06-NOV-2026	CLD	X.01-01: the package carries the control utility /usr/sbin/mbus-ctl too.
+#	06-NOV-2026	CLD	V.01-01: the package carries the control utility /usr/sbin/mbus-ctl too.
 #--
 
 include $(TOPDIR)/rules.mk

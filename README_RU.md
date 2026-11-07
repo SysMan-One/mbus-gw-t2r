@@ -180,7 +180,7 @@ $ sudo make install
 
 | Что | Куда |
 |-----|------|
-| Бинарник `mbusgw-t2r` и утилита `mbus-ctl` | `/opt/mbusgw-t2r/sbin/` |
+| Бинарник `mbusgw-t2r` и утилита `mbus-ctl` | `/opt/mbusgw-t2r/sbin/` (.deb добавляет симлинк `/usr/sbin/mbus-ctl`) |
 | Файлы конфигурации | `/opt/mbusgw-t2r/etc/` |
 | Документация и эталонные копии конфигов | `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/` |
 
@@ -227,7 +227,7 @@ glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ub
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.0.0-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.1.0-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -249,8 +249,8 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 сеть роутеру для установки не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_1.0.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.0.0-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.1.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.1.0-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 Пакет ставит шлюз в `/usr/sbin/mbusgw-t2r`, настройки — в `/etc/mbusgw-t2r/`, службу procd —
@@ -413,7 +413,7 @@ TCP-партнёра. Направьте партнёра на RAW-слушат�
 шлюз, пока его нет (перезапуск).
 
 ```
-$ sudo /opt/mbusgw-t2r/sbin/mbus-ctl sho conn
+$ sudo mbus-ctl sho conn			# .deb: /usr/sbin/mbus-ctl; 'make install': /opt/mbusgw-t2r/sbin/mbus-ctl
 Connections of the MODBUS gateway at 07-NOV-2026 00:07:44
 
 Listener #0  127.0.0.1:45459  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s), accepted 2, rejected 0

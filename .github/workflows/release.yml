@@ -42,7 +42,7 @@
 #				V is a product version, X (v<VERSION>) is a field test one; the leading zeros of
 #				the fields are dropped for the package version and the Release title.
 #
-#	06-NOV-2026	CLD	X.01-01: the installed packages (.deb, .ipk/.apk) must carry a working mbus-ctl.
+#	06-NOV-2026	CLD	V.01-01: the installed packages (.deb, .ipk/.apk) must carry a working mbus-ctl.
 #--
 
 name: release

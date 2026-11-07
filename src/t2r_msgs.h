@@ -57,7 +57,7 @@
 **				is DEVLOST now); never released, no code is shifted in a released catalogue.
 **				DEVABSENT names what the RAW clients get (a disconnect) - the text only.
 **
-**	06-NOV-2026	CLD	X.01-01 / REV: 01.01.00 - The control channel and the mbus-ctl utility: added CTLREADY,
+**	06-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The control channel and the mbus-ctl utility: added CTLREADY,
 **				CTLOFF, CTLBUSY, CTLERR, CTLSYSWRN, CTLRESET, CTLRESTART, CTLCHKFAIL, CHECKOK,
 **				RESTARTING, EXECERR (the gateway) and CTLNOGW, CTLANSERR, CTLBADANS, CTLWAIT,
 **				CTLBACK, CTLNOBACK, CTLRESETN (mbus-ctl, it shares the catalogue).
