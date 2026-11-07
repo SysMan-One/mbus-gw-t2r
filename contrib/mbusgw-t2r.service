@@ -7,11 +7,12 @@
 #		$ sudo systemctl edit mbusgw-t2r
 #
 #	The control utility talks to the gateway over /var/run/mbusgw-t2r.sock:
-#		$ sudo /opt/mbusgw-t2r/sbin/mbus-ctl SHOW CONNECTIONS
+#		$ sudo mbus-ctl SHOW CONNECTIONS
 #
 #	CREATION DATE: 28-OCT-2026
 #
-#	06-NOV-2026	CLD	V.01-01: ExecReload= by mbus-ctl RESTART GATEWAY.
+#	06-NOV-2026	CLD	V.01-01: ExecReload= by mbus-ctl RESTART GATEWAY; it waits until the gateway
+#				is back (up to /WAIT=30 s): 'systemctl reload' returns when it is done (RRL).
 #--
 [Unit]
 Description=MODBUS TCP to RTU gateway (mbusgw-t2r)
@@ -22,8 +23,9 @@ After=network.target
 Type=simple
 ExecStart=/opt/mbusgw-t2r/sbin/mbusgw-t2r --settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 Restart=on-failure
-# 'systemctl reload': the gateway checks its settings and restarts itself (the same PID), see mbus-ctl
-ExecReload=/opt/mbusgw-t2r/sbin/mbus-ctl RESTART GATEWAY /NOWAIT
+# 'systemctl reload': the gateway checks its settings and restarts itself (the same PID), see mbus-ctl;
+# the reload ends when the gateway is up again (or the settings are refused - the old ones stay)
+ExecReload=/opt/mbusgw-t2r/sbin/mbus-ctl RESTART GATEWAY
 RestartSec=5
 
 [Install]
