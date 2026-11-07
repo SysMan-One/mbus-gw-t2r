@@ -440,15 +440,25 @@ Total: 3 connection(s)
 (`%T2R-S-CTLBACK`). `systemctl reload mbusgw-t2r` делает то же самое. Перезапуск запускает тот файл
 программы, который работает сейчас: после обновления пакета перезапускайте службу (.deb делает это сам).
 
-Запросы — обычные текстовые строки, поэтому шлюз можно спросить и руками: один запрос на
-соединение, ответ кончается строкой `OK` или `ERROR <причина>`:
+Канал управления говорит на маленьком двоичном протоколе — StarLet AVProto TLV; текстового вида у
+него нет, на текстовую строку шлюз не отвечает. Один запрос на соединение: клиент шлёт один PDU,
+шлюз отвечает одним PDU и закрывает соединение:
 
 ```
-$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock
-LISTENER lsn=0 bind=0.0.0.0:502 mode=MODBUS target=/dev/ttyUSB0 state=UP connlm=8 idletmo=60 sessions=1 accepted=5 rejected=0
-CONN id=5 sd=8 lsn=0 mode=MODBUS peer=10.0.0.7:50122 since=1762463264 reset=0 req=120 ans=120 err=0 rx=1440 tx=1320
-OK
+PDU     = HEADER TLV TLV ...
+HEADER  = magic[8] "MBUSCTL"  u_len  u_csr  u_seq          20 октетов, числа в сетевом порядке
+TLV     = [type:4 | tag:12]   len    value                 числа WORD/LONGWORD/QWORD, тексты BBLOCK
+
+запрос:   u_csr = команда: 1 SHOW GATEWAY, 2 SHOW LINES, 3 SHOW CONNECTIONS,
+                  4 RESET CONNECTIONS (ALL | ID | ADDR [PORT]), 5 RESTART GATEWAY
+ответ:    u_csr = статус (младший бит установлен — успех), тот же u_seq, записи:
+          REC=LISTENER LSN ADDR PORT MODE TARGET STATE CONNLM IDLETMO SESSIONS ACCEPTED REJECTED
+          REC=CONN     ID SD LSN MODE ADDR PORT SINCE RESET NREQ NANS NERR NRX NTX
+          ...          REASON — почему запрос не выполнен
 ```
+
+Коды команд и тегов — в `src/t2r_ctlproto.h`, клиент — `mbus-ctl` (`src/mbus_ctl.c`);
+`tests/ctl_test.py` говорит со шлюзом из Python через `struct` — короткий пример другого клиента.
 
 Запросы: `SHOW GATEWAY`, `SHOW LINES`, `SHOW CONNECTIONS`, `RESET CONNECTIONS <id|адрес|адрес:порт|ALL>`,
 `RESTART GATEWAY`, `HELP` (полные слова, регистр любой). Несколько шлюзов на одной машине: дайте

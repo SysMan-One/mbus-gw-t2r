@@ -49,6 +49,9 @@
 **				.accepted/.rejected counters; added T2R$K_CTL_* constants, t2r$net_sess_walk(),
 **				t2r$ctl_start(), t2r$ctl_stop().
 **
+**	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - T2R$K_CTL_LINESZ is gone: the control channel speaks
+**				AVProto TLV (src/t2r_ctlproto.h).
+**
 **--
 */
 
@@ -122,13 +125,12 @@ enum {
 									   of the FTDI latency_timer plus a margin */
 
 /*
- * The control channel (T2R-CTL): a local AF_UNIX socket, one text request line per connection,
- * see src/t2r_ctl.c and the mbus-ctl utility.
+ * The control channel (T2R-CTL): a local AF_UNIX socket, one AVProto TLV request per connection,
+ * see src/t2r_ctlproto.h (the protocol), src/t2r_ctl.c and the mbus-ctl utility.
  */
 #define		T2R$K_CTL_SOCK		"/var/run/mbusgw-t2r.sock"	/* The default path: /CONTROL=<path> or NONE	*/
 #define		T2R$K_CTL_MODE		0660				/* Socket rights: the owner and the group only	*/
-#define		T2R$K_CTL_LINESZ	256				/* The longest request line			*/
-#define		T2R$K_CTL_TMO_MSEC	5000				/* A client must send its line in this time	*/
+#define		T2R$K_CTL_TMO_MSEC	5000				/* A client must send its request in this time	*/
 #define		T2R$K_CTL_POLL_MSEC	1000				/* <g_exit_flag> check interval			*/
 #define		T2R$K_CTL_DRAIN_SEC	10				/* RESTART: wait the sessions to end at most	*/
 

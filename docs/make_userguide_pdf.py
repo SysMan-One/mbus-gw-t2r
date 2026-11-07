@@ -48,6 +48,9 @@
 #
 #	06-NOV-2026	CLD	V.01-01: 4.3 mbus-ctl (watching and controlling a running gateway), the options /control
 #				and /check, the codes CTLREADY .. CTLRESETN (the version on the cover is not changed yet).
+#
+#	07-NOV-2026	CLD	V.01-01: the control channel speaks AVProto TLV - no socat example any more;
+#				the codes CTLBADSEL and CTLCUT.
 #--
 import sys
 
@@ -713,8 +716,8 @@ def s_pack_en ():
 		   'PID stays the same: systemd and procd see nothing. mbus-ctl waits until the gateway answers again '
 		   '(CTLBACK), in 3--15 seconds. With systemd, <font face="Mono">systemctl reload mbusgw-t2r</font> does the same. '
 		   'After an upgrade of the package use <font face="Mono">systemctl restart</font>.'),
-		 P('The gateway understands plain text lines, so you can also ask it by hand:'),
-		 C('$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock'),
+		 P('The gateway and mbus-ctl talk a small binary protocol (TLV records, see README.md). You cannot type '
+		   'to the gateway by hand: always use mbus-ctl.'),
 		 P('Two gateways on one computer need two socket files: <font face="Mono">/control=&lt;file&gt;</font> for the '
 		   'gateway, <font face="Mono">/socket=&lt;file&gt;</font> for mbus-ctl.')],
 		# --- Chapter 5 ---
@@ -939,6 +942,8 @@ def s_pack_en ():
 			('CTLBACK', 'S', 'The gateway is back after the restart.'),
 			('CTLNOBACK', 'W', 'The gateway has not answered after the restart in time; read its log.'),
 			('CTLRESETN', 'S', 'mbus-ctl reset connection has disconnected this many clients.'),
+			('CTLBADSEL', 'E', 'mbus-ctl reset connection needs a connection: an Id from sho conn, a.b.c.d, a.b.c.d:port or /all.'),
+			('CTLCUT', 'W', 'The answer did not fit into 64 KB (many hundreds of clients): the table is not full.'),
 		 ], [26*mm, 10*mm, 127*mm], a_mono_cols=(0,)),
 		 H2('7.3.  If Nothing Helps'),
 		 P('Collect and attach to your question: 1) the full start-up log with /trace (from '
@@ -1262,8 +1267,8 @@ def s_pack_ru ():
 		   'прежним: systemd и procd ничего не замечают. mbus-ctl ждёт, пока шлюз снова ответит (CTLBACK), 3–15 секунд. '
 		   'Под systemd то же делает <font face="Mono">systemctl reload mbusgw-t2r</font>. После обновления пакета '
 		   'используйте <font face="Mono">systemctl restart</font>.'),
-		 P('Шлюз понимает обычные текстовые строки, поэтому его можно спросить и руками:'),
-		 C('$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock'),
+		 P('Шлюз и mbus-ctl говорят на маленьком двоичном протоколе (записи TLV, см. README_RU.md). Руками со '
+		   'шлюзом не поговорить: пользуйтесь mbus-ctl.'),
 		 P('Двум шлюзам на одном компьютере нужны два файла-сокета: <font face="Mono">/control=&lt;файл&gt;</font> для '
 		   'шлюза, <font face="Mono">/socket=&lt;файл&gt;</font> для mbus-ctl.')],
 		[H1('Глава 5.  Псевдоустройство меток времени'),
@@ -1480,6 +1485,8 @@ def s_pack_ru ():
 			('CTLBACK', 'S', 'Шлюз вернулся после перезапуска.'),
 			('CTLNOBACK', 'W', 'Шлюз не ответил после перезапуска вовремя; читайте его журнал.'),
 			('CTLRESETN', 'S', 'mbus-ctl reset connection отключил столько клиентов.'),
+			('CTLBADSEL', 'E', 'mbus-ctl reset connection нужно указать соединение: Id из sho conn, a.b.c.d, a.b.c.d:порт или /all.'),
+			('CTLCUT', 'W', 'Ответ не поместился в 64 КБ (многие сотни клиентов): таблица неполная.'),
 		 ], [26*mm, 11*mm, 126*mm], a_mono_cols=(0,)),
 		 H2('7.3.  Если ничего не помогло'),
 		 P('Соберите и приложите к вопросу: 1) полный журнал запуска с /trace (от REVISNF до '

@@ -61,6 +61,10 @@
 **				CTLOFF, CTLBUSY, CTLERR, CTLSYSWRN, CTLRESET, CTLRESTART, CTLCHKFAIL, CHECKOK,
 **				RESTARTING, EXECERR (the gateway) and CTLNOGW, CTLANSERR, CTLBADANS, CTLWAIT,
 **				CTLBACK, CTLNOBACK, CTLRESETN (mbus-ctl, it shares the catalogue).
+**
+**	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The control channel speaks AVProto TLV: added CTLBADSEL
+**				(mbus-ctl checks the connection selector itself now) and CTLCUT; not released yet,
+**				so the new codes are just appended.
 **--
 */
 
@@ -197,6 +201,8 @@ $DEF_MSG(T2R, INFO,	CTLWAIT,			"The gateway is restarting, waiting for it at mos
 $DEF_MSG(T2R, SUCCESS,	CTLBACK,			"The gateway has restarted in !UL second(s): pid !UL, !UL listener(s) up") \
 $DEF_MSG(T2R, WARN,	CTLNOBACK,		"The gateway has not come back in !UL seconds --- see its log") \
 $DEF_MSG(T2R, SUCCESS,	CTLRESETN,		"!UL connection(s) reset") \
+$DEF_MSG(T2R, ERROR,	CTLBADSEL,		"Bad connection <!AZ> --- give an id, a.b.c.d, a.b.c.d:port or /ALL (see SHOW CONNECTIONS)") \
+$DEF_MSG(T2R, WARN,	CTLCUT,			"The answer of the gateway is cut at !UL octets --- not all the records are shown") \
 
 
 

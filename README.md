@@ -440,15 +440,26 @@ even notice. The clients just reconnect. `mbus-ctl` waits until the gateway answ
 (`%T2R-S-CTLBACK`). `systemctl reload mbusgw-t2r` does the same. The restart runs the program file
 which is running now: after a package upgrade restart the service instead (the .deb does it itself).
 
-The requests are plain text lines, so the gateway can be asked by hand as well - one request per
-connection, the answer ends with `OK` or `ERROR <reason>`:
+The control channel speaks a small binary protocol, the StarLet AVProto TLV - there is no text form
+of it, the gateway does not answer a text line. One request per connection: the client sends one
+PDU, the gateway sends one PDU back and closes the connection:
 
 ```
-$ echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock
-LISTENER lsn=0 bind=0.0.0.0:502 mode=MODBUS target=/dev/ttyUSB0 state=UP connlm=8 idletmo=60 sessions=1 accepted=5 rejected=0
-CONN id=5 sd=8 lsn=0 mode=MODBUS peer=10.0.0.7:50122 since=1762463264 reset=0 req=120 ans=120 err=0 rx=1440 tx=1320
-OK
+PDU     = HEADER TLV TLV ...
+HEADER  = magic[8] "MBUSCTL"  u_len  u_csr  u_seq          20 octets, numbers in network byte order
+TLV     = [type:4 | tag:12]   len    value                 WORD/LONGWORD/QWORD numbers, BBLOCK texts
+
+request:  u_csr = the command: 1 SHOW GATEWAY, 2 SHOW LINES, 3 SHOW CONNECTIONS,
+                  4 RESET CONNECTIONS (ALL | ID | ADDR [PORT]), 5 RESTART GATEWAY
+answer:   u_csr = the status (the low bit set - success), the same u_seq, the records:
+          REC=LISTENER LSN ADDR PORT MODE TARGET STATE CONNLM IDLETMO SESSIONS ACCEPTED REJECTED
+          REC=CONN     ID SD LSN MODE ADDR PORT SINCE RESET NREQ NANS NERR NRX NTX
+          ...          REASON - why a request has failed
 ```
+
+The command codes and the tags are in `src/t2r_ctlproto.h`, `mbus-ctl` (`src/mbus_ctl.c`) is the
+client; `tests/ctl_test.py` talks to the gateway from Python with `struct` - a short example of
+another client.
 
 The requests: `SHOW GATEWAY`, `SHOW LINES`, `SHOW CONNECTIONS`, `RESET CONNECTIONS <id|addr|addr:port|ALL>`,
 `RESTART GATEWAY`, `HELP` (full words, any case). Several gateways on one host: give each its own

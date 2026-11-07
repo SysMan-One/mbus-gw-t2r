@@ -69,6 +69,9 @@
 #				The package (T2R_SYSTEMD_UNIT) adds the symlink /usr/sbin/mbus-ctl, so that the
 #				utility is in PATH.
 #
+#	07-NOV-2026	CLD	V.01-01: src/t2r_ctlproto.h - the AVProto TLV protocol of the control channel,
+#				shared by the gateway and mbus-ctl.
+#
 #	USAGE (see README.md for the whole installation sequence):
 #		$ mkdir ./build && cd ./build
 #		$ cmake ../ -DCMAKE_BUILD_TYPE=Release
@@ -212,6 +215,7 @@ set ( T2R_SOURCES                                               # TOOTOO Router
 	src/t2r_modbus.h
 	src/t2r_modbus.c
 	src/t2r_ctl.c
+	src/t2r_ctlproto.h
 )
 
 
@@ -220,11 +224,12 @@ target_link_libraries( ${T2R_TARGET} StarLet::starlet pthread rt ${T2R_LIBCONFIG
 
 #
 #   mbus-ctl - the monitoring and control utility: talks to the gateway over its local control socket
-#   (see src/t2r_ctl.c); it shares the message catalogue (src/t2r_msgs.h) with the gateway.
+#   (see src/t2r_ctl.c, the protocol - src/t2r_ctlproto.h); it shares the message catalogue (src/t2r_msgs.h)
+#   with the gateway.
 #
 set ( T2R_CTL_TARGET    "mbus-ctl" )
 
-add_executable ( ${T2R_CTL_TARGET} src/mbus_ctl.c src/t2r_msgs.h src/t2r_defs.h)
+add_executable ( ${T2R_CTL_TARGET} src/mbus_ctl.c src/t2r_msgs.h src/t2r_defs.h src/t2r_ctlproto.h)
 target_link_libraries( ${T2R_CTL_TARGET} StarLet::starlet pthread)
 
 

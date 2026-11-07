@@ -5,7 +5,9 @@
 #
 #   tests/ctl_test.py [--gw ./build-ctl/mbusgw-t2r] [--ctl ./build-ctl/mbus-ctl]
 #
-#   proto	- the bare socket protocol: HELP, SHOW GATEWAY/LINES/CONNECTIONS, an unknown request, the counters
+#   proto	- the bare socket protocol (AVProto TLV, src/t2r_ctlproto.h): SHOW GATEWAY/LINES/CONNECTIONS, the sequence
+#		  number, an unknown command code, a bad argument type, a wrong magic, a too long PDU and a text
+#		  line are not answered, the counters
 #   util	- mbus-ctl: the abbreviations (sho conn, sho gw, sho ser, sho lin), the tables, exit statuses
 #   cont	- mbus-ctl SHOW CONNECTIONS /CONTINUOUS=1 redraws until SIGINT, exits 0
 #   reset	- RESET CONNECTIONS by id, by address:port, by address, /ALL; the clients get a FIN, CTLRESET in the log
@@ -14,19 +16,20 @@
 #		  a broken settings file: RESTART is refused, the gateway goes on
 #   sock	- the socket rights 0660, a stale socket of a killed gateway is replaced, a second gateway on the same
 #		  socket goes on without the control channel (CTLBUSY) and does not steal it; /CONTROL=NONE
-#   socat	- the same requests by socat, if it is installed
 #
 # SPDX-License-Identifier: Apache-2.0
 #
 # MODIFICATION HISTORY:
 #	06-NOV-2026	CLD	V.01-01: Initial revision.
+#	07-NOV-2026	CLD	V.01-01: The control channel speaks AVProto TLV: request() builds and parses the PDUs,
+#				the socat test is gone (no text protocol), proto checks the PDU framing.
 #
 import argparse, os, pty, re, select, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, threading, time, tty
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--gw', default='./build-ctl/mbusgw-t2r')
 ap.add_argument('--ctl', default='./build-ctl/mbus-ctl')
-ap.add_argument('tests', nargs='*', default=['proto', 'util', 'cont', 'reset', 'raw', 'restart', 'sock', 'socat'])
+ap.add_argument('tests', nargs='*', default=['proto', 'util', 'cont', 'reset', 'raw', 'restart', 'sock'])
 a = ap.parse_args()
 GW, CTL = os.path.abspath(a.gw), os.path.abspath(a.ctl)
 TMP = tempfile.mkdtemp(prefix='t2r_ctl_')
@@ -146,12 +149,43 @@ class Gateway:
             self.p.wait()
 
 
-def request(path, line, timeout=15):
-    """One request: return (final line, [data lines])."""
+# The control protocol, see src/t2r_ctlproto.h: HEADER = magic[8] u_len u_csr u_seq, TLV = [type:4|id:12] len value
+MAGIC = b'MBUSCTL'
+HDR = struct.Struct('>8sIII')
+WORD, LONGWORD, QWORD, BBLOCK = 3, 4, 5, 0
+CMD = dict(SHOW_GATEWAY=1, SHOW_LINES=2, SHOW_CONNECTIONS=3, RESET_CONNECTIONS=4, RESTART_GATEWAY=5)
+REC = {1: 'GATEWAY', 2: 'LISTENER', 3: 'LINE', 4: 'CONN', 5: 'RESET', 6: 'CHECK'}
+STATE = ['DOWN', 'UP', 'CLOSED', 'ABSENT', 'OPEN']
+TAGS = {1: 'rec', 2: 'reason', 3: 'text', 4: 'count', 5: 'all', 6: 'cut',
+        16: 'ident', 17: 'rev', 18: 'arch', 19: 'pid', 20: 'started', 21: 'now', 22: 'settings', 23: 'control',
+        24: 'lines', 25: 'listeners', 26: 'up', 27: 'connections',
+        32: 'lsn', 33: 'addr', 34: 'port', 35: 'mode', 36: 'target', 37: 'state', 38: 'connlm', 39: 'idletmo',
+        40: 'sessions', 41: 'accepted', 42: 'rejected',
+        48: 'line', 49: 'device', 50: 'baud', 51: 'databits', 52: 'parity', 53: 'stopbits', 54: 'iotmo', 55: 'lategd',
+        56: 'rs485', 57: 'addts',
+        64: 'id', 65: 'sd', 66: 'since', 67: 'reset', 68: 'nreq', 69: 'nans', 70: 'nerr', 71: 'nrx', 72: 'ntx'}
+TAG = {v: k for k, v in TAGS.items()}
+FMT = {WORD: '>H', LONGWORD: '>I', QWORD: '>Q'}
+
+
+def tlv(name, typ, val):
+    v = val.encode() if isinstance(val, str) else val if typ == BBLOCK else struct.pack(FMT[typ], val)
+    return struct.pack('>HH', (typ << 12) | TAG[name], len(v)) + v
+
+
+def pdu(csr, *tlvs, seq=1, magic=MAGIC):
+    body = b''.join(tlvs)
+    return HDR.pack(magic, len(body), csr, seq) + body
+
+
+def exchange(path, data, timeout=15, shut=False):
+    """Send octets, return all the octets of the answer (b'' - closed without an answer)."""
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     s.connect(path)
-    s.sendall(line.encode() + b'\n')
+    s.sendall(data)
+    if shut:
+        s.shutdown(socket.SHUT_WR)
     d = b''
     while True:
         c = s.recv(65536)
@@ -159,12 +193,49 @@ def request(path, line, timeout=15):
             break
         d += c
     s.close()
-    ls = d.decode().splitlines()
-    return ls[-1], ls[:-1]
+    return d
 
 
-def kv(line):
-    return dict(w.split('=', 1) for w in line.split()[1:] if '=' in w)
+def parse(d):
+    """An answer PDU -> (status, seq, records [(type, {field: value})], {reason, count, cut})."""
+    magic, ln, csr, seq = HDR.unpack(d[:HDR.size])
+    assert magic == MAGIC.ljust(8, b'\0') and ln == len(d) - HDR.size, f'bad header {magic} {ln} {len(d)}'
+    recs, top, pos, body = [], {}, 0, d[HDR.size:]
+    while pos < len(body):
+        tag, vl = struct.unpack('>HH', body[pos:pos + 4])
+        typ, name, v = tag >> 12, TAGS.get(tag & 0xfff, tag & 0xfff), body[pos + 4:pos + 4 + vl]
+        pos += 4 + vl
+        v = v.decode(errors='replace') if typ == BBLOCK else struct.unpack(FMT[typ], v)[0]
+        if name == 'rec':
+            recs.append((REC.get(v, v), {}))
+        elif name in ('reason', 'count', 'cut') or not recs:
+            top[name] = v
+        else:
+            recs[-1][1][name] = v
+    return csr, seq, recs, top
+
+
+def request(path, cmd, *tlvs, seq=7, timeout=15):
+    """One request: return (status, [records], {top fields}); the sequence number must come back."""
+    csr, s, recs, top = parse(exchange(path, pdu(CMD[cmd], *tlvs, seq=seq), timeout))
+    assert s == seq, f'seq {s} != {seq}'
+    return csr, recs, top
+
+
+def recs_of(recs, typ):
+    return [f for t, f in recs if t == typ]
+
+
+def gwrec(gw):
+    """The GATEWAY record of SHOW GATEWAY."""
+    csr, recs, _ = request(gw.sock, 'SHOW_GATEWAY')
+    g = recs_of(recs, 'GATEWAY')
+    return g[0] if csr & 1 and g else {}
+
+
+def ip(f):
+    a = f.get('addr', 0)
+    return f'{a >> 24 & 255}.{a >> 16 & 255}.{a >> 8 & 255}.{a & 255}:{f.get("port")}'
 
 
 class Client:
@@ -233,34 +304,38 @@ def setup(name, raw=False, **kw):
 # ---------------------------------------------------------------------------------------------------------------------
 def t_proto():
     gw, ln, port, _, _ = setup('proto')
-    fin, data = request(gw.sock, 'HELP')
-    check('proto HELP', fin == 'OK' and len(data) == 6 and all(d.startswith('HELP ') for d in data), f'{len(data)} lines')
-    fin, data = request(gw.sock, 'show gateway')
-    g = kv(data[0]) if data else {}
-    check('proto SHOW GATEWAY (case-insensitive)', fin == 'OK' and data[0].startswith('GATEWAY ')
-          and g.get('pid') == str(gw.p.pid) and g.get('control') == gw.sock and g.get('up') == '1', data[0] if data else fin)
-    check('proto SHOW GATEWAY LISTENER', len(data) == 2 and kv(data[1]).get('bind') == f'127.0.0.1:{port}', data[-1])
-    fin, data = request(gw.sock, 'SHOW LINES')
-    check('proto SHOW LINES', fin == 'OK' and len(data) == 1 and kv(data[0]).get('dev') == ln.name
-          and kv(data[0]).get('state') == 'OPEN', data[0] if data else fin)
-    fin, _ = request(gw.sock, 'SHOW NOTHING')
-    check('proto unknown request', fin.startswith('ERROR'), fin)
-    fin, _ = request(gw.sock, 'SHOW CONN')
-    check('proto no abbreviations on the wire', fin.startswith('ERROR'), fin)
+    csr, recs, _ = request(gw.sock, 'SHOW_GATEWAY', seq=12345)
+    g = recs_of(recs, 'GATEWAY')
+    g = g[0] if g else {}
+    check('proto SHOW GATEWAY (status, seq echoed)', csr & 1 and g.get('pid') == gw.p.pid and g.get('control') == gw.sock
+          and g.get('up') == 1 and g.get('ident', '').startswith('V.'), str(recs[:1]))
+    lsn = recs_of(recs, 'LISTENER')
+    check('proto SHOW GATEWAY LISTENER', len(lsn) == 1 and ip(lsn[0]) == f'127.0.0.1:{port}' and STATE[lsn[0]['state']] == 'UP', str(lsn))
+    csr, recs, _ = request(gw.sock, 'SHOW_LINES')
+    lines = recs_of(recs, 'LINE')
+    check('proto SHOW LINES', csr & 1 and len(lines) == 1 and lines[0].get('device') == ln.name
+          and STATE[lines[0]['state']] == 'OPEN' and lines[0].get('baud') == 115200 and chr(lines[0].get('parity', 0)) == 'N', str(lines))
+    csr, s_, recs, top = parse(exchange(gw.sock, pdu(99, seq=5)))
+    check('proto unknown command code: a failure status and REASON', not csr & 1 and 'unknown' in top.get('reason', '') and s_ == 5, str(top))
+    csr, recs, top = request(gw.sock, 'RESET_CONNECTIONS', tlv('id', BBLOCK, '7'))
+    check('proto a bad argument type: refused', not csr & 1 and 'bad ID' in top.get('reason', ''), str(top))
+    check('proto wrong magic: not answered', exchange(gw.sock, pdu(1, magic=b'NOTCTL')) == b'')
+    check('proto too long PDU: not answered', exchange(gw.sock, HDR.pack(MAGIC, 5000, 1, 1)) == b'')
+    check('proto a text line is not answered', exchange(gw.sock, b'SHOW CONNECTIONS\n', shut=True) == b'')
 
     c1, c2 = Client(port), Client(port)
     for _ in range(5):
         c1.read(0, 2)
     c2.read(10, 1)
-    fin, data = request(gw.sock, 'SHOW CONNECTIONS')
-    conns = {int(kv(d)['peer'].split(':')[1]): kv(d) for d in data if d.startswith('CONN ')}
+    csr, recs, _ = request(gw.sock, 'SHOW_CONNECTIONS')
+    conns = {f['port']: f for f in recs_of(recs, 'CONN')}
     a1, a2 = conns.get(c1.port, {}), conns.get(c2.port, {})
     # A request: 12 octets; an answer of 2 registers: 7 + 1 + 1 + 4 = 13, of 1 register: 11
-    check('proto SHOW CONNECTIONS counters', fin == 'OK' and len(conns) == 2
-          and (a1.get('req'), a1.get('ans'), a1.get('err'), a1.get('rx'), a1.get('tx')) == ('5', '5', '0', '60', '65')
-          and (a2.get('req'), a2.get('rx'), a2.get('tx')) == ('1', '12', '11'), f'{a1} {a2}')
-    lsn = [kv(d) for d in data if d.startswith('LISTENER ')]
-    check('proto LISTENER accepted/sessions', len(lsn) == 1 and lsn[0]['sessions'] == '2' and lsn[0]['accepted'] == '2', str(lsn))
+    check('proto SHOW CONNECTIONS counters', csr & 1 and len(conns) == 2
+          and (a1.get('nreq'), a1.get('nans'), a1.get('nerr'), a1.get('nrx'), a1.get('ntx')) == (5, 5, 0, 60, 65)
+          and (a2.get('nreq'), a2.get('nrx'), a2.get('ntx')) == (1, 12, 11) and ip(a1) == f'127.0.0.1:{c1.port}', f'{a1} {a2}')
+    lsn = recs_of(recs, 'LISTENER')
+    check('proto LISTENER accepted/sessions', len(lsn) == 1 and lsn[0]['sessions'] == 2 and lsn[0]['accepted'] == 2, str(lsn))
     c1.close(); c2.close()
     gw.stop(); ln.close()
     check('proto socket removed at the exit', not os.path.exists(gw.sock))
@@ -324,8 +399,8 @@ def t_reset():
     cs = [Client(port) for _ in range(4)]
     for c in cs:
         c.read(0)
-    _, data = request(gw.sock, 'SHOW CONNECTIONS')
-    ids = {int(kv(d)['peer'].split(':')[1]): kv(d)['id'] for d in data if d.startswith('CONN ')}
+    _, recs, _ = request(gw.sock, 'SHOW_CONNECTIONS')
+    ids = {f['port']: str(f['id']) for f in recs_of(recs, 'CONN')}
     rc, out = ctl('reset', 'conn', ids[cs[0].port], '/socket=' + gw.sock)
     check('reset conn <id>', rc == 0 and '1 connection(s) reset' in out and cs[0].closed(), out)
     rc, out = ctl('rese', 'connection', f'127.0.0.1:{cs[1].port}', '/socket=' + gw.sock)
@@ -333,15 +408,17 @@ def t_reset():
     rc, out = ctl('reset', 'connect', '9999', '/socket=' + gw.sock)
     check('reset unknown id: ERROR, exit 1', rc == 1 and 'no connection matches' in out, out)
     rc, out = ctl('reset', 'conn', '/socket=' + gw.sock)
-    check('reset without a selector', rc == 1, out)
+    check('reset without a selector: CTLBADSEL', rc == 1 and 'CTLBADSEL' in out, out)
+    rc, out = ctl('reset', 'conn', '1.2.3', '/socket=' + gw.sock)
+    check('reset bad address: CTLBADSEL', rc == 1 and 'CTLBADSEL' in out, out)
     rc, out = ctl('reset', 'conn', '127.0.0.1', '/socket=' + gw.sock)
     check('reset conn <addr> (2 left)', rc == 0 and '2 connection(s) reset' in out and cs[2].closed() and cs[3].closed(), out)
     cs = [Client(port) for _ in range(3)]
     rc, out = ctl('reset', 'conn', '/all', '/socket=' + gw.sock)
     check('reset conn /all', rc == 0 and '3 connection(s) reset' in out and all(c.closed() for c in cs), out)
     time.sleep(0.5)
-    fin, data = request(gw.sock, 'SHOW CONNECTIONS')
-    check('reset: the registry is empty', not [d for d in data if d.startswith('CONN ')], str(data))
+    _, recs, _ = request(gw.sock, 'SHOW_CONNECTIONS')
+    check('reset: the registry is empty', not recs_of(recs, 'CONN'), str(recs))
     t = gw.text()
     check('reset: CTLRESET logged, no NETPOLLEV', t.count('CTLRESET') == 7 and 'NETPOLLEV' not in t,
           f'CTLRESET {t.count("CTLRESET")}, NETPOLLEV {t.count("NETPOLLEV")}')
@@ -359,12 +436,12 @@ def t_raw():
     while len(got) < 100:
         got += sk.recv(1000)
     time.sleep(0.2)
-    _, data = request(gw.sock, 'SHOW CONNECTIONS')
-    conn = [kv(d) for d in data if d.startswith('CONN ') and kv(d)['mode'] == 'RAW']
-    check('raw live counters', len(conn) == 1 and conn[0]['rx'] == '100' and conn[0]['tx'] == '100', str(conn))
+    _, recs, _ = request(gw.sock, 'SHOW_CONNECTIONS')
+    conn = [f for f in recs_of(recs, 'CONN') if f['mode'] == 1]
+    check('raw live counters', len(conn) == 1 and conn[0]['nrx'] == 100 and conn[0]['ntx'] == 100, str(conn))
     rc, out = ctl('sho', 'conn', '/socket=' + gw.sock)
     check('raw display', rc == 0 and 'RAW' in out and 'To line' in out, out)
-    rc, out = ctl('reset', 'conn', conn[0]['id'] if conn else '0', '/socket=' + gw.sock)
+    rc, out = ctl('reset', 'conn', str(conn[0]['id']) if conn else '0', '/socket=' + gw.sock)
     sk.settimeout(3)
     try:
         eof = sk.recv(1) == b''
@@ -377,17 +454,15 @@ def t_raw():
 
 def t_restart():
     gw, ln, port, _, _ = setup('restart')
-    _, data = request(gw.sock, 'SHOW GATEWAY')
-    started = kv(data[0])['started']
+    started = gwrec(gw)['started']
     time.sleep(1.1)						# A new start time must differ by a second at least
     c = Client(port)
     c.read(0)
     t0 = time.time()
     rc, out = ctl('restart', 'gw', '/socket=' + gw.sock)
     dt = time.time() - t0
-    _, data = request(gw.sock, 'SHOW GATEWAY')
-    g = kv(data[0])
-    check('restart gw: back, the same pid, a new start time', rc == 0 and 'CTLBACK' in out and g['pid'] == str(gw.p.pid)
+    g = gwrec(gw)
+    check('restart gw: back, the same pid, a new start time', rc == 0 and 'CTLBACK' in out and g['pid'] == gw.p.pid
           and g['started'] != started and gw.p.poll() is None, f'{dt:.1f} s, {out.strip()}')
     check('restart: the old client is dropped', c.closed(1))
     c = Client(port)
@@ -401,8 +476,7 @@ def t_restart():
     rc, out = ctl('restart', 'gateway', '/socket=' + gw.sock)
     check('restart with broken settings: refused, exit 1', rc == 1 and 'check has failed' in out and 'CFGPARSE' in out, out)
     time.sleep(4)
-    fin, data = request(gw.sock, 'SHOW GATEWAY')
-    check('restart refused: the gateway goes on', fin == 'OK' and gw.p.poll() is None and kv(data[0])['pid'] == str(gw.p.pid))
+    check('restart refused: the gateway goes on', gw.p.poll() is None and gwrec(gw)['pid'] == gw.p.pid)
     gw.write_conf(good)
     rc, out = ctl('restart', 'gw', '/nowait', '/socket=' + gw.sock)
     check('restart /nowait', rc == 0 and 'CTLWAIT' not in out, out)
@@ -410,11 +484,10 @@ def t_restart():
     ok = False
     for _ in range(40):
         try:
-            fin, data = request(gw.sock, 'SHOW GATEWAY')
-            if fin == 'OK' and kv(data[0])['up'] == '1':
+            if gwrec(gw).get('up') == 1:
                 ok = True
                 break
-        except OSError:
+        except (OSError, AssertionError, struct.error):
             pass
         time.sleep(0.5)
     check('restart /nowait: back', ok and gw.p.poll() is None)
@@ -428,16 +501,14 @@ def t_sock():
     # A second gateway on the same control socket (other ports, other line): CTLBUSY, the first one keeps it
     ln2 = Line(); rtu_slave(ln2)
     gw2 = Gateway('sock2', [(ln2.name, free_port())], control=gw.sock)
-    _, data = request(gw.sock, 'SHOW GATEWAY')
     check('sock second gateway: CTLBUSY, the socket stays with the first', 'CTLBUSY' in gw2.text() and gw2.p.poll() is None
-          and kv(data[0])['pid'] == str(gw.p.pid), gw2.text()[-300:])
+          and gwrec(gw)['pid'] == gw.p.pid, gw2.text()[-300:])
     gw2.stop(); ln2.close()
     # A killed gateway leaves its socket: a new one replaces it
     gw.stop(signal.SIGKILL)
     check('sock kill -9 leaves the socket', os.path.exists(gw.sock))
     gw3 = Gateway('sock3', [(ln.name, port)], control=gw.sock)
-    _, data = request(gw.sock, 'SHOW GATEWAY')
-    check('sock stale socket is replaced', 'CTLREADY' in gw3.text() and kv(data[0])['pid'] == str(gw3.p.pid))
+    check('sock stale socket is replaced', 'CTLREADY' in gw3.text() and gwrec(gw3)['pid'] == gw3.p.pid)
     gw3.stop()
     # A regular file at the path is never removed
     reg = os.path.join(TMP, 'regular.file')
@@ -450,15 +521,6 @@ def t_sock():
     check('sock /CONTROL=NONE', 'CTLOFF' in gw5.text() and gw5.p.poll() is None)
     gw5.stop()
     ln.close()
-
-
-def t_socat():
-    if not shutil.which('socat'):
-        return check('socat (not installed, skipped)', True)
-    gw, ln, port, _, _ = setup('socat')
-    r = subprocess.run(f'echo "SHOW CONNECTIONS" | socat - UNIX-CONNECT:{gw.sock}', shell=True, capture_output=True, text=True, timeout=10)
-    check('socat SHOW CONNECTIONS', r.returncode == 0 and r.stdout.rstrip().endswith('OK') and 'LISTENER ' in r.stdout, r.stdout)
-    gw.stop(); ln.close()
 
 
 for t in a.tests:

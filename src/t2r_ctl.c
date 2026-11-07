@@ -13,24 +13,22 @@
 **	default T2R$K_CTL_SOCK, rights T2R$K_CTL_MODE), served by one thread of its own. Nothing is
 **	opened to the network: who may control the gateway is decided by the rights of the socket file.
 **
-**	The protocol is plain text, one request per connection, so it can be tried by hand:
+**	The protocol is the StarLet AVProto TLV, one request per connection; the PDU, the command codes
+**	and the tags are described in src/t2r_ctlproto.h, the client is mbus-ctl (src/mbus_ctl.c):
 **
-**		$ echo "SHOW CONNECTIONS" | socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock
+**	    the client sends ONE PDU:	magic "MBUSCTL", u_csr = T2R$K_CTL_CMD_*, the arguments as TLVs
+**	    the gateway answers:	ONE PDU: u_csr = the status (the low bit - success), the same u_seq,
+**					the data as the records (REC=GATEWAY/LISTENER/LINE/CONN/RESET/CHECK)
+**					and REASON on a failure; then closes the connection.
 **
-**	    the client sends ONE line:	<VERB> <OBJECT> [<argument>]		(case-insensitive)
-**	    the gateway answers:	zero or more data lines "<TAG> key=value key=value ..."
-**					and one final line: "OK [text]" or "ERROR <text>",
-**					then closes the connection.
+**	A PDU with a wrong magic or too long is not answered: the connection is closed at once.
 **
-**	The requests (see s_ctl_cmds[]):
-**		SHOW GATEWAY		- GATEWAY + LISTENER lines
-**		SHOW LINES		- LINE lines (the serial lines)
-**		SHOW CONNECTIONS	- LISTENER + CONN lines (the TCP clients and their counters)
-**		RESET CONNECTIONS <id | a.b.c.d | a.b.c.d:port | ALL> - shutdown() of the client sockets
-**		RESTART GATEWAY		- check the settings by a child "/CHECK" run, then re-exec
-**		HELP			- HELP lines
-**
-**	The words are the full ones: the abbreviations (sho conn /cont) are the job of mbus-ctl.
+**	The commands (see s_ctl_cmds[]):
+**		SHOW_GATEWAY		- GATEWAY + LISTENER records
+**		SHOW_LINES		- LINE records (the serial lines)
+**		SHOW_CONNECTIONS	- LISTENER + CONN records (the TCP clients and their counters)
+**		RESET_CONNECTIONS	- ALL | ID | ADDR [PORT]: shutdown() of the client sockets
+**		RESTART_GATEWAY		- check the settings by a child "/CHECK" run, then re-exec
 **
 **	How it is plugged into the gateway: main() calls t2r$ctl_start() after the listeners are up and
 **	t2r$ctl_stop() at the exit; the sessions are seen through the registry of T2R-NET
@@ -47,6 +45,9 @@
 **
 **	06-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - Initial revision.
 **
+**	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The protocol is the AVProto TLV (src/t2r_ctlproto.h),
+**				the text request lines and the HELP request are gone.
+**
 **--
 */
 
@@ -57,7 +58,6 @@
 #include	<stdarg.h>
 #include	<string.h>
 #include	<strings.h>
-#include	<ctype.h>
 #include	<errno.h>
 #include	<unistd.h>
 #include	<poll.h>
@@ -76,6 +76,7 @@
 #include	"utility_routines.h"
 #include	"t2r_defs.h"
 #include	"t2r_msgs.h"
+#include	"t2r_ctlproto.h"
 
 
 extern int	g_exit_flag, g_restart_flag, g_trace;
@@ -99,104 +100,206 @@ static	int		s_ctl_restart;						/* RESTART is accepted: raise the flags	*/
 
 
 /*
- * An answer is composed in memory, then sent at once: the registry lock is never held over a write
- * to a slow client.
+ * An answer is composed in memory as one AVProto PDU of T2R$K_CTL_ANSSZ octets, then sent at once:
+ * the registry lock is never held over a write to a slow client.
  */
 typedef struct	t2r_ctl_ans_t {
-	char	*data;
-	size_t	len,
-		size;
-	int	nomem;								/* realloc() has failed: answer ERROR	*/
+	AVPROTO_PDU	*pdu;							/* T2R$K_CTL_ANSSZ octets		*/
+	int		cut;							/* No room for one more record		*/
 } T2R$_CTL_ANS;
 
 
+
 /*
- *   DESCRIPTION: Append a formatted text to the answer (snprintf() style: the protocol data, not a
- *	message of the log).
+ *   DESCRIPTION: Append one TLV to the answer. Once the answer is cut, nothing more is put.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_fmt, ...:	A format and its arguments
+ *	a_ans:		An answer
+ *	a_tag:		A tag id, T2R$K_CTL_TAG_*
+ *	a_type:		TAG$K_WORD/LONGWORD/QWORD/BBLOCK
+ *	a_val:		The value (a number - in the host byte order)
+ *	a_valsz:	The size of the value
  *
  *   OUTPUTS:
- *	a_ans:		.data/.len/.size; .nomem on a failure
+ *	a_ans:		.pdu; .cut if there is no room
  *
  *   RETURNS:
  *	NONE
  */
 static void	s_ctl_put (
 		T2R$_CTL_ANS	*a_ans,
+		unsigned	a_tag,
+		unsigned	a_type,
+	const	void		*a_val,
+		unsigned	a_valsz
+		)
+{
+	if ( a_ans->cut )
+		return;
+
+	if ( !(1 & __tlv$put(a_ans->pdu, T2R$K_CTL_ANSSZ, a_tag, a_type, (void *) a_val, a_valsz)) )
+		a_ans->cut = 1;
+}
+
+
+/*
+ *   DESCRIPTION: The typed forms of s_ctl_put(): a WORD, a LONGWORD, a QWORD, a text (at most
+ *	T2R$K_CTL_RECMAX / 2 octets).
+ */
+static inline void	s_ctl_putw (T2R$_CTL_ANS *a_ans, unsigned a_tag, uint16_t a_val)
+{
+	s_ctl_put(a_ans, a_tag, TAG$K_WORD, &a_val, sizeof(a_val));
+}
+
+static inline void	s_ctl_putl (T2R$_CTL_ANS *a_ans, unsigned a_tag, uint32_t a_val)
+{
+	s_ctl_put(a_ans, a_tag, TAG$K_LONGWORD, &a_val, sizeof(a_val));
+}
+
+static inline void	s_ctl_putq (T2R$_CTL_ANS *a_ans, unsigned a_tag, uint64_t a_val)
+{
+	s_ctl_put(a_ans, a_tag, TAG$K_QWORD, &a_val, sizeof(a_val));
+}
+
+static inline void	s_ctl_puts (T2R$_CTL_ANS *a_ans, unsigned a_tag, const char *a_val)
+{
+	s_ctl_put(a_ans, a_tag, TAG$K_BBLOCK, a_val, (unsigned) strnlen(a_val, T2R$K_CTL_RECMAX / 2));
+}
+
+
+
+/*
+ *   DESCRIPTION: Start a record: the REC tag. With less than T2R$K_CTL_RECMAX octets of room (and the
+ *	room for CUT and REASON) the answer is cut here: whole records only.
+ *
+ *   INPUTS:
+ *	a_ans:		An answer
+ *	a_rec:		T2R$K_CTL_REC_*
+ *
+ *   OUTPUTS:
+ *	a_ans:		.cut
+ *
+ *   RETURNS:
+ *	NONE
+ */
+static void	s_ctl_rec (
+		T2R$_CTL_ANS	*a_ans,
+		uint16_t	a_rec
+		)
+{
+	if ( (sizeof(AVPROTO_HDR) + be32toh(a_ans->pdu->r_hdr.u_len) + 2 * T2R$K_CTL_RECMAX) > T2R$K_CTL_ANSSZ )
+		a_ans->cut = 1;
+
+	s_ctl_putw(a_ans, T2R$K_CTL_TAG_REC, a_rec);
+}
+
+
+
+/*
+ *   DESCRIPTION: Put the REASON of a failure (snprintf() style: the protocol data, not a message of
+ *	the log).
+ *
+ *   INPUTS:
+ *	a_ans:		An answer
+ *	a_fmt, ...:	A format and its arguments
+ *
+ *   RETURNS:
+ *	STS$K_ERROR - for "return s_ctl_fail(...)"
+ */
+static int	s_ctl_fail (
+		T2R$_CTL_ANS	*a_ans,
 	const	char	*a_fmt,
 		...
 		)
 {
 va_list	l_ap;
-int	l_len;
-char	*l_new;
+char	l_text[T2R$K_CTL_RECMAX / 2];
+int	l_cut = a_ans->cut;
 
-	if ( a_ans->nomem )
-		return;
+	va_start(l_ap, a_fmt);
+	vsnprintf(l_text, sizeof(l_text), a_fmt, l_ap);
+	va_end(l_ap);
 
-	for (int i = 0; i < 2; i++)
-		{
-		va_start(l_ap, a_fmt);
-		l_len = vsnprintf(a_ans->data ? a_ans->data + a_ans->len : NULL, a_ans->size - a_ans->len, a_fmt, l_ap);
-		va_end(l_ap);
+	a_ans->cut = 0;								/* The room for it is kept by s_ctl_rec() */
+	s_ctl_puts(a_ans, T2R$K_CTL_TAG_REASON, l_text);
+	a_ans->cut = l_cut;
 
-		if ( l_len < 0 )
-			return;
-
-		if ( (size_t) l_len < (a_ans->size - a_ans->len) )
-			{
-			a_ans->len += (size_t) l_len;
-			return;
-			}
-
-		if ( !(l_new = realloc(a_ans->data, a_ans->size + (size_t) l_len + 4096)) )
-			{
-			a_ans->nomem = 1;
-			return;
-			}
-
-		a_ans->data = l_new;
-		a_ans->size += (size_t) l_len + 4096;
-		}
+	return	STS$K_ERROR;
 }
 
 
 
 /*
- *   DESCRIPTION: Format "a.b.c.d:port" of a socket address.
+ *   DESCRIPTION: Get a number argument of a request: a WORD, LONGWORD or QWORD TLV. __tlv$lookup(),
+ *	not __tlv$get(): the wire length must be checked against the type (StarLet 1.6 does not).
  *
  *   INPUTS:
- *	a_sk:		A socket address
+ *	a_req:		The request PDU
+ *	a_reqsz:	Its real size
+ *	a_tag:		A tag id
  *
  *   OUTPUTS:
- *	a_buf:		"a.b.c.d:port", at least 24 octets
+ *	a_val:		The value
  *
  *   RETURNS:
- *	a_buf
+ *	STS$K_SUCCESS, STS$K_WARN - absent, STS$K_ERROR - not a number or ill-formed
  */
-static const char *	s_ctl_addr (
-	const struct sockaddr_in *a_sk,
-		char	*a_buf
+static int	s_ctl_getnum (
+		void		*a_req,
+		unsigned	a_reqsz,
+		unsigned	a_tag,
+		uint64_t	*a_val
 		)
 {
-char	l_ip[INET_ADDRSTRLEN] = "?";
+int	l_rc;
+unsigned	l_type = 0, l_len = 0;
+void	*l_p = NULL;
+uint16_t	l_w;
+uint32_t	l_l;
+uint64_t	l_q;
 
-	inet_ntop(AF_INET, &a_sk->sin_addr, l_ip, sizeof(l_ip));
-	snprintf(a_buf, 24, "%s:%u", l_ip, ntohs(a_sk->sin_port));
+	if ( !(1 & (l_rc = __tlv$lookup(a_req, a_reqsz, NULL, a_tag, &l_type, &l_p, &l_len))) )
+		return	l_rc;
 
-	return	a_buf;
+	if ( (l_type == TAG$K_WORD) && (l_len == sizeof(l_w)) )
+		memcpy(&l_w, l_p, sizeof(l_w)), *a_val = be16toh(l_w);
+	else if ( (l_type == TAG$K_LONGWORD) && (l_len == sizeof(l_l)) )
+		memcpy(&l_l, l_p, sizeof(l_l)), *a_val = be32toh(l_l);
+	else if ( (l_type == TAG$K_QWORD) && (l_len == sizeof(l_q)) )
+		memcpy(&l_q, l_p, sizeof(l_q)), *a_val = be64toh(l_q);
+	else	return	STS$K_ERROR;
+
+	return	STS$K_SUCCESS;
 }
 
 
 
 /*
- *   DESCRIPTION: Put a LISTENER line per listener.
+ *   DESCRIPTION: Put the ADDR and PORT fields of a socket address.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
+ *	a_ans:		An answer
+ *	a_sk:		A socket address
+ *
+ *   RETURNS:
+ *	NONE
+ */
+static void	s_ctl_put_addr (
+		T2R$_CTL_ANS	*a_ans,
+	const struct sockaddr_in *a_sk
+		)
+{
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_ADDR, ntohl(a_sk->sin_addr.s_addr));
+	s_ctl_putw(a_ans, T2R$K_CTL_TAG_PORT, ntohs(a_sk->sin_port));
+}
+
+
+
+/*
+ *   DESCRIPTION: Put a LISTENER record per listener.
+ *
+ *   INPUTS:
+ *	a_ans:		An answer
  *
  *   IMPLICIT INPUTS:
  *	g_listeners, g_listeners_nr
@@ -208,46 +311,58 @@ static void	s_ctl_put_listeners (
 		T2R$_CTL_ANS	*a_ans
 		)
 {
-char	l_bind[24];
 T2R$_LISTENER	*l_lsnr;
 
 	for (int i = 0; i < g_listeners_nr; i++)
 		{
 		l_lsnr = &g_listeners[i];
 
-		s_ctl_put(a_ans, "LISTENER lsn=%d bind=%s mode=%s target=%s state=%s connlm=%d idletmo=%d"
-			" sessions=%d accepted=%u rejected=%u\n",
-			i, s_ctl_addr(&l_lsnr->sk, l_bind), (l_lsnr->mode == T2R$K_MODE_RAW) ? "RAW" : "MODBUS",
-			l_lsnr->target, (0 <= l_lsnr->fd) ? "UP" : "DOWN", l_lsnr->connlm, l_lsnr->idletmo,
-			__atomic_load_n(&l_lsnr->sessions, __ATOMIC_ACQUIRE), l_lsnr->accepted, l_lsnr->rejected);
+		s_ctl_rec(a_ans, T2R$K_CTL_REC_LISTENER);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_LSN, (uint32_t) i);
+		s_ctl_put_addr(a_ans, &l_lsnr->sk);
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_MODE, (l_lsnr->mode == T2R$K_MODE_RAW) ? T2R$K_CTL_MODE_RAW : T2R$K_CTL_MODE_MODBUS);
+		s_ctl_puts(a_ans, T2R$K_CTL_TAG_TARGET, l_lsnr->target);
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_STATE, (0 <= l_lsnr->fd) ? T2R$K_CTL_STATE_UP : T2R$K_CTL_STATE_DOWN);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_CONNLM, (uint32_t) l_lsnr->connlm);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_IDLETMO, (uint32_t) l_lsnr->idletmo);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_SESSIONS, (uint32_t) __atomic_load_n(&l_lsnr->sessions, __ATOMIC_ACQUIRE));
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_ACCEPTED, l_lsnr->accepted);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_REJECTED, l_lsnr->rejected);
 		}
 }
 
 
 
 /*
- *   DESCRIPTION: A t2r$net_sess_walk() routine of SHOW CONNECTIONS: put a CONN line of a session.
+ *   DESCRIPTION: A t2r$net_sess_walk() routine of SHOW CONNECTIONS: put a CONN record of a session.
  *
  *   INPUTS:
  *	a_session:	A session (the registry lock is held)
- *	a_arg:		T2R$_CTL_ANS * - the answer buffer
+ *	a_arg:		T2R$_CTL_ANS * - the answer
  *
  *   RETURNS:
  *	STS$K_SUCCESS - go on
  */
-static int	s_ctl_conn_line (
+static int	s_ctl_conn_rec (
 		T2R$_SESSION	*a_session,
 		void		*a_arg
 		)
 {
-char	l_peer[24];
+T2R$_CTL_ANS	*l_ans = a_arg;
 
-	s_ctl_put((T2R$_CTL_ANS *) a_arg, "CONN id=%" PRIu32 " sd=%d lsn=%d mode=%s peer=%s since=%lld reset=%d"
-		" req=%" PRIu64 " ans=%" PRIu64 " err=%" PRIu64 " rx=%" PRIu64 " tx=%" PRIu64 "\n",
-		a_session->id, a_session->sd, (int) (a_session->listener - g_listeners),
-		(a_session->listener->mode == T2R$K_MODE_RAW) ? "RAW" : "MODBUS",
-		s_ctl_addr(&a_session->sk, l_peer), (long long) a_session->start, a_session->reset,
-		a_session->nreq, a_session->nans, a_session->nerr, a_session->nrx, a_session->ntx);
+	s_ctl_rec(l_ans, T2R$K_CTL_REC_CONN);
+	s_ctl_putl(l_ans, T2R$K_CTL_TAG_ID, a_session->id);
+	s_ctl_putl(l_ans, T2R$K_CTL_TAG_SD, (uint32_t) a_session->sd);
+	s_ctl_putl(l_ans, T2R$K_CTL_TAG_LSN, (uint32_t) (a_session->listener - g_listeners));
+	s_ctl_putw(l_ans, T2R$K_CTL_TAG_MODE, (a_session->listener->mode == T2R$K_MODE_RAW) ? T2R$K_CTL_MODE_RAW : T2R$K_CTL_MODE_MODBUS);
+	s_ctl_put_addr(l_ans, &a_session->sk);
+	s_ctl_putq(l_ans, T2R$K_CTL_TAG_SINCE, (uint64_t) a_session->start);
+	s_ctl_putw(l_ans, T2R$K_CTL_TAG_RESET, (uint16_t) !!a_session->reset);
+	s_ctl_putq(l_ans, T2R$K_CTL_TAG_NREQ, a_session->nreq);
+	s_ctl_putq(l_ans, T2R$K_CTL_TAG_NANS, a_session->nans);
+	s_ctl_putq(l_ans, T2R$K_CTL_TAG_NERR, a_session->nerr);
+	s_ctl_putq(l_ans, T2R$K_CTL_TAG_NRX, a_session->nrx);
+	s_ctl_putq(l_ans, T2R$K_CTL_TAG_NTX, a_session->ntx);
 
 	return	STS$K_SUCCESS;
 }
@@ -258,20 +373,20 @@ char	l_peer[24];
  *   DESCRIPTION: SHOW CONNECTIONS - the listeners and the TCP clients with their counters.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_arg:		Unused
+ *	a_ans:		An answer
+ *	a_req, a_reqsz:	The request PDU (no arguments)
  *
  *   RETURNS:
  *	STS$K_SUCCESS
  */
 static int	s_ctl_show_conn (
 		T2R$_CTL_ANS	*a_ans,
-	const	char		*a_arg
+		void		*a_req,
+		unsigned	a_reqsz
 		)
 {
 	s_ctl_put_listeners(a_ans);
-	t2r$net_sess_walk(s_ctl_conn_line, a_ans);
-	s_ctl_put(a_ans, "OK\n");
+	t2r$net_sess_walk(s_ctl_conn_rec, a_ans);
 
 	return	STS$K_SUCCESS;
 }
@@ -307,8 +422,8 @@ int	l_idx = (int) (a_session->target - g_serials);
  *   DESCRIPTION: SHOW LINES - the serial lines: settings, state, users.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_arg:		Unused
+ *	a_ans:		An answer
+ *	a_req, a_reqsz:	The request PDU (no arguments)
  *
  *   IMPLICIT INPUTS:
  *	g_serials, g_serials_nr, g_listeners, g_listeners_nr
@@ -318,12 +433,13 @@ int	l_idx = (int) (a_session->target - g_serials);
  */
 static int	s_ctl_show_lines (
 		T2R$_CTL_ANS	*a_ans,
-	const	char		*a_arg
+		void		*a_req,
+		unsigned	a_reqsz
 		)
 {
 int	l_sessions[T2R$K_MAX_SERIALS] = {0}, l_lsnrs;
+uint16_t	l_state;
 T2R$_SERIAL	*l_serial;
-const char	*l_state;
 
 	t2r$net_sess_walk(s_ctl_line_count, l_sessions);
 
@@ -337,17 +453,24 @@ const char	*l_state;
 			l_lsnrs += (g_listeners[j].serial == l_serial);
 
 		if ( l_serial->state == T2R$K_STATE_IDLE )
-			l_state = "CLOSED";						/* No listener has opened it */
-		else	l_state = l_serial->nodev ? "ABSENT" : "OPEN";
+			l_state = T2R$K_CTL_STATE_CLOSED;			/* No listener has opened it */
+		else	l_state = l_serial->nodev ? T2R$K_CTL_STATE_ABSENT : T2R$K_CTL_STATE_OPEN;
 
-		s_ctl_put(a_ans, "LINE line=%d dev=%s chars=%d,%d,%c,%d iotmo=%d lategd=%d rs485=%d ts=%d state=%s"
-			" listeners=%d sessions=%d\n",
-			i, l_serial->devname, l_serial->baud, l_serial->databits, l_serial->parity, l_serial->stopbits,
-			l_serial->anstmo_msec, l_serial->lategd_msec, !!(l_serial->flags & T2R$M_SERIAL_RS485),
-			!!(l_serial->flags & T2R$M_SERIAL_ADDTS), l_state, l_lsnrs, l_sessions[i]);
+		s_ctl_rec(a_ans, T2R$K_CTL_REC_LINE);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_LINE, (uint32_t) i);
+		s_ctl_puts(a_ans, T2R$K_CTL_TAG_DEVICE, l_serial->devname);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_BAUD, (uint32_t) l_serial->baud);
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_DATABITS, (uint16_t) l_serial->databits);
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_PARITY, (uint16_t) l_serial->parity);
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_STOPBITS, (uint16_t) l_serial->stopbits);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_IOTMO, (uint32_t) l_serial->anstmo_msec);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_LATEGD, (uint32_t) l_serial->lategd_msec);
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_RS485, (uint16_t) !!(l_serial->flags & T2R$M_SERIAL_RS485));
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_ADDTS, (uint16_t) !!(l_serial->flags & T2R$M_SERIAL_ADDTS));
+		s_ctl_putw(a_ans, T2R$K_CTL_TAG_STATE, l_state);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_LISTENERS, (uint32_t) l_lsnrs);
+		s_ctl_putl(a_ans, T2R$K_CTL_TAG_SESSIONS, (uint32_t) l_sessions[i]);
 		}
-
-	s_ctl_put(a_ans, "OK\n");
 
 	return	STS$K_SUCCESS;
 }
@@ -358,30 +481,38 @@ const char	*l_state;
  *   DESCRIPTION: SHOW GATEWAY - the revision, the process, the uptime and the listeners.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_arg:		Unused
+ *	a_ans:		An answer
+ *	a_req, a_reqsz:	The request PDU (no arguments)
  *
  *   RETURNS:
  *	STS$K_SUCCESS
  */
 static int	s_ctl_show_gw (
 		T2R$_CTL_ANS	*a_ans,
-	const	char		*a_arg
+		void		*a_req,
+		unsigned	a_reqsz
 		)
 {
-int	l_up = 0;
+uint32_t	l_up = 0;
 
 	for (int i = 0; i < g_listeners_nr; i++)
 		l_up += (0 <= g_listeners[i].fd);
 
-	s_ctl_put(a_ans, "GATEWAY ident=%s rev=%s arch=%s pid=%d started=%lld now=%lld settings=%s control=%s"
-		" lines=%d listeners=%d up=%d connections=%d\n",
-		g_t2r_ident, g_t2r_rev, __ARCH__NAME__, (int) getpid(), (long long) g_start_time, (long long) time(NULL),
-		$ASCLEN(&g_settings) ? $ASCPTR(&g_settings) : "-", s_ctl_path, g_serials_nr, g_listeners_nr, l_up,
-		t2r$net_sess_count());
+	s_ctl_rec(a_ans, T2R$K_CTL_REC_GATEWAY);
+	s_ctl_puts(a_ans, T2R$K_CTL_TAG_IDENT, g_t2r_ident);
+	s_ctl_puts(a_ans, T2R$K_CTL_TAG_REV, g_t2r_rev);
+	s_ctl_puts(a_ans, T2R$K_CTL_TAG_ARCH, __ARCH__NAME__);
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_PID, (uint32_t) getpid());
+	s_ctl_putq(a_ans, T2R$K_CTL_TAG_STARTED, (uint64_t) g_start_time);
+	s_ctl_putq(a_ans, T2R$K_CTL_TAG_NOW, (uint64_t) time(NULL));
+	s_ctl_put(a_ans, T2R$K_CTL_TAG_SETTINGS, TAG$K_BBLOCK, $ASCPTR(&g_settings), $ASCLEN(&g_settings));
+	s_ctl_put(a_ans, T2R$K_CTL_TAG_CONTROL, TAG$K_BBLOCK, s_ctl_path, (unsigned) strlen(s_ctl_path));
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_LINES, (uint32_t) g_serials_nr);
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_LISTENERS, (uint32_t) g_listeners_nr);
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_UP, l_up);
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_CONNECTIONS, (uint32_t) t2r$net_sess_count());
 
 	s_ctl_put_listeners(a_ans);
-	s_ctl_put(a_ans, "OK\n");
 
 	return	STS$K_SUCCESS;
 }
@@ -392,12 +523,12 @@ int	l_up = 0;
  * RESET CONNECTIONS: what is to be reset
  */
 typedef struct	t2r_ctl_sel_t {
-	int	all;								/* ALL				*/
-	uint32_t id;								/* A session id, 0 - not given	*/
-	struct in_addr addr;							/* A client address ...		*/
-	int	port;								/* ... and its port, 0 - any	*/
-	int	count;								/* Has been reset		*/
-	T2R$_CTL_ANS *ans;
+	int		all;							/* ALL				*/
+	uint32_t	id;							/* A session id, 0 - not given	*/
+	struct in_addr	addr;							/* A client address ...		*/
+	int		port;							/* ... and its port, 0 - any	*/
+	int		count;							/* Has been reset		*/
+	T2R$_CTL_ANS	*ans;
 } T2R$_CTL_SEL;
 
 
@@ -424,7 +555,6 @@ static int	s_ctl_reset_one (
 {
 T2R$_CTL_SEL	*l_sel = a_arg;
 int	l_rc;
-char	l_peer[24];
 
 	if ( a_session->reset )							/* Is leaving already */
 		return	STS$K_SUCCESS;
@@ -446,7 +576,9 @@ char	l_peer[24];
 	if ( (l_rc = shutdown(a_session->sd, SHUT_RDWR)) )
 		$PUTMSG_FAO(T2R$__NETSYSWRN, a_session->sd, "shutdown()", l_rc, errno);
 
-	s_ctl_put(l_sel->ans, "RESET id=%" PRIu32 " peer=%s\n", a_session->id, s_ctl_addr(&a_session->sk, l_peer));
+	s_ctl_rec(l_sel->ans, T2R$K_CTL_REC_RESET);
+	s_ctl_putl(l_sel->ans, T2R$K_CTL_TAG_ID, a_session->id);
+	s_ctl_put_addr(l_sel->ans, &a_session->sk);
 	l_sel->count++;
 
 	return	STS$K_SUCCESS;
@@ -455,70 +587,73 @@ char	l_peer[24];
 
 
 /*
- *   DESCRIPTION: RESET CONNECTIONS <id | a.b.c.d | a.b.c.d:port | ALL> - drop the TCP clients.
+ *   DESCRIPTION: RESET CONNECTIONS - drop the TCP clients. The arguments: ALL, or ID, or ADDR with an
+ *	optional PORT.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_arg:		The selector, may be NULL
+ *	a_ans:		An answer
+ *	a_req, a_reqsz:	The request PDU
  *
  *   RETURNS:
  *	STS$K_SUCCESS, STS$K_ERROR - no or bad selector, nothing matches
  */
 static int	s_ctl_reset_conn (
 		T2R$_CTL_ANS	*a_ans,
-	const	char		*a_arg
+		void		*a_req,
+		unsigned	a_reqsz
 		)
 {
 T2R$_CTL_SEL	l_sel = {.ans = a_ans};
-char	l_ip[INET_ADDRSTRLEN], *l_end;
-const char	*l_colon;
-unsigned long	l_val;
-size_t	l_len;
+uint64_t	l_val = 0;
+int	l_rc;
+char	l_ip[INET_ADDRSTRLEN] = "?";
 
-	if ( !a_arg || !*a_arg )
-		return	s_ctl_put(a_ans, "ERROR which connection? Give an id, an address, address:port or ALL\n"), STS$K_ERROR;
-
-	if ( !strcasecmp(a_arg, "ALL") )
+	if ( (1 & (l_rc = s_ctl_getnum(a_req, a_reqsz, T2R$K_CTL_TAG_ALL, &l_val))) && l_val )
 		l_sel.all = 1;
-	else if ( isdigit((unsigned char) *a_arg) && !strchr(a_arg, '.') )	/* A session id */
+	else if ( (l_rc == STS$K_ERROR) )
+		return	s_ctl_fail(a_ans, "bad ALL argument");
+	else if ( 1 & (l_rc = s_ctl_getnum(a_req, a_reqsz, T2R$K_CTL_TAG_ID, &l_val)) )
 		{
-		errno = 0;
-		l_val = strtoul(a_arg, &l_end, 10);
-
-		if ( errno || *l_end || !l_val || (l_val > UINT32_MAX) )
-			return	s_ctl_put(a_ans, "ERROR bad connection id <%s>\n", a_arg), STS$K_ERROR;
+		if ( !l_val || (l_val > UINT32_MAX) )
+			return	s_ctl_fail(a_ans, "bad connection id %" PRIu64, l_val);
 
 		l_sel.id = (uint32_t) l_val;
 		}
-	else	{								/* a.b.c.d or a.b.c.d:port */
-		l_len = (l_colon = strchr(a_arg, ':')) ? (size_t) (l_colon - a_arg) : strlen(a_arg);
+	else if ( (l_rc == STS$K_ERROR) )
+		return	s_ctl_fail(a_ans, "bad ID argument");
+	else if ( 1 & (l_rc = s_ctl_getnum(a_req, a_reqsz, T2R$K_CTL_TAG_ADDR, &l_val)) )
+		{
+		if ( l_val > UINT32_MAX )
+			return	s_ctl_fail(a_ans, "bad address");
 
-		if ( l_len >= sizeof(l_ip) )
-			return	s_ctl_put(a_ans, "ERROR bad address <%s>\n", a_arg), STS$K_ERROR;
+		l_sel.addr.s_addr = htonl((uint32_t) l_val);
 
-		memcpy(l_ip, a_arg, l_len);
-		l_ip[l_len] = '\0';
-
-		if ( 1 != inet_pton(AF_INET, l_ip, &l_sel.addr) )
-			return	s_ctl_put(a_ans, "ERROR bad address <%s>\n", a_arg), STS$K_ERROR;
-
-		if ( l_colon )
+		if ( 1 & (l_rc = s_ctl_getnum(a_req, a_reqsz, T2R$K_CTL_TAG_PORT, &l_val)) )
 			{
-			l_val = strtoul(l_colon + 1, &l_end, 10);
-
-			if ( *l_end || !$ISINRANGE(l_val, T2R$K_PORT_MIN, T2R$K_PORT_MAX) )
-				return	s_ctl_put(a_ans, "ERROR bad port in <%s>\n", a_arg), STS$K_ERROR;
+			if ( !$ISINRANGE(l_val, T2R$K_PORT_MIN, T2R$K_PORT_MAX) )
+				return	s_ctl_fail(a_ans, "bad port %" PRIu64, l_val);
 
 			l_sel.port = (int) l_val;
 			}
+		else if ( l_rc == STS$K_ERROR )
+			return	s_ctl_fail(a_ans, "bad PORT argument");
 		}
+	else	return	s_ctl_fail(a_ans, "which connection? Give an id, an address, address:port or ALL");
 
 	t2r$net_sess_walk(s_ctl_reset_one, &l_sel);
 
 	if ( !l_sel.count )
-		return	s_ctl_put(a_ans, "ERROR no connection matches <%s>\n", a_arg), STS$K_ERROR;
+		{
+		if ( l_sel.id )
+			return	s_ctl_fail(a_ans, "no connection matches <%" PRIu32 ">", l_sel.id);
 
-	s_ctl_put(a_ans, "OK %d\n", l_sel.count);
+		inet_ntop(AF_INET, &l_sel.addr, l_ip, sizeof(l_ip));
+
+		return	l_sel.port ? s_ctl_fail(a_ans, "no connection matches <%s:%d>", l_ip, l_sel.port)
+			: s_ctl_fail(a_ans, "no connection matches <%s>", l_ip);
+		}
+
+	s_ctl_putl(a_ans, T2R$K_CTL_TAG_COUNT, (uint32_t) l_sel.count);
 
 	return	STS$K_SUCCESS;
 }
@@ -529,10 +664,10 @@ size_t	l_len;
  *   DESCRIPTION: Check the settings file by a child run of the same program: "<image> /SETTINGS=<file>
  *	/CHECK" parses the settings exactly as a start does and exits with its status. The live tables
  *	of the gateway are not touched at all. The WARNING/ERROR/FATAL lines of the child are put into
- *	the answer as CHECK lines: the operator sees why.
+ *	the answer as CHECK records: the operator sees why.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
+ *	a_ans:		An answer
  *
  *   IMPLICIT INPUTS:
  *	g_settings
@@ -554,7 +689,7 @@ struct pollfd	l_pfd;
 	snprintf(l_settings, sizeof(l_settings), "/settings=%.*s", $ASC(&g_settings));
 
 	if ( pipe(l_pipe) )
-		return	$PUTMSG_FAO(T2R$__CTLSYSWRN, "pipe()", -1, errno), s_ctl_put(a_ans, "ERROR pipe() failed\n"), STS$K_ERROR;
+		return	$PUTMSG_FAO(T2R$__CTLSYSWRN, "pipe()", -1, errno), s_ctl_fail(a_ans, "pipe() failed");
 
 	/* posix_spawn(), not fork(): the gateway is multithreaded */
 	posix_spawn_file_actions_init(&l_fa);
@@ -571,7 +706,7 @@ struct pollfd	l_pfd;
 		{
 		close(l_pipe[0]);
 		$PUTMSG_FAO(T2R$__CTLSYSWRN, "posix_spawn(/proc/self/exe)", l_rc, l_rc);
-		return	s_ctl_put(a_ans, "ERROR cannot run the settings check, error %d\n", l_rc), STS$K_ERROR;
+		return	s_ctl_fail(a_ans, "cannot run the settings check, error %d", l_rc);
 		}
 
 	/* Collect the output until EOF, at most T2R$K_CTL_TMO_MSEC between the portions */
@@ -599,16 +734,18 @@ struct pollfd	l_pfd;
 			*(l_nl++) = '\0';
 
 		if ( strstr(l_line, "-W-") || strstr(l_line, "-E-") || strstr(l_line, "-F-") )
-			s_ctl_put(a_ans, "CHECK %s\n", l_line);
+			{
+			s_ctl_rec(a_ans, T2R$K_CTL_REC_CHECK);
+			s_ctl_puts(a_ans, T2R$K_CTL_TAG_TEXT, l_line);
+			}
 		}
 
 	if ( WIFEXITED(l_status) && (WEXITSTATUS(l_status) == EXIT_SUCCESS) )
 		return	STS$K_SUCCESS;
 
 	$PUTMSG_FAO(T2R$__CTLCHKFAIL, l_status);
-	s_ctl_put(a_ans, "ERROR the settings check has failed, the gateway goes on as it is\n");
 
-	return	STS$K_ERROR;
+	return	s_ctl_fail(a_ans, "the settings check has failed, the gateway goes on as it is");
 }
 
 
@@ -618,8 +755,8 @@ struct pollfd	l_pfd;
  *	(the same PID: systemd and procd see nothing, the listeners and the lines are opened anew).
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_arg:		Unused
+ *	a_ans:		An answer
+ *	a_req, a_reqsz:	The request PDU (no arguments)
  *
  *   IMPLICIT OUTPUTS:
  *	s_ctl_restart
@@ -629,7 +766,8 @@ struct pollfd	l_pfd;
  */
 static int	s_ctl_restart_gw (
 		T2R$_CTL_ANS	*a_ans,
-	const	char		*a_arg
+		void		*a_req,
+		unsigned	a_reqsz
 		)
 {
 int	l_rc;
@@ -639,7 +777,6 @@ int	l_rc;
 
 	$PUTMSG_FAO(T2R$__CTLRESTART);
 
-	s_ctl_put(a_ans, "OK restarting pid=%d\n", (int) getpid());
 	s_ctl_restart = 1;							/* The flags are raised after the answer */
 
 	return	STS$K_SUCCESS;
@@ -647,49 +784,56 @@ int	l_rc;
 
 
 
-static int	s_ctl_help (T2R$_CTL_ANS *a_ans, const char *a_arg);
-
 /*
- * The requests: <verb> <object> -> a routine. The words are exact (case-insensitive).
+ * The commands: a code of u_csr -> a routine
  */
 typedef struct	t2r_ctl_cmd_t {
-	const char	*verb,
-			*object;
-	int		(*rtn) (T2R$_CTL_ANS *a_ans, const char *a_arg);
-	const char	*help;
+	uint32_t	code;							/* T2R$K_CTL_CMD_*			*/
+	const char	*name;							/* For the trace			*/
+	int		(*rtn) (T2R$_CTL_ANS *a_ans, void *a_req, unsigned a_reqsz);
 } T2R$_CTL_CMD;
 
 static const T2R$_CTL_CMD	s_ctl_cmds [] = {
-	{ "SHOW",	"GATEWAY",	s_ctl_show_gw,		"the revision, the uptime, the listeners" },
-	{ "SHOW",	"LINES",	s_ctl_show_lines,	"the serial lines" },
-	{ "SHOW",	"CONNECTIONS",	s_ctl_show_conn,	"the TCP clients and their counters" },
-	{ "RESET",	"CONNECTIONS",	s_ctl_reset_conn,	"<id | a.b.c.d | a.b.c.d:port | ALL> - drop TCP clients" },
-	{ "RESTART",	"GATEWAY",	s_ctl_restart_gw,	"check the settings and restart the gateway process" },
-	{ "HELP",	NULL,		s_ctl_help,		"this list" },
+	{ T2R$K_CTL_CMD_SHOW_GATEWAY,		"SHOW GATEWAY",		s_ctl_show_gw },
+	{ T2R$K_CTL_CMD_SHOW_LINES,		"SHOW LINES",		s_ctl_show_lines },
+	{ T2R$K_CTL_CMD_SHOW_CONNECTIONS,	"SHOW CONNECTIONS",	s_ctl_show_conn },
+	{ T2R$K_CTL_CMD_RESET_CONNECTIONS,	"RESET CONNECTIONS",	s_ctl_reset_conn },
+	{ T2R$K_CTL_CMD_RESTART_GATEWAY,	"RESTART GATEWAY",	s_ctl_restart_gw },
 };
 
 
 
 /*
- *   DESCRIPTION: HELP - the list of the requests.
+ *   DESCRIPTION: Read exactly <a_len> octets from the client; a client which stays silent for
+ *	T2R$K_CTL_TMO_MSEC is dropped.
  *
  *   INPUTS:
- *	a_ans:		An answer buffer
- *	a_arg:		Unused
+ *	a_sd:		A client socket
+ *	a_len:		The octets to read
+ *
+ *   OUTPUTS:
+ *	a_buf:		The data
  *
  *   RETURNS:
- *	STS$K_SUCCESS
+ *	STS$K_SUCCESS, STS$K_WARN - a timeout or the client has gone
  */
-static int	s_ctl_help (
-		T2R$_CTL_ANS	*a_ans,
-	const	char		*a_arg
+static int	s_ctl_recvn (
+		int	a_sd,
+		void	*a_buf,
+		size_t	a_len
 		)
 {
-	for (size_t i = 0; i < $ARRSZ(s_ctl_cmds); i++)
-		s_ctl_put(a_ans, "HELP %s %s - %s\n", s_ctl_cmds[i].verb, s_ctl_cmds[i].object ? s_ctl_cmds[i].object : "",
-			s_ctl_cmds[i].help);
+ssize_t	l_got;
+struct pollfd	l_pfd = {.fd = a_sd, .events = POLLIN};
 
-	s_ctl_put(a_ans, "OK\n");
+	for (size_t l_off = 0; l_off < a_len; l_off += (size_t) l_got)
+		{
+		if ( 0 >= poll(&l_pfd, 1, T2R$K_CTL_TMO_MSEC) )
+			return	STS$K_WARN;
+
+		if ( 0 >= (l_got = recv(a_sd, (char *) a_buf + l_off, a_len - l_off, 0)) )
+			return	STS$K_WARN;
+		}
 
 	return	STS$K_SUCCESS;
 }
@@ -697,8 +841,9 @@ static int	s_ctl_help (
 
 
 /*
- *   DESCRIPTION: Serve one client: read one request line, run it, send the answer. The caller closes
- *	the connection.
+ *   DESCRIPTION: Serve one client: read one request PDU (the header, then exactly u_len octets), run
+ *	the command, send the answer PDU. A wrong magic or a too long PDU is not answered. The caller
+ *	closes the connection.
  *
  *   INPUTS:
  *	a_sd:		A connected client socket
@@ -710,71 +855,68 @@ static int	s_ctl_serve (
 		int	a_sd
 		)
 {
-char	l_line[T2R$K_CTL_LINESZ + 1], *l_words[4] = {0}, *l_save = NULL, *l_nl = NULL;
-int	l_rc, l_len = 0, l_nw = 0;
-size_t	l_off;
+union	{
+	AVPROTO_PDU	pdu;
+	uint8_t		raw[T2R$K_CTL_REQSZ];
+	} l_req = {0};
+unsigned	l_len = 0, l_csr = 0, l_seq = 0;
+int	l_rc = STS$K_ERROR;
+size_t	l_off, l_total;
 ssize_t	l_sent;
-struct pollfd	l_pfd = {.fd = a_sd, .events = POLLIN};
 T2R$_CTL_ANS	l_ans = {0};
 const T2R$_CTL_CMD	*l_cmd = NULL;
 
-	/* Read up to the end of the line; a client which stays silent is dropped */
-	while ( !l_nl && (l_len < T2R$K_CTL_LINESZ) )
+	if ( !(1 & s_ctl_recvn(a_sd, &l_req.pdu.r_hdr, sizeof(AVPROTO_HDR))) )
+		return	STS$K_WARN;
+
+	if ( !(1 & __tlv$hget(&l_req.pdu, (const unsigned char *) T2R$K_CTL_MAGIC, &l_len, &l_csr, &l_seq)) )
+		return	$IFTRACE(g_trace, "Control request: wrong magic, dropped"), STS$K_WARN;
+
+	if ( l_len > (T2R$K_CTL_REQSZ - sizeof(AVPROTO_HDR)) )
+		return	$IFTRACE(g_trace, "Control request: %u octets is too long, dropped", l_len), STS$K_WARN;
+
+	if ( l_len && !(1 & s_ctl_recvn(a_sd, l_req.pdu.r_tlv, l_len)) )
+		return	STS$K_WARN;
+
+	/* The answer: the header now, the status into u_csr at the end */
+	if ( !(l_ans.pdu = malloc(T2R$K_CTL_ANSSZ)) )
+		return	$PUTMSG_FAO(T2R$__CTLSYSWRN, "malloc()", -1, errno), STS$K_WARN;
+
+	__tlv$hset(l_ans.pdu, (const unsigned char *) T2R$K_CTL_MAGIC, 0, l_seq);
+
+	for (size_t i = 0; i < $ARRSZ(s_ctl_cmds); i++)
 		{
-		if ( 0 >= (l_rc = poll(&l_pfd, 1, T2R$K_CTL_TMO_MSEC)) )
-			return	STS$K_WARN;
-
-		if ( 0 >= (l_rc = recv(a_sd, l_line + l_len, T2R$K_CTL_LINESZ - l_len, 0)) )
-			break;							/* EOF: take what we have */
-
-		l_len += l_rc;
-		l_line[l_len] = '\0';
-		l_nl = strpbrk(l_line, "\r\n");
-		}
-
-	l_line[l_len] = '\0';
-
-	if ( l_nl )
-		*l_nl = '\0';
-
-	for (char *l_w = strtok_r(l_line, " \t", &l_save); l_w && (l_nw < 4); l_w = strtok_r(NULL, " \t", &l_save))
-		l_words[l_nw++] = l_w;
-
-	for (size_t i = 0; l_nw && (i < $ARRSZ(s_ctl_cmds)); i++)
-		{
-		if ( strcasecmp(l_words[0], s_ctl_cmds[i].verb) )
-			continue;
-
-		if ( s_ctl_cmds[i].object && ((l_nw < 2) || strcasecmp(l_words[1], s_ctl_cmds[i].object)) )
-			continue;
-
-		l_cmd = &s_ctl_cmds[i];
-		break;
+		if ( s_ctl_cmds[i].code == l_csr )
+			{
+			l_cmd = &s_ctl_cmds[i];
+			break;
+			}
 		}
 
 	if ( l_cmd )
 		{
-		$IFTRACE(g_trace, "Control request: %s %s %s", l_words[0], l_words[1] ? l_words[1] : "", l_words[2] ? l_words[2] : "");
+		$IFTRACE(g_trace, "Control request: %s, %u octets of arguments", l_cmd->name, l_len);
 
-		l_cmd->rtn(&l_ans, l_cmd->object ? l_words[2] : NULL);
+		l_rc = l_cmd->rtn(&l_ans, &l_req.pdu, (unsigned) (sizeof(AVPROTO_HDR) + l_len));
 		}
-	else	s_ctl_put(&l_ans, "ERROR unknown request, try HELP\n");
+	else	l_rc = s_ctl_fail(&l_ans, "unknown command code %u", l_csr);
 
-	if ( l_ans.nomem )
+	if ( l_ans.cut )							/* The room for it is kept by s_ctl_rec() */
 		{
-		s_ctl_restart = 0;
-		free(l_ans.data);
-		l_ans = (T2R$_CTL_ANS) {0};
-		s_ctl_put(&l_ans, "ERROR out of memory\n");
+		l_ans.cut = 0;
+		s_ctl_putw(&l_ans, T2R$K_CTL_TAG_CUT, 1);
 		}
 
-	for (l_off = 0; l_ans.data && (l_off < l_ans.len); l_off += (size_t) l_sent)
+	l_ans.pdu->r_hdr.u_csr = htobe32((uint32_t) l_rc);
+	l_total = sizeof(AVPROTO_HDR) + be32toh(l_ans.pdu->r_hdr.u_len);
+
+	for (l_off = 0; l_off < l_total; l_off += (size_t) l_sent)
 		{
-		if ( 0 >= (l_sent = send(a_sd, l_ans.data + l_off, l_ans.len - l_off, MSG_NOSIGNAL)) )
+		if ( 0 >= (l_sent = send(a_sd, (char *) l_ans.pdu + l_off, l_total - l_off, MSG_NOSIGNAL)) )
 			break;							/* The client has gone: not our problem */
 		}
 
-	free(l_ans.data);
+	free(l_ans.pdu);
 
 	return	STS$K_SUCCESS;
 }

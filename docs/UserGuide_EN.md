@@ -326,9 +326,8 @@ Two more options of the gateway:
 | `/control=NONE` | No control channel at all |
 | `/check` | Only check the settings file and exit: `%T2R-S-CHECKOK` and exit status 0 --- the file is good |
 
-The gateway understands plain text lines, so you can also ask it by hand with `socat`:
-`echo "SHOW CONNECTIONS" | sudo socat - UNIX-CONNECT:/var/run/mbusgw-t2r.sock`. The answer ends
-with `OK` or with `ERROR <reason>`.
+The gateway and `mbus-ctl` talk a small binary protocol (TLV records, see README.md). You cannot
+type to the gateway by hand: always use `mbus-ctl`.
 
 ## 5. Reading the log
 
@@ -512,6 +511,8 @@ dislikes.**
 | `CTLBACK` | S | The gateway is back after the restart; the time, the PID and the TCP ports up are shown |
 | `CTLNOBACK` | W | The gateway has not answered after the restart in time; read its log (`journalctl -u mbusgw-t2r`, `logread -e mbusgw-t2r`) |
 | `CTLRESETN` | S | `mbus-ctl reset connection` has disconnected this many clients |
+| `CTLBADSEL` | E | `mbus-ctl reset connection` needs a connection: an `Id` from `mbus-ctl sho conn`, an address `a.b.c.d`, `a.b.c.d:port` or `/all` |
+| `CTLCUT` | W | The answer did not fit into 64 KB (many hundreds of clients): the table is not full. Look at one listener's clients in its log |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*
 
