@@ -46,6 +46,9 @@
 #
 #	10-NOV-2026	CLD	SHA256SUMS is signed with minisign (the MINISIGN_KEY secret, checked with
 #				minisign.pub of the tag), SHA256SUMS.minisig is attached to the Release.
+#
+#	11-NOV-2026	CLD	The signature is checked with the public key written in the workflow,
+#				not minisign.pub of the tag: a re-run of an older tag has no such file.
 #--
 
 name: release
@@ -364,8 +367,9 @@ jobs:
       # One minisign signature over SHA256SUMS vouches for every file of the
       # release.  The secret key is the MINISIGN_KEY secret of this repository
       # (no password); it lives in the runner's temporary directory for this
-      # step only.  The signature is checked with minisign.pub of the tag
-      # before anything is published.
+      # step only.  The signature is checked with the public key written below
+      # (the one of minisign.pub; an older tag has no minisign.pub) before
+      # anything is published.
       - name: Sign SHA256SUMS
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
