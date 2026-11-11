@@ -1,0 +1,84 @@
+#++
+#   DESCRIPTION: The build and the self-contained tests of the gateway on every push (amd64, arm64)
+#
+#   AUTHOR: Ruslan R. Laishev (BMF, The BadAss SysMan)
+#
+#   CREATION DATE: 10-NOV-2026
+#
+#       A push, a pull request or a manual run (Actions -> ci -> Run workflow) builds StarLet and the
+#       gateway (Release, as the packages of release.yml) on x86_64 and aarch64 and runs the tests
+#       that need no hardware: tests/issues_test.py all (the field reports over a pty pair and a fake
+#       RTU slave) and tests/ctl_test.py (the control channel and mbus-ctl). StarLet goes to a prefix
+#       in the runner's temporary directory, not to /usr/local. The README badge shows this workflow.
+#
+#       MODIFICATION HISTORY:
+#
+#       10-NOV-2026     CLD     Initial revision.
+#--
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
+
+jobs:
+  build-test:
+    name: build and test ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake pkg-config \
+            libconfig-dev git ca-certificates python3
+
+      - uses: actions/checkout@v5
+
+      - name: Build StarLet
+        run: |
+          git clone --depth 1 "$STARLET_REPO" "$RUNNER_TEMP/starlet-src"
+          git -C "$RUNNER_TEMP/starlet-src" log -1 --format='StarLet: %H %cd'
+          cmake -S "$RUNNER_TEMP/starlet-src" -B "$RUNNER_TEMP/starlet-build" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/starlet"
+          cmake --build "$RUNNER_TEMP/starlet-build" -j "$(nproc)"
+          cmake --install "$RUNNER_TEMP/starlet-build"
+
+      - name: Build the gateway
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/starlet"
+          cmake --build build -j "$(nproc)"
+          file build/mbusgw-t2r build/mbus-ctl
+          out=$(build/mbusgw-t2r 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q 'REVISNF'
+          build/mbus-ctl help | grep -q 'RESTART GATEWAY'
+
+      - name: Test the field reports (tests/issues_test.py)
+        run: python3 tests/issues_test.py --gw build/mbusgw-t2r all
+
+      - name: Test the control channel (tests/ctl_test.py)
+        run: python3 tests/ctl_test.py --gw build/mbusgw-t2r --ctl build/mbus-ctl
+
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: logs-${{ matrix.arch }}
+          path: |
+            /tmp/t2r_issues_*/
+            /tmp/t2r_ctl_*/
+          if-no-files-found: ignore

@@ -1,5 +1,7 @@
 # MODBUS TCP to RTU gateway
 
+[![ci](https://github.com/napilab/mbus-gw-t2r/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/napilab/mbus-gw-t2r/actions/workflows/ci.yml)
+
 *[Русская версия: README_RU.md](README_RU.md)*
 
 A yet another gateway for MODBUS TCP to RTU (Limited Edition especialy for LAB240 and NaPiLab Teams)
@@ -271,6 +273,30 @@ and started in the OpenWrt images before the release. To build them by your own 
 `echo "src-link mbusgw <this tree>/openwrt" >> feeds.conf`,
 `./scripts/feeds update mbusgw && ./scripts/feeds install mbusgw-t2r`,
 `make package/mbusgw-t2r/compile`.
+
+####	Checking a download
+
+A release made after 10-NOV-2026 carries `SHA256SUMS.minisig`, a
+[minisign](https://jedisct1.github.io/minisign/) signature of `SHA256SUMS`: one signature for
+every package and the sources tarball of the release. The public key is in `minisign.pub` of
+this repository:
+
+    RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+
+Put the files you took next to `SHA256SUMS` and `SHA256SUMS.minisig`, then:
+
+    minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+    sha256sum -c --ignore-missing SHA256SUMS
+
+The first must say `Signature and comment signature verified`, the second `OK` for every file.
+Anything else - the file is not the one released: do not install it. The earlier releases have
+`SHA256SUMS` only.
+
+####	Automatic tests (GitHub Actions)
+
+The workflow `.github/workflows/ci.yml` (the badge at the top) builds StarLet and the gateway on
+amd64 and arm64 on every push and pull request and runs the tests that need no hardware:
+`tests/issues_test.py all` and `tests/ctl_test.py` (a pty pair and a fake RTU slave).
 
 ####	Automatic build (GitLab CI)
 

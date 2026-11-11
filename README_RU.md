@@ -1,5 +1,7 @@
 # Шлюз MODBUS TCP в RTU
 
+[![ci](https://github.com/napilab/mbus-gw-t2r/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/napilab/mbus-gw-t2r/actions/workflows/ci.yml)
+
 *[English version: README.md](README.md)*
 
 Ещё один шлюз MODBUS TCP → RTU (ограниченное издание специально для команд LAB240 и NaPiLab).
@@ -270,6 +272,29 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 `echo "src-link mbusgw <это дерево>/openwrt" >> feeds.conf`,
 `./scripts/feeds update mbusgw && ./scripts/feeds install mbusgw-t2r`,
 `make package/mbusgw-t2r/compile`.
+
+####	Проверка скачанного
+
+В релизе, сделанном после 10-NOV-2026, есть `SHA256SUMS.minisig` — подпись
+[minisign](https://jedisct1.github.io/minisign/) файла `SHA256SUMS`: одна подпись на все пакеты и
+архив исходников релиза. Открытый ключ лежит в `minisign.pub` этого репозитория:
+
+    RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+
+Положите скачанные файлы рядом с `SHA256SUMS` и `SHA256SUMS.minisig` и выполните:
+
+    minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
+    sha256sum -c --ignore-missing SHA256SUMS
+
+Первая команда должна сказать `Signature and comment signature verified`, вторая — `OK` для
+каждого файла. Иначе файл не тот, что выпущен: не ставьте его. В более ранних релизах есть только
+`SHA256SUMS`.
+
+####	Автоматические тесты (GitHub Actions)
+
+Workflow `.github/workflows/ci.yml` (значок в начале файла) при каждом push и pull request собирает
+StarLet и шлюз на amd64 и arm64 и прогоняет тесты, которым не нужно железо:
+`tests/issues_test.py all` и `tests/ctl_test.py` (пара pty и имитатор ведомого RTU).
 
 ####	Автоматическая сборка (GitLab CI)
 

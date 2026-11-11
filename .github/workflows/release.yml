@@ -43,6 +43,9 @@
 #				the fields are dropped for the package version and the Release title.
 #
 #	06-NOV-2026	CLD	V.01-01: the installed packages (.deb, .ipk/.apk) must carry a working mbus-ctl.
+#
+#	10-NOV-2026	CLD	SHA256SUMS is signed with minisign (the MINISIGN_KEY secret, checked with
+#				minisign.pub of the tag), SHA256SUMS.minisig is attached to the Release.
 #--
 
 name: release
@@ -336,10 +339,8 @@ jobs:
           pattern: '{deb,owrt}-*'
           merge-multiple: true
 
-      - name: Attach the packages to the Release
+      - name: Collect the files and SHA256SUMS
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           # The tag is v<VERSION> (the field test X) or V<MM>.<NN>.<E> (the product V.01-00 -> V01.00.0):
@@ -357,12 +358,46 @@ jobs:
             case "$pkg" in mbusgw-t2r_${VER}-*) ;; *) echo "$pkg does not match $TAG"; exit 1;; esac
           done
           sha256sum *.deb *.ipk *.apk *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      # One minisign signature over SHA256SUMS vouches for every file of the
+      # release.  The secret key is the MINISIGN_KEY secret of this repository
+      # (no password); it lives in the runner's temporary directory for this
+      # step only.  The signature is checked with minisign.pub of the tag
+      # before anything is published.
+      - name: Sign SHA256SUMS
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ -z "${MINISIGN_KEY}" ]
+          then
+            echo "::error::no MINISIGN_KEY secret - the release would go out unsigned"
+            exit 1
+          fi
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          key="${RUNNER_TEMP}/minisign.key"
+          trap 'rm -f "${key}"' EXIT
+          ( umask 077; printf '%s\n' "${MINISIGN_KEY}" > "${key}" )
+          minisign -S -s "${key}" -m SHA256SUMS \
+            -t "mbusgw-t2r ${TAG} SHA256SUMS signed $(date -u +%d-%b-%Y | tr a-z A-Z)"
+          minisign -Vm SHA256SUMS -p src/minisign.pub
+
+      - name: Attach the packages to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS --clobber
+            gh release upload "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
           else
-            gh release create "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS --title "mbusgw-t2r ${VER}" --notes-file - <<EOF
+            gh release create "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "mbusgw-t2r ${VER}" --notes-file - <<EOF
           The .deb for amd64 and arm64 is tested on Debian 12, Debian 13 and Ubuntu 24.04 (any system with glibc >= 2.34 should do); for mipsel and mips64el it is built for Debian 12. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`. Install: \`sudo apt install ./mbusgw-t2r_${VER}-1_<arch>.deb\`.
 
           OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${VER}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${VER}-*_<arch>.apk\`); libconfig and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
+
+          To check a download: \`minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14\` (\`SHA256SUMS.minisig\` next to it), then \`sha256sum -c --ignore-missing SHA256SUMS\`.
           EOF
           fi
