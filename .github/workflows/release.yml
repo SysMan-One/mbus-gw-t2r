@@ -382,7 +382,8 @@ jobs:
           ( umask 077; printf '%s\n' "${MINISIGN_KEY}" > "${key}" )
           minisign -S -s "${key}" -m SHA256SUMS \
             -t "mbusgw-t2r ${TAG} SHA256SUMS signed $(date -u +%d-%b-%Y | tr a-z A-Z)"
-          minisign -Vm SHA256SUMS -p src/minisign.pub
+          # The key is pinned here, not read from src/: a re-run of an older tag has no minisign.pub.
+          minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14
 
       - name: Attach the packages to the Release
         env:
