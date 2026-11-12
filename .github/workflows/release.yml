@@ -5,11 +5,12 @@
 #
 #   CREATION DATE: 28-OCT-2026
 #
-#	A push of the tag v<VERSION> (VERSION follows __REV__ of src/t2r_main.c, X.00-13ECO05 ->
-#	v0.13.5) builds the packages and attaches them, the User Guide PDFs and the sources tarball
-#	to the Release of that tag. The manual run (Actions -> release -> Run workflow) with the <tag>
-#	input does the same for an existing tag (the files of its Release are replaced); without it -
-#	only builds and tests the packages of the branch, see the run's artifacts.
+#	A push of the tag that is the __IDENT__ of src/t2r_main.c (V.01-01ECO02, X.01-02; the package
+#	version follows __REV__: V.01-01ECO02 -> 1.1.2) builds the packages and attaches them, the User
+#	Guide PDFs and the sources tarball to the Release of that tag; the older tags v<VERSION> (v0.13.5)
+#	and V<MM>.<NN>.<E> (V01.01.0) are still taken. The manual run (Actions -> release -> Run
+#	workflow) with the <tag> input does the same for an existing tag (the files of its Release are
+#	replaced); without it - only builds and tests the packages of the branch, see the run's artifacts.
 #
 #	The packages are built on Debian 12 (bookworm): the binary needs glibc >= 2.34 only (bookworm,
 #	trixie, Ubuntu 22.04 and newer); libconfig and StarLet are linked statically.
@@ -49,17 +50,22 @@
 #
 #	11-NOV-2026	CLD	The signature is checked with the public key written in the workflow,
 #				not minisign.pub of the tag: a re-run of an older tag has no such file.
+#
+#	12-NOV-2026	CLD	The tag may be the IDENT itself (X.aa-bb[ECOcc], V.aa-bb[ECOcc]): it must be
+#				the __IDENT__ of src/t2r_main.c, the package version is aa.bb.cc without the
+#				leading zeros (V.01-01ECO02 -> 1.1.2, V.01-01 -> 1.1.0) and must be the one of
+#				__REV__; the X.* tags start the run too. v<VERSION> and V<MM>.<NN>.<E> as before.
 #--
 
 name: release
 
 on:
   push:
-    tags: ['v*', 'V*']
+    tags: ['v*', 'V*', 'X.*']             # V* takes V.aa-bb[ECOcc] and the older V<MM>.<NN>.<E>
   workflow_dispatch:
     inputs:
       tag:
-        description: "An existing tag (v0.13.5) to build and release; empty - build only"
+        description: "An existing tag (V.01-01ECO02; the older v0.13.5, V01.01.0) to build and release; empty - build only"
         required: false
         default: ""
 
@@ -329,7 +335,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [test, deb-cross, openwrt-test]
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || startsWith(inputs.tag, 'v') || startsWith(inputs.tag, 'V')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || startsWith(github.ref, 'refs/tags/X.') || startsWith(inputs.tag, 'v') || startsWith(inputs.tag, 'V') || startsWith(inputs.tag, 'X.')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -346,11 +352,22 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          # The tag is v<VERSION> (the field test X) or V<MM>.<NN>.<E> (the product V.01-00 -> V01.00.0):
-          # the package version is the tag without the prefix and without the leading zeros of the fields
-          VER=$(echo "${TAG#[vV]}" | sed -E 's/(^|\.)0+([0-9])/\1\2/g')
           ident=$(sed -n 's/^#define[[:space:]]*__IDENT__[[:space:]]*"\(.*\)"/\1/p' src/src/t2r_main.c)
           test -n "$ident"
+          # The tag is the IDENT (X.aa-bb[ECOcc] or V.aa-bb[ECOcc]): it must be the __IDENT__ of the tree,
+          # the package version is aa.bb.cc without the leading zeros (V.01-01ECO02 -> 1.1.2, V.01-01 -> 1.1.0)
+          # and must be the one CMake takes from __REV__. The older tags v<VERSION> (the field test, v0.13.5)
+          # and V<MM>.<NN>.<E> (the product, V01.01.0): the tag without the prefix and the leading zeros.
+          re='^[XV]\.([0-9]+)-([0-9]+)(ECO([0-9]+))?$'
+          if [[ "$TAG" =~ $re ]]; then
+            test "$TAG" = "$ident" || { echo "::error::the tag $TAG is not the __IDENT__ $ident of src/t2r_main.c"; exit 1; }
+            VER=$((10#${BASH_REMATCH[1]})).$((10#${BASH_REMATCH[2]})).$((10#${BASH_REMATCH[4]:-0}))
+            rev=$(sed -n 's/^#define[[:space:]]*__REV__[[:space:]]*"\([0-9.]*\)".*/\1/p' src/src/t2r_main.c)
+            rver=$(echo "$rev" | sed -E 's/(^|\.)0+([0-9])/\1\2/g')
+            test "$VER" = "$rver" || { echo "::error::the tag $TAG (version $VER) is not __REV__ $rev ($rver) of src/t2r_main.c"; exit 1; }
+          else
+            VER=$(echo "${TAG#[vV]}" | sed -E 's/(^|\.)0+([0-9])/\1\2/g')
+          fi
           for l in EN RU; do
             cp "src/docs/UserGuide_$l.pdf" "mbusgw-t2r-$ident-UserGuide_$l.pdf"
           done
