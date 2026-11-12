@@ -223,6 +223,10 @@ under `/opt/mbusgw-t2r/etc/` - the has been tuned working configuration always s
 
 ####	Ready-made packages (GitHub Releases)
 
+A release is tagged with the `__IDENT__` of the head module itself, with no "v" (say,
+`V.01-01ECO02`); the package version follows from it (`V.01-01ECO02` -> `1.1.2`). The tags
+`v0.13.x` and `V01.01.0` are the earlier releases and keep their names.
+
 Every release tag on GitHub (`v0.13.5` and later) gets `.deb` packages for amd64 and arm64 at
 https://github.com/napilab/mbus-gw-t2r/releases. They are built on Debian 12 and need glibc 2.34
 or newer only (tested on Debian 12, Debian 13 and Ubuntu 24.04); libconfig and StarLet are linked
