@@ -358,13 +358,16 @@ jobs:
           # the package version is aa.bb.cc without the leading zeros (V.01-01ECO02 -> 1.1.2, V.01-01 -> 1.1.0)
           # and must be the one CMake takes from __REV__. The older tags v<VERSION> (the field test, v0.13.5)
           # and V<MM>.<NN>.<E> (the product, V01.01.0): the tag without the prefix and the leading zeros.
-          re='^[XV]\.([0-9]+)-([0-9]+)(ECO([0-9]+))?$'
+          # The ECO of the form X./V. is two digits, no more and no less: V.01-01ECO2 is refused.
+          re='^[XV]\.([0-9][0-9])-([0-9][0-9])(ECO([0-9][0-9]))?$'
           if [[ "$TAG" =~ $re ]]; then
             test "$TAG" = "$ident" || { echo "::error::the tag $TAG is not the __IDENT__ $ident of src/t2r_main.c"; exit 1; }
             VER=$((10#${BASH_REMATCH[1]})).$((10#${BASH_REMATCH[2]})).$((10#${BASH_REMATCH[4]:-0}))
             rev=$(sed -n 's/^#define[[:space:]]*__REV__[[:space:]]*"\([0-9.]*\)".*/\1/p' src/src/t2r_main.c)
             rver=$(echo "$rev" | sed -E 's/(^|\.)0+([0-9])/\1\2/g')
             test "$VER" = "$rver" || { echo "::error::the tag $TAG (version $VER) is not __REV__ $rev ($rver) of src/t2r_main.c"; exit 1; }
+          elif [[ "$TAG" == [XV].* ]]; then
+            echo "::error::the tag $TAG is not of the form X.aa-bb[ECOcc] or V.aa-bb[ECOcc] (two digits each)"; exit 1
           else
             VER=$(echo "${TAG#[vV]}" | sed -E 's/(^|\.)0+([0-9])/\1\2/g')
           fi
