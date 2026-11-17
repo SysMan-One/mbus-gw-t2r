@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"V.01-01"
-#define	__REV__		"01.01.00"
+#define	__IDENT__	"V.01-01ECO01"
+#define	__REV__		"01.01.01"
 
 /*
 **++
@@ -88,6 +88,14 @@
 **				the sessions count the requests, answers, errors and octets, the listeners -
 **				the accepted and rejected connections; a session reset by the operator does
 **				not report NETPOLLEV. The data path is not changed otherwise.
+**
+**	17-NOV-2026	CLD	V.01-01ECO01 / REV: 01.01.01 - s_net_session(): the client socket is given to
+**				t2r$tty_exec_req() - a request of a client which has gone is dropped (STS$K_WARN,
+**				PEERCLOSE, not an error of the session) and the session ends at once, its <connlm>
+**				slot is free; an answer which has been sent by one send() completes the exchange
+**				at once (was: one more poll() for POLLOUT - an extra round, the closed client then
+**				was seen as NETPOLLEV and its slot was held a bit longer); the idle time of the
+**				session is counted from the end of the answer.
 **--
 */
 
@@ -611,9 +619,10 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 					}
 
 
-				if ( !(1 & (l_rc = t2r$tty_exec_req (l_serial, &l_rtu_req_dsc, &l_rtu_resp_dsc, &l_excode))) )
+				if ( !(1 & (l_rc = t2r$tty_exec_req (l_serial, l_session->sd, &l_rtu_req_dsc, &l_rtu_resp_dsc, &l_excode))) )
 					{
-					l_session->nerr++;
+					if ( l_rc != STS$K_WARN )		/* WARN: the client has gone, nothing to count */
+						l_session->nerr++;
 					break;
 					}
 
@@ -636,9 +645,19 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 				/* FALLTHRU */					/* Try to send the answer immediately */
 			case T2R$K_STATE_PDU_XMIT:
 
-				$MBAP_PRINT("Sending", l_netbuf_dsc.data, l_netbuf_dsc.len);
+				if ( l_session->datalen != l_netbuf_dsc.len )	/* Something is still to be sent ? */
+					{
+					$MBAP_PRINT("Sending", l_netbuf_dsc.data, l_netbuf_dsc.len);
 
-				if ( l_session->datalen == l_netbuf_dsc.len )	/* All data is sent to remote TCP client ? */
+					if ( !(1 & (l_rc = s_net_mbap_tx (l_session))) )
+						break;
+					}
+
+				/*
+				 * All data is sent to the remote TCP client: the exchange is completed at once, a
+				 * whole answer in one send() does not wait for one more poll() round.
+				 */
+				if ( l_session->datalen == l_netbuf_dsc.len )
 					{
 					$MBAP_PRINT("Sent", l_netbuf_dsc.data, l_netbuf_dsc.len);
 
@@ -647,12 +666,11 @@ $DESCRIPTOR_S	(l_rtu_resp_dsc, (2*MODBUS$SZ_MAXPDU));
 					l_pfd.events &= ~POLLOUT;		/* we don't need to check on socket for output */
 					l_session->state = T2R$K_STATE_READY;	/* Do transition to initial state */
 					l_session->datalen = l_netbuf_dsc.len = 0;
+					clock_gettime(CLOCK_MONOTONIC_COARSE, &l_session->lastio_ts);	/* <idletmo> from the answer */
+					l_pfd.revents = 0;			/* That POLLIN was the request just served: READY waits for a new poll() */
 
 					continue;
 					}
-
-				if ( !(1 & (l_rc = s_net_mbap_tx (l_session))) )
-					break;
 			}
 
 

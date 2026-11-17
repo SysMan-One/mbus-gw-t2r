@@ -51,6 +51,9 @@
 #
 #	07-NOV-2026	CLD	V.01-01: the control channel speaks AVProto TLV - no socat example any more;
 #				the codes CTLBADSEL and CTLCUT.
+#
+#	17-NOV-2026	CLD	V.01-01ECO01: PEERCLOSE also tells a request dropped because its client has
+#				closed while it waited for a busy line; a half-closed client.
 #--
 import sys
 
@@ -854,7 +857,7 @@ def s_pack_en ():
 			('TTYSYSWRN', 'W', 'A minor serial port call failed (tcflush, poll/read while flushing); the gateway keeps working.'),
 			('DEVSYSERR', 'E', 'A serial port setup call failed (tcgetattr, tcsetattr, cfsetspeed, mutex); the port is not used.'),
 			('DEVSYSWRN', 'W', 'Waiting for the serial line took too long (pthread_mutex_timedlock); the gateway tries again.'),
-			('PEERCLOSE', 'I', 'The TCP client has closed the connection — the normal end of a session.'),
+			('PEERCLOSE', 'I', 'The TCP client has closed the connection — the normal end of a session. Since V.01-01ECO01 also: a client has closed while its request waited for a busy line (e.g. behind a NOANSWER) — the request is dropped, the line is not used for it, the connlm place of the client is free within 0.5 s; a half-closed client (shutdown(SHUT_WR), nc -N) gets its answer on a free line, but not after such a wait.'),
 			('ALLSENT', 'W', 'Nothing left to send on a TCP connection — harmless.'),
 			('BADPROTO', 'E', 'A TCP request has a non-zero MBAP protocol id: the client does not speak MODBUS TCP; the connection is closed.'),
 			('PDUSHORT', 'E', 'A TCP request is too short to be a MODBUS request; the connection is closed.'),
@@ -1397,7 +1400,7 @@ def s_pack_ru ():
 			('TTYSYSWRN', 'W', 'Сбой второстепенного вызова на порту (tcflush, poll/read при очистке); шлюз продолжает работу.'),
 			('DEVSYSERR', 'E', 'Сбой вызова настройки порта (tcgetattr, tcsetattr, cfsetspeed, mutex); порт не используется.'),
 			('DEVSYSWRN', 'W', 'Ожидание последовательной линии затянулось (pthread_mutex_timedlock); шлюз пробует снова.'),
-			('PEERCLOSE', 'I', 'TCP-клиент закрыл соединение — обычное окончание сеанса.'),
+			('PEERCLOSE', 'I', 'TCP-клиент закрыл соединение — обычное окончание сеанса. С V.01-01ECO01 ещё: клиент закрыл соединение, пока его запрос ждал занятую линию (например, за NOANSWER) — запрос отброшен, на линию не идёт, место клиента в connlm освобождается в пределах 0,5 с; клиент с полузакрытием (shutdown(SHUT_WR), nc -N) на свободной линии ответ получает, а после такого ожидания — нет.'),
 			('ALLSENT', 'W', 'На TCP-соединении нечего отправлять — безвредно.'),
 			('BADPROTO', 'E', 'У TCP-запроса ненулевой идентификатор протокола MBAP: клиент говорит не на MODBUS TCP; соединение закрывается.'),
 			('PDUSHORT', 'E', 'TCP-запрос слишком короткий для MODBUS; соединение закрывается.'),

@@ -52,6 +52,10 @@
 **	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - T2R$K_CTL_LINESZ is gone: the control channel speaks
 **				AVProto TLV (src/t2r_ctlproto.h).
 **
+**	17-NOV-2026	CLD	V.01-01ECO01 / REV: 01.01.01 - t2r$tty_exec_req() got the socket of the client
+**				(a_sd): a request of a client which has gone is dropped; added
+**				T2R$K_LOCK_SLICE_MSEC.
+**
 **--
 */
 
@@ -120,6 +124,7 @@ enum {
 #define		T2R$K_SETTLE_MSEC	50				/* A pause after the serial port set up, then TCIOFLUSH */
 #define		T2R$K_REOPEN_MSEC	1000				/* An absent or lost device is reopened this often	*/
 #define		T2R$K_CHECK_MSEC	1000				/* The idle lines are checked for a hangup this often	*/
+#define		T2R$K_LOCK_SLICE_MSEC	500				/* A waiter of the line checks its client this often	*/
 #define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 4	*/
 #define		T2R$K_USBGAP_MSEC	20				/* A gap inside of an answer from an USB adapter: 16 msec
 									   of the FTDI latency_timer plus a margin */
@@ -312,7 +317,7 @@ void	t2r$rtu_print (const char *a__mod, const char *a__fi, const int a__li,
 
 int	t2r$tty_open(T2R$_SERIAL *);
 int	t2r$tty_close(T2R$_SERIAL *);
-int	t2r$tty_exec_req(T2R$_SERIAL *, void *a_req_dsc, void *a_resp_dsc, uint8_t *a_excode);
+int	t2r$tty_exec_req(T2R$_SERIAL *, int a_sd, void *a_req_dsc, void *a_resp_dsc, uint8_t *a_excode);
 int	t2r$tty_check(T2R$_SERIAL *);
 int	t2r$tty_raw_relay(T2R$_SERIAL *, int a_sd, int a_idletmo, uint64_t *a_net2tty, uint64_t *a_tty2net);
 

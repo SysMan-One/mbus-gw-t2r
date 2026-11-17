@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-01"
-#define	__REV__		"01.01.00"
+#define	__IDENT__	"V.01-01ECO01"
+#define	__REV__		"01.01.01"
 
 /*
 **++
@@ -209,6 +209,11 @@
 **				every descriptor above stderr, then execv("/proc/self/exe") with the saved
 **				command line - the same PID, so systemd and procd see nothing (RESTARTING,
 **				EXECERR). g_t2r_ident/g_t2r_rev/g_start_time are given to T2R-CTL.
+**
+**	17-NOV-2026	CLD	V.01-01ECO01 / REV: 01.01.01 (package version 1.1.1) - T2R-TTY, T2R-NET: a
+**				request of a TCP client which has closed while it waited for a busy line is
+**				dropped, its session frees the <connlm> slot within a lock slice (was: a NOANSWER of a dead
+**				unit turned into a cascade of CONNLIMIT/NETPOLLEV under connection churn).
 **--
 */
 

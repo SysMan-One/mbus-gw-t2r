@@ -423,7 +423,7 @@ dislikes.**
 | `TTYSYSWRN` | W | A minor serial port call failed (tcflush, poll/read while flushing); the gateway keeps working |
 | `DEVSYSERR` | E | A serial port setup call failed (tcgetattr, tcsetattr, cfsetspeed, mutex); the port is not used |
 | `DEVSYSWRN` | W | Waiting for the serial line took too long (pthread_mutex_timedlock); the gateway tries again |
-| `PEERCLOSE` | I | The TCP client has closed the connection --- the normal end of a session |
+| `PEERCLOSE` | I | The TCP client has closed the connection --- the normal end of a session. Since V.01-01ECO01 also: a client has closed while its request waited for a busy line (e.g. behind a NOANSWER) --- the request is dropped, the line is not used for it, the `connlm` place of the client is free within 0.5 s; a half-closed client (`shutdown(SHUT_WR)`, `nc -N`) gets its answer on a free line, but not after such a wait |
 | `ALLSENT` | W | Nothing left to send on a TCP connection --- harmless |
 | `BADPROTO` | E | A TCP request has a non-zero MBAP protocol id: the client does not speak MODBUS TCP; the connection is closed |
 | `PDUSHORT` | E | A TCP request is too short to be a MODBUS request; the connection is closed |

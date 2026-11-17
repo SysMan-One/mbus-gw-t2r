@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"X.00-14ECO02"
-#define	__REV__		"00.14.02"
+#define	__IDENT__	"V.01-01ECO01"
+#define	__REV__		"01.01.01"
 
 /*
 **++
@@ -118,6 +118,16 @@
 **				data: what it has sent is read out first, a close() with an unread input is an RST); a hangup or EIO/ENODEV/ENXIO of the line during the session
 **				closes the device (s_tty_lost(), DEVLOST - was TTYPOLLEV, the dead descriptor
 **				was kept) and ends the session.
+**
+**	17-NOV-2026	CLD	V.01-01ECO01 / REV: 01.01.01 - A request of a TCP client which has gone is not executed:
+**				t2r$tty_exec_req() got the client socket (a_sd), s_tty_lock() waits for the line
+**				by T2R$K_LOCK_SLICE_MSEC slices and checks the client between them, and once more
+**				with the lock taken (s_tty_peer_gone()). A closed client of a session queued for a
+**				busy line (a NOANSWER of a dead unit holds it for <iotmo> + <lategd>) frees its
+**				<connlm> slot within a slice and does not take the line for nobody (was: up to 3 x 13 s
+**				in the queue, then an RTU exchange whose answer was sent into an RST). An RST counts
+**				always, a FIN only after the request has waited for a busy line: a half-closed
+**				client (shutdown(SHUT_WR), "nc -N") on a free line still gets its answer.
 **--
 */
 #include	<time.h>
@@ -155,28 +165,84 @@ static const struct timespec	s_reopen_ts = {.tv_sec = T2R$K_REOPEN_MSEC / 1000, 
 
 
 /*
- *   DESCRIPTION: Get an exclusive access to the serial device: a MODBUS RTU line is strictly a
- *	half duplex request-answer bus, so only one network session at a time is allowed to talk
- *	to it. A timed lock is used (13 seconds, 3 attempts) to detect a stuck holder instead of
- *	hanging forever. Every timed out attempt is signalled by DEVSYSWRN.
+ *   DESCRIPTION: Has the TCP client of a session gone? An RST or an error of the socket, and - if
+ *	a_fin is set - a FIN (recv() would return 0). Nothing is read: a peek of one octet, without
+ *	waiting. A FIN which follows a not yet read data is not seen - such a client is served as
+ *	before. A FIN alone cannot tell a closed client from a half-closed one (a shutdown(SHUT_WR)
+ *	after its request, as "nc -N", which still reads the answer), so the caller counts it only
+ *	when the request has really waited in the queue for the line: a client which has closed there
+ *	is gone (the bench case - a NOANSWER of a dead unit ahead of it), a half-closed one on a free
+ *	line is served.
  *
  *   INPUTS:
- *	a_serial:	A context of the serial line, .lock - the guarding mutex
+ *	a_sd:		The socket of the client, -1 - there is no client to check
+ *	a_fin:		1 - a FIN is a gone client too, 0 - only an RST or a socket error
  *
  *   OUTPUTS:
  *	NONE
  *
  *   RETURNS:
+ *	1 - the client has gone, 0 - it is there (or a_sd is -1)
+ */
+static int	s_tty_peer_gone (
+		int	a_sd,
+		int	a_fin
+		)
+{
+int	l_rc;
+uint8_t	l_octet;
+struct pollfd	l_pfd = {.fd = a_sd, .events = POLLIN};
+
+	if ( 0 > a_sd )
+		return	0;
+
+	if ( 0 >= poll(&l_pfd, 1, 0) )
+		return	0;							/* Nothing has come (an error of poll() - not a verdict) */
+
+	if ( l_pfd.revents & (POLLERR | POLLHUP | POLLNVAL) )
+		return	1;
+
+	if ( !(l_rc = recv(a_sd, &l_octet, sizeof(l_octet), MSG_PEEK | MSG_DONTWAIT)) )
+		return	a_fin;							/* A FIN: gone or half-closed */
+
+	return	(0 > l_rc) && (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR);
+}
+
+
+
+/*
+ *   DESCRIPTION: Get an exclusive access to the serial device: a MODBUS RTU line is strictly a
+ *	half duplex request-answer bus, so only one network session at a time is allowed to talk
+ *	to it. A timed lock is used (13 seconds, 3 attempts) to detect a stuck holder instead of
+ *	hanging forever. Every timed out attempt is signalled by DEVSYSWRN. An attempt is waited out
+ *	by T2R$K_LOCK_SLICE_MSEC slices: between them the TCP client (a_sd) is checked, a client which
+ *	has gone (a FIN counts: the request has waited a slice at least) ends the wait at the next check - its
+ *	session frees the <connlm> slot, the line is not used for an answer nobody will read.
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line, .lock - the guarding mutex
+ *	a_sd:		The socket of the TCP client the line is taken for, -1 - no client to check
+ *
+ *   OUTPUTS:
+ *	a_waited:	1 - a slice at least has timed out (the line was busy), 0 - taken at once
+ *
+ *   RETURNS:
  *	STS$K_SUCCESS	- the lock has been taken
+ *	STS$K_WARN	- the client has gone, the lock is not taken (PEERCLOSE is signalled)
  *	T2R$__DEVLOCKERR - the lock has not been taken after 3 attempts
  *	T2R$__SYSERR	- clock_gettime() failed
  */
 static inline int s_tty_lock (
-		T2R$_SERIAL	*a_serial
+		T2R$_SERIAL	*a_serial,
+		int		a_sd,
+		int		*a_waited
 		)
 {
-struct timespec l_now, l_tmo = {.tv_sec = 13}, l_etime;
-int	l_rc;
+struct timespec l_now, l_tmo = {.tv_sec = 13}, l_etime, l_slice_ts, l_send;
+const struct timespec l_slice = {.tv_sec = T2R$K_LOCK_SLICE_MSEC / 1000, .tv_nsec = (T2R$K_LOCK_SLICE_MSEC % 1000) * 1000000L};
+int	l_rc, l_last;
+
+	*a_waited = 0;
 
 	for (int i = 0; i < 3; i++)
 		{
@@ -185,10 +251,35 @@ int	l_rc;
 
 		__util$add_time (&l_now, &l_tmo, &l_etime);
 
-		if ( !(l_rc = pthread_mutex_timedlock(&a_serial->lock, &l_etime)) )
+		for ( l_last = 0; !l_last; )
 			{
-			//$IFTRACE(g_trace, "Got exclusive access to <%s> ...", a_serial->devname);
-			return	STS$K_SUCCESS;
+			l_send = l_etime;					/* No client to check: the whole attempt is one wait */
+
+			if ( 0 <= a_sd )
+				{
+				__util$add_time (&l_now, &l_slice, &l_slice_ts);
+
+				if ( 0 > __util$cmp_time (&l_slice_ts, &l_etime) )
+					l_send = l_slice_ts;
+				}
+
+			l_last = (l_send.tv_sec == l_etime.tv_sec) && (l_send.tv_nsec == l_etime.tv_nsec);
+
+			if ( !(l_rc = pthread_mutex_timedlock(&a_serial->lock, &l_send)) )
+				{
+				//$IFTRACE(g_trace, "Got exclusive access to <%s> ...", a_serial->devname);
+				return	STS$K_SUCCESS;
+				}
+
+			if ( l_rc != ETIMEDOUT )
+				break;
+
+			*a_waited = 1;						/* The line is busy: the request is in the queue */
+
+			if ( s_tty_peer_gone (a_sd, 1) )
+				return	$PUTMSG_FAO(T2R$__PEERCLOSE, a_sd), STS$K_WARN;
+
+			clock_gettime(CLOCK_REALTIME_COARSE, &l_now);
 			}
 
 		$PUTMSG_FAO(T2R$__DEVSYSWRN, a_serial->devname, "pthread_mutex_timedlock()", l_rc, errno);
@@ -1312,9 +1403,9 @@ int	t2r$tty_open (
 			       T2R$_SERIAL	*a_serial
 			       )
 {
-int	l_rc;
+int	l_rc, l_waited;
 
-	if ( !(1 & s_tty_lock (a_serial)) )
+	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
 		return	$PUTMSG_FAO(T2R$__DEVINIERR, a_serial->devname);
 
 	if ( a_serial->state > T2R$K_STATE_IDLE )
@@ -1364,9 +1455,9 @@ int	t2r$tty_close (
 			       T2R$_SERIAL	*a_serial
 			       )
 {
-int	l_rc;
+int	l_rc, l_waited;
 
-	if ( !(1 & s_tty_lock (a_serial)) )
+	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
 		return	$PUTMSG_FAO(T2R$__DEVCLSERR, a_serial->fd, a_serial->devname);
 
 	if ( !a_serial->state )
@@ -1576,10 +1667,14 @@ struct pollfd	l_pfd = {.fd = a_serial->fd, .events = POLLIN};
  *	the line; a bad quantity is answered by the ILLEGAL_DATA_ADDRESS exception. On an RTU I/O
  *	error the line is flushed and a SERVER_DEVICE_FAILURE exception PDU is formed. An absent or
  *	lost device (see s_tty_reopen(), s_tty_lost()) gets the GW_NO_PATH (10) exception, without
- *	EXCRPT: DEVLOST/DEVABSENT has told it once.
+ *	EXCRPT: DEVLOST/DEVABSENT has told it once. A request of a client which has gone (a_sd, see
+ *	s_tty_peer_gone()) - an RST before the lock; an RST or a FIN while waiting for it or with the
+ *	lock taken after a wait - is dropped without any I/O on the line. A FIN on a free line is a
+ *	half-closed client possibly: it is served.
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line
+ *	a_sd:		The socket of the TCP client, -1 - do not check the client
  *	a_req_dsc:	A descriptor of the request PDU (without MBAP and without CRC)
  *
  *   OUTPUTS:
@@ -1588,16 +1683,18 @@ struct pollfd	l_pfd = {.fd = a_serial->fd, .events = POLLIN};
  *
  *   RETURNS:
  *	STS$K_SUCCESS	- an answer or an exception PDU is in a_resp_dsc (check a_excode)
+ *	STS$K_WARN	- the client has gone (PEERCLOSE is signalled), a_resp_dsc is not filled
  *	T2R$__DEVBUSY	- the device lock is not taken, a_resp_dsc is not filled
  */
 int	t2r$tty_exec_req (
 		T2R$_SERIAL	*a_serial,
+			int	a_sd,
 			void	*a_req_dsc,
 			void	*a_resp_dsc,
 			uint8_t	*a_excode
 			)
 {
-int	l_rc, l_rcv, l_nodev;
+int	l_rc, l_rcv, l_nodev, l_waited = 0;
 T2R$_DESC	*l_req_dsc = a_req_dsc, *l_resp_dsc = a_resp_dsc;
 MODBUS_REQ_T	*l_req_pdu;
 
@@ -1622,8 +1719,26 @@ MODBUS_REQ_T	*l_req_pdu;
 		}
 
 
-	if ( !(1 & s_tty_lock (a_serial)) )
+	/*
+	 * The client may have gone while its request was on the way, in the queue for the line (a
+	 * NOANSWER of a dead unit holds the line for <iotmo> + <lategd>) or just before the lock was
+	 * given to us: its request is dropped, the line is not taken for an answer nobody will read.
+	 */
+	if ( s_tty_peer_gone (a_sd, 0) )
+		return	$PUTMSG_FAO(T2R$__PEERCLOSE, a_sd), STS$K_WARN;
+
+	if ( STS$K_WARN == (l_rc = s_tty_lock (a_serial, a_sd, &l_waited)) )
+		return	l_rc;							/* The client has gone while waiting */
+
+	if ( !(1 & l_rc) )
 		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
+
+	if ( s_tty_peer_gone (a_sd, l_waited) )				/* A FIN counts after a wait only */
+		{
+		s_tty_unlock (a_serial);
+
+		return	$PUTMSG_FAO(T2R$__PEERCLOSE, a_sd), STS$K_WARN;
+		}
 
 
 	if ( !(1 & (l_rc = s_tty_reopen (a_serial))) )
@@ -1702,7 +1817,7 @@ int	t2r$tty_raw_relay (
 		uint64_t	*a_tty2net
 			)
 {
-int	l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0, l_errno;
+int	l_waited, l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0, l_errno;
 ssize_t	l_cnt;
 struct pollfd	l_pfd[2];
 struct timespec	l_now, l_lastio;
@@ -1710,7 +1825,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 	*a_net2tty = *a_tty2net = 0;
 
-	if ( !(1 & s_tty_lock (a_serial)) )
+	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
 		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
 
 	if ( !(1 & (l_rc = s_tty_reopen (a_serial))) )					/* Absent: the client gets a FIN at once */
