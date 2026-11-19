@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-01ECO01"
-#define	__REV__		"01.01.01"
+#define	__IDENT__	"V.01-01ECO02"
+#define	__REV__		"01.01.02"
 
 /*
 **++
@@ -214,6 +214,16 @@
 **				request of a TCP client which has closed while it waited for a busy line is
 **				dropped, its session frees the <connlm> slot within a lock slice (was: a NOANSWER of a dead
 **				unit turned into a cascade of CONNLIMIT/NETPOLLEV under connection churn).
+**
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 (package version 1.1.2) - The counted strings go
+**				to the messages as they are: CHECKOK takes &g_settings (!AC, was $ASCPTR() for
+**				!AZ - the length was thrown away), t2r$ctl_start() takes &g_ctlsock.
+**				The <target> of a listener and the <device> of a serial are kept as ASC
+**				(__util$str2asc(); up to ASC$K_SZ - 1 octets, was 64; a longer one is
+**				SERBADREC/LSNBADREC - so the copy is whole and NUL-terminated with any StarLet,
+**				1.6.10 of the OpenWrt kits included), every message shows the device name by
+**				!AC; s_settings_find_n_get_serial() compares the length and the text. s_save_argv():
+**				a failed strdup() frees the copies made before it (was: a leak).
 **--
 */
 
@@ -286,8 +296,8 @@ int	g_exit_flag = 0,						/* Global flag 'all must to be stop'	*/
 	g_trace = 0;							/* A flag to produce extensible logging	*/
 
 time_t	g_start_time;							/* SHOW GATEWAY: the uptime		*/
-const char g_t2r_ident[] = __IDENT__,					/* SHOW GATEWAY: the revision		*/
-	g_t2r_rev[] = __REV__;
+const ASC  g_t2r_ident = {$ASCINI(__IDENT__)},					/* SHOW GATEWAY: the revision		*/
+	g_t2r_rev = {$ASCINI(__REV__)};
 
 static char	**s_argv;						/* A copy of the command line: RESTART	*/
 
@@ -316,13 +326,13 @@ static KWDENT	s_mode_tbl[] =						/* <mode> of a listener, case-insensitive */
 
 static const OPTS g_optstbl [] =					/* General CLI options		*/
 {
-	{{$ASCINI("config")},	&g_confspec, ASC$K_SZ,		OPTS$K_CONF},
+	{{$ASCINI("config")},	&g_confspec, ASC$K_SZ - 1,	OPTS$K_CONF},
 	{{$ASCINI("trace")},	&g_trace, 0,			OPTS$K_OPT},
-	{{$ASCINI("logfile")},	&g_logfspec, ASC$K_SZ,		OPTS$K_STR},
+	{{$ASCINI("logfile")},	&g_logfspec, ASC$K_SZ - 1,	OPTS$K_STR},
 	{{$ASCINI("logsize")},	&g_logsize, 0,			OPTS$K_INT},
 
-	{{$ASCINI("settings")},	&g_settings,  ASC$K_SZ,		OPTS$K_STR},
-	{{$ASCINI("control")},	&g_ctlsock,  ASC$K_SZ,		OPTS$K_STR},
+	{{$ASCINI("settings")},	&g_settings,  ASC$K_SZ - 1,	OPTS$K_STR},
+	{{$ASCINI("control")},	&g_ctlsock,  ASC$K_SZ - 1,	OPTS$K_STR},
 	{{$ASCINI("check")},	&g_check, 0,			OPTS$K_OPT},
 
 	OPTS_NULL
@@ -370,7 +380,8 @@ static int s_settings_find_n_get_serial (
 	 */
 	for ( int i = 0; i < g_serials_nr; i++)
 		{
-		if ( !strncasecmp(a_target, g_serials[i].devname, T2R$K_TTY_DEVNAME) )
+		if ( (strnlen(a_target, ASC$K_SZ - 1) == $ASCLEN(&g_serials[i].devname))	/* As __util$str2asc() keeps it */
+			&& !strncasecmp(a_target, $ASCPTR(&g_serials[i].devname), $ASCLEN(&g_serials[i].devname)) )
 			return	*a_serial = &g_serials[i], STS$K_SUCCESS;
 		}
 
@@ -443,7 +454,13 @@ char	l_chars[64];
 			continue;
 			}
 
-		strncpy(l_serial->devname, l_str, T2R$K_TTY_DEVNAME);		/* The tail is zeroed by the memset above */
+		if ( strnlen(l_str, ASC$K_SZ) > ASC$K_SZ - 1 )			/* The ASC keeps it whole and NUL-terminated, */
+			{								/* with any StarLet's __util$str2asc()	*/
+			$PUTMSG_FAO(T2R$__SERBADREC, i, "<device> name is too long");
+			continue;
+			}
+
+		__util$str2asc(l_str, &l_serial->devname);			/* NUL-terminated: open() takes its sts */
 
 		/*
 		 * config_setting_lookup_int() reports a PRESENCE of the key, so the value must be
@@ -454,13 +471,13 @@ char	l_chars[64];
 #ifdef HAVE_TIOCRS485
 			l_serial->flags |=  T2R$M_SERIAL_RS485;
 #else
-			$PUTMSG_FAO(T2R$__SERNORS485, i, l_serial->devname);
+			$PUTMSG_FAO(T2R$__SERNORS485, i, &l_serial->devname);
 #endif
 			}
 
 		if ( !config_setting_lookup_string(l_args, "chars", &l_str) )
 			{
-			$PUTMSG_FAO(T2R$__SERBADOPT, i, l_serial->devname, "no <chars> option");
+			$PUTMSG_FAO(T2R$__SERBADOPT, i, &l_serial->devname, "no <chars> option");
 			continue;
 			}
 
@@ -470,7 +487,7 @@ char	l_chars[64];
 		 */
 		if ( sizeof(l_chars) <= (size_t) snprintf(l_chars, sizeof(l_chars), "%s", l_str) )
 			{
-			$PUTMSG_FAO(T2R$__SERBADOPT, i, l_serial->devname, "<chars> value is too long");
+			$PUTMSG_FAO(T2R$__SERBADOPT, i, &l_serial->devname, "<chars> value is too long");
 			continue;
 			}
 
@@ -478,7 +495,7 @@ char	l_chars[64];
 
 		if ( 4 != sscanf(l_chars, "%d,%d,%c,%d", &l_speed, &l_databits, &l_parity, &l_stopbits) )
 			{
-			$PUTMSG_FAO(T2R$__SERBADCHR, i, l_serial->devname, l_chars);
+			$PUTMSG_FAO(T2R$__SERBADCHR, i, &l_serial->devname, l_chars);
 			continue;
 			}
 
@@ -487,19 +504,19 @@ char	l_chars[64];
 		 */
 		if ( !$ISINRANGE(l_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX) )
 			{
-			$PUTMSG_FAO(T2R$__SERRANGE, i, l_serial->devname, "speed (baud)", l_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX);
+			$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "speed (baud)", l_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX);
 			continue;
 			}
 
 		if ( !$ISINRANGE(l_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX) )
 			{
-			$PUTMSG_FAO(T2R$__SERRANGE, i, l_serial->devname, "data bits", l_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX);
+			$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "data bits", l_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX);
 			continue;
 			}
 
 		if ( !$ISINRANGE(l_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX) )
 			{
-			$PUTMSG_FAO(T2R$__SERRANGE, i, l_serial->devname, "stop bits", l_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX);
+			$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "stop bits", l_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX);
 			continue;
 			}
 
@@ -511,7 +528,7 @@ char	l_chars[64];
 				break;
 
 			default:
-				$PUTMSG_FAO(T2R$__SERBADPAR, i, l_serial->devname, 1, &l_parity);
+				$PUTMSG_FAO(T2R$__SERBADPAR, i, &l_serial->devname, 1, &l_parity);
 				continue;
 			}
 
@@ -535,7 +552,7 @@ char	l_chars[64];
 			{
 			if ( (l_int < 0) || (l_int > T2R$K_LATEGD_MAX) )
 				{
-				$PUTMSG_FAO(T2R$__SERRANGE, i, l_serial->devname, "lategd (msec)", l_int, 0, T2R$K_LATEGD_MAX);
+				$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "lategd (msec)", l_int, 0, T2R$K_LATEGD_MAX);
 				continue;
 				}
 
@@ -578,16 +595,16 @@ char	l_chars[64];
 
 		if ( (l_int = pthread_mutex_init(&l_serial->lock, NULL)) )
 			{
-			$PUTMSG_FAO(T2R$__DEVSYSERR, l_serial->devname, "pthread_mutex_init()", l_int, errno);
+			$PUTMSG_FAO(T2R$__DEVSYSERR, &l_serial->devname, "pthread_mutex_init()", l_int, errno);
 			continue;
 			}
 
-		$PUTMSG_FAO(T2R$__DEVADDED, i, l_serial->devname, l_serial->baud, l_serial->databits, 1, &l_parity,
+		$PUTMSG_FAO(T2R$__DEVADDED, i, &l_serial->devname, l_serial->baud, l_serial->databits, 1, &l_parity,
 			l_serial->stopbits, l_serial->anstmo_msec, l_serial->inter_pdu_usec);
 
 		if ( l_serial->flags &  T2R$M_SERIAL_ADDTS )
-			$PUTMSG_FAO(T2R$__TSENABLED, l_serial->devname, l_serial->ts_unit_nr, l_serial->ts_fncode, l_serial->ts_base_reg0);
-		else	$PUTMSG_FAO(T2R$__TSDISABLED, l_serial->devname);
+			$PUTMSG_FAO(T2R$__TSENABLED, &l_serial->devname, l_serial->ts_unit_nr, l_serial->ts_fncode, l_serial->ts_base_reg0);
+		else	$PUTMSG_FAO(T2R$__TSDISABLED, &l_serial->devname);
 
 
 		l_serial++;
@@ -801,6 +818,12 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 			continue;
 			}
 
+		if ( strnlen(l_str, ASC$K_SZ) > ASC$K_SZ - 1 )			/* As <device> of a serial: a longer one */
+			{								/* could only match a cut name		*/
+			$PUTMSG_FAO(T2R$__LSNBADREC, i, "<target> name is too long");
+			continue;
+			}
+
 		if ( !(1 & s_settings_find_n_get_serial (l_str, &l_listener->serial)) )
 			{
 			$PUTMSG_FAO(T2R$__LSNNOTGT, i, l_str);
@@ -830,7 +853,7 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 			continue;
 			}
 
-		strncpy(l_listener->target, l_str, T2R$K_TTY_DEVNAME);		/* The tail is zeroed by the memset above */
+		__util$str2asc(l_str, &l_listener->target);
 
 		if ( (l_int = pthread_mutex_init(&l_listener->rawlock, NULL)) )
 			{
@@ -838,7 +861,7 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 			continue;
 			}
 
-		$PUTMSG_FAO(T2R$__LSNADDED, i, l_listener->serial->devname, (l_listener->proto == IPPROTO_UDP) ? "UDP": "TCP",
+		$PUTMSG_FAO(T2R$__LSNADDED, i, &l_listener->serial->devname, (l_listener->proto == IPPROTO_UDP) ? "UDP": "TCP",
 			&l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), l_listener->connlm, l_listener->idletmo,
 			(l_listener->mode == T2R$K_MODE_RAW) ? (l_listener->takeover ? "RAW (takeover)" : "RAW") : "MODBUS");
 
@@ -1051,18 +1074,24 @@ static void	s_save_argv (
 		char	**argv
 		)
 {
-	if ( !(s_argv = calloc((size_t) argc + 1, sizeof(char *))) )
+char	**l_argv;
+
+	if ( !(l_argv = calloc((size_t) argc + 1, sizeof(char *))) )
 		return;
 
 	for (int i = 0; i < argc; i++)
 		{
-		if ( !(s_argv[i] = strdup(argv[i])) )
+		if ( !(l_argv[i] = strdup(argv[i])) )
 			{
-			free(s_argv);
-			s_argv = NULL;
+			while ( i-- )
+				free(l_argv[i]);		/* The copies made so far */
+
+			free(l_argv);
 			return;
 			}
 		}
+
+	s_argv = l_argv;					/* A whole copy or none */
 }
 
 
@@ -1163,15 +1192,15 @@ int l_rc = 0;
 	if ( !(1 & s_config_validation()) )
 		return	$PUTMSG_FAO(T2R$__CFGABORT), EXIT_FAILURE;
 
-	if ( g_check )								/* /CHECK: that is all */
-		return	$PUTMSG_FAO(T2R$__CHECKOK, $ASCPTR(&g_settings), g_serials_nr, g_listeners_nr), EXIT_SUCCESS;
+	if ( g_check )								/* /CHECK: that settings is good */
+		return	$PUTMSG_FAO(T2R$__CHECKOK, &g_settings, g_serials_nr, g_listeners_nr), EXIT_SUCCESS;
 
 
 	s_init_sig_handler ();
 
 	if ( (1 & (l_rc = t2r$net_start_listeners ())) )
 		{
-		t2r$ctl_start ($ASCPTR(&g_ctlsock));				/* A failure is not fatal: no control only */
+		t2r$ctl_start (&g_ctlsock);					/* A failure is not fatal: no control only */
 
 		while ( !g_exit_flag)
 			{

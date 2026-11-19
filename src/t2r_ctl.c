@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-CTL"
-#define	__IDENT__	"V.01-01"
-#define	__REV__		"01.01.00"
+#define	__IDENT__	"V.01-01ECO02"
+#define	__REV__		"01.01.02"
 
 /*
 **++
@@ -48,6 +48,12 @@
 **	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The protocol is the AVProto TLV (src/t2r_ctlproto.h),
 **				the text request lines and the HELP request are gone.
 **
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - t2r$ctl_start() takes the path as an ASC and gives it
+**				to CTLREADY/CTLBUSY/CTLERR as it is (!AC); s_ctl_path is an ASC (its sts is kept
+**				NUL-terminated for lstat()/unlink()/chmod()), SHOW GATEWAY sends it by its length.
+**
+**	19-NOV-2026	RRL	Reduce usage of  strlen() and ASCIZ.
+**
 **--
 */
 
@@ -81,7 +87,7 @@
 
 extern int	g_exit_flag, g_restart_flag, g_trace;
 extern time_t	g_start_time;
-extern const char g_t2r_ident[], g_t2r_rev[];
+extern const ASC g_t2r_ident, g_t2r_rev;
 extern ASC	g_settings;
 
 extern T2R$_LISTENER	g_listeners[];
@@ -94,7 +100,7 @@ extern char	**environ;
 
 static	int		s_ctl_sd = -1;						/* The listening AF_UNIX socket		*/
 static	pthread_t	s_ctl_tid;						/* The control thread, joined at the stop	*/
-static	char		s_ctl_path[sizeof(((struct sockaddr_un *) 0)->sun_path)];
+static	ASC		s_ctl_path;						/* < sizeof(sun_path): sts stays NUL-terminated */
 static	int		s_ctl_restart;						/* RESTART is accepted: raise the flags	*/
 										/* after the answer has been sent	*/
 
@@ -105,7 +111,7 @@ static	int		s_ctl_restart;						/* RESTART is accepted: raise the flags	*/
  */
 typedef struct	t2r_ctl_ans_t {
 	AVPROTO_PDU	*pdu;							/* T2R$K_CTL_ANSSZ octets		*/
-	int		cut;							/* No room for one more record		*/
+	int		cut;							/* Flag: No room for one more record	*/
 } T2R$_CTL_ANS;
 
 
@@ -161,11 +167,17 @@ static inline void	s_ctl_putq (T2R$_CTL_ANS *a_ans, unsigned a_tag, uint64_t a_v
 	s_ctl_put(a_ans, a_tag, TAG$K_QWORD, &a_val, sizeof(a_val));
 }
 
-static inline void	s_ctl_puts (T2R$_CTL_ANS *a_ans, unsigned a_tag, const char *a_val)
+static inline void	s_ctl_putaz (T2R$_CTL_ANS *a_ans, unsigned a_tag, const char *a_val)
 {
-	s_ctl_put(a_ans, a_tag, TAG$K_BBLOCK, a_val, (unsigned) strnlen(a_val, T2R$K_CTL_RECMAX / 2));
+	s_ctl_put(a_ans, a_tag, TAG$K_BBLOCK, a_val, (unsigned) strnlen( a_val, (T2R$K_CTL_RECMAX / 2)) );
 }
 
+static inline void	s_ctl_putac (T2R$_CTL_ANS *a_ans, unsigned a_tag, const ASC *a_val)
+{
+const int	l_len = $MIN( $ASCLEN(a_val), (T2R$K_CTL_RECMAX / 2) );
+
+	s_ctl_put(a_ans, a_tag, TAG$K_BBLOCK, $ASCPTR(a_val), l_len);
+}
 
 
 /*
@@ -214,14 +226,16 @@ static int	s_ctl_fail (
 {
 va_list	l_ap;
 char	l_text[T2R$K_CTL_RECMAX / 2];
-int	l_cut = a_ans->cut;
+int	l_cut = a_ans->cut, l_len;
 
 	va_start(l_ap, a_fmt);
-	vsnprintf(l_text, sizeof(l_text), a_fmt, l_ap);
+	l_len = vsnprintf(l_text, sizeof(l_text), a_fmt, l_ap);
 	va_end(l_ap);
 
+	l_len = $MIN(l_len, T2R$K_CTL_RECMAX / 2 );				/* Validate lenth of the text data in the buffer */
+
 	a_ans->cut = 0;								/* The room for it is kept by s_ctl_rec() */
-	s_ctl_puts(a_ans, T2R$K_CTL_TAG_REASON, l_text);
+	s_ctl_put(a_ans, T2R$K_CTL_TAG_REASON, TAG$K_BBLOCK, l_text, l_len);
 	a_ans->cut = l_cut;
 
 	return	STS$K_ERROR;
@@ -321,7 +335,7 @@ T2R$_LISTENER	*l_lsnr;
 		s_ctl_putl(a_ans, T2R$K_CTL_TAG_LSN, (uint32_t) i);
 		s_ctl_put_addr(a_ans, &l_lsnr->sk);
 		s_ctl_putw(a_ans, T2R$K_CTL_TAG_MODE, (l_lsnr->mode == T2R$K_MODE_RAW) ? T2R$K_CTL_MODE_RAW : T2R$K_CTL_MODE_MODBUS);
-		s_ctl_puts(a_ans, T2R$K_CTL_TAG_TARGET, l_lsnr->target);
+		s_ctl_putac(a_ans, T2R$K_CTL_TAG_TARGET, &l_lsnr->target);
 		s_ctl_putw(a_ans, T2R$K_CTL_TAG_STATE, (0 <= l_lsnr->fd) ? T2R$K_CTL_STATE_UP : T2R$K_CTL_STATE_DOWN);
 		s_ctl_putl(a_ans, T2R$K_CTL_TAG_CONNLM, (uint32_t) l_lsnr->connlm);
 		s_ctl_putl(a_ans, T2R$K_CTL_TAG_IDLETMO, (uint32_t) l_lsnr->idletmo);
@@ -458,7 +472,7 @@ T2R$_SERIAL	*l_serial;
 
 		s_ctl_rec(a_ans, T2R$K_CTL_REC_LINE);
 		s_ctl_putl(a_ans, T2R$K_CTL_TAG_LINE, (uint32_t) i);
-		s_ctl_puts(a_ans, T2R$K_CTL_TAG_DEVICE, l_serial->devname);
+		s_ctl_putac(a_ans,T2R$K_CTL_TAG_DEVICE, &l_serial->devname);
 		s_ctl_putl(a_ans, T2R$K_CTL_TAG_BAUD, (uint32_t) l_serial->baud);
 		s_ctl_putw(a_ans, T2R$K_CTL_TAG_DATABITS, (uint16_t) l_serial->databits);
 		s_ctl_putw(a_ans, T2R$K_CTL_TAG_PARITY, (uint16_t) l_serial->parity);
@@ -499,14 +513,14 @@ uint32_t	l_up = 0;
 		l_up += (0 <= g_listeners[i].fd);
 
 	s_ctl_rec(a_ans, T2R$K_CTL_REC_GATEWAY);
-	s_ctl_puts(a_ans, T2R$K_CTL_TAG_IDENT, g_t2r_ident);
-	s_ctl_puts(a_ans, T2R$K_CTL_TAG_REV, g_t2r_rev);
-	s_ctl_puts(a_ans, T2R$K_CTL_TAG_ARCH, __ARCH__NAME__);
+	s_ctl_putac(a_ans, T2R$K_CTL_TAG_IDENT, &g_t2r_ident);
+	s_ctl_putac(a_ans, T2R$K_CTL_TAG_REV, &g_t2r_rev);
+	s_ctl_putaz(a_ans, T2R$K_CTL_TAG_ARCH, __ARCH__NAME__);
 	s_ctl_putl(a_ans, T2R$K_CTL_TAG_PID, (uint32_t) getpid());
 	s_ctl_putq(a_ans, T2R$K_CTL_TAG_STARTED, (uint64_t) g_start_time);
 	s_ctl_putq(a_ans, T2R$K_CTL_TAG_NOW, (uint64_t) time(NULL));
-	s_ctl_put(a_ans, T2R$K_CTL_TAG_SETTINGS, TAG$K_BBLOCK, $ASCPTR(&g_settings), $ASCLEN(&g_settings));
-	s_ctl_put(a_ans, T2R$K_CTL_TAG_CONTROL, TAG$K_BBLOCK, s_ctl_path, (unsigned) strlen(s_ctl_path));
+	s_ctl_putac(a_ans, T2R$K_CTL_TAG_SETTINGS, &g_settings);
+	s_ctl_putac(a_ans, T2R$K_CTL_TAG_CONTROL, &s_ctl_path);
 	s_ctl_putl(a_ans, T2R$K_CTL_TAG_LINES, (uint32_t) g_serials_nr);
 	s_ctl_putl(a_ans, T2R$K_CTL_TAG_LISTENERS, (uint32_t) g_listeners_nr);
 	s_ctl_putl(a_ans, T2R$K_CTL_TAG_UP, l_up);
@@ -736,7 +750,7 @@ struct pollfd	l_pfd;
 		if ( strstr(l_line, "-W-") || strstr(l_line, "-E-") || strstr(l_line, "-F-") )
 			{
 			s_ctl_rec(a_ans, T2R$K_CTL_REC_CHECK);
-			s_ctl_puts(a_ans, T2R$K_CTL_TAG_TEXT, l_line);
+			s_ctl_putaz(a_ans, T2R$K_CTL_TAG_TEXT, l_line);
 			}
 		}
 
@@ -988,7 +1002,7 @@ struct pollfd	l_pfd = {.fd = s_ctl_sd, .events = POLLIN};
  *	which answers belongs to another running gateway and is left alone.
  *
  *   INPUTS:
- *	a_path:		A path of the socket; NULL, "" or "NONE" - the channel is disabled
+ *	a_path:		A path of the socket (ASC); NULL, empty or "NONE" - the channel is disabled
  *
  *   IMPLICIT OUTPUTS:
  *	s_ctl_sd, s_ctl_tid, s_ctl_path
@@ -997,26 +1011,28 @@ struct pollfd	l_pfd = {.fd = s_ctl_sd, .events = POLLIN};
  *	STS$K_SUCCESS - is ready or disabled, STS$K_WARN - the gateway goes on without it
  */
 int	t2r$ctl_start (
-	const char	*a_path
+	const ASC	*a_path
 		)
 {
 int	l_rc, l_sd;
 struct sockaddr_un	l_sun = {.sun_family = AF_UNIX};
 struct stat	l_st;
+const  ASC l_none = {$ASCINI("NONE")};
 
-	if ( !a_path || !*a_path || !strcasecmp(a_path, "NONE") )
-		return	$PUTMSG_FAO(T2R$__CTLOFF), STS$K_SUCCESS;
 
-	if ( strlen(a_path) >= sizeof(l_sun.sun_path) )
+	if ( !a_path || !__util$cmpasc_blind(a_path, &l_none) )		/* a_path == NULL or "NONE" ? */
+		return	$PUTMSG_FAO(T2R$__CTLOFF), STS$K_SUCCESS;	/* Yes! Control is OFF */
+
+	if ( $ASCLEN(a_path) >= sizeof(l_sun.sun_path) )
 		return	$PUTMSG_FAO(T2R$__CTLERR, a_path, "strlen(path) >= sizeof(sun_path)", -1, ENAMETOOLONG), STS$K_WARN;
 
-	strcpy(l_sun.sun_path, a_path);
+	memcpy(l_sun.sun_path, $ASCPTR(a_path), $ASCLEN(a_path));	/* l_sun is zeroed: the C string the calls want */
 
 	if ( 0 > (l_sd = socket(AF_UNIX, SOCK_STREAM, 0)) )
 		return	$PUTMSG_FAO(T2R$__CTLERR, a_path, "socket()", l_sd, errno), STS$K_WARN;
 
 	/* Is there a file already? A live socket is another gateway's, a dead one is a leftover */
-	if ( !lstat(a_path, &l_st) )
+	if ( !lstat(l_sun.sun_path, &l_st) )
 		{
 		if ( !S_ISSOCK(l_st.st_mode) )
 			return	close(l_sd), $PUTMSG_FAO(T2R$__CTLERR, a_path, "lstat(): not a socket", -1, ENOTSOCK), STS$K_WARN;
@@ -1029,7 +1045,7 @@ struct stat	l_st;
 		if ( 0 > (l_sd = socket(AF_UNIX, SOCK_STREAM, 0)) )
 			return	$PUTMSG_FAO(T2R$__CTLERR, a_path, "socket()", l_sd, errno), STS$K_WARN;
 
-		if ( unlink(a_path) )
+		if ( unlink(l_sun.sun_path) )
 			return	close(l_sd), $PUTMSG_FAO(T2R$__CTLERR, a_path, "unlink()", -1, errno), STS$K_WARN;
 		}
 
@@ -1037,27 +1053,29 @@ struct stat	l_st;
 		return	close(l_sd), $PUTMSG_FAO(T2R$__CTLERR, a_path, "bind()", l_rc, errno), STS$K_WARN;
 
 	/* The socket is created by the umask rights: set ours before anybody is let in by listen() */
-	if ( (l_rc = chmod(a_path, T2R$K_CTL_MODE)) )
+	if ( (l_rc = chmod(l_sun.sun_path, T2R$K_CTL_MODE)) )
 		{
 		$PUTMSG_FAO(T2R$__CTLERR, a_path, "chmod()", l_rc, errno);
-		return	close(l_sd), unlink(a_path), STS$K_WARN;
+		return	close(l_sd), unlink(l_sun.sun_path), STS$K_WARN;
 		}
 
 	if ( (l_rc = listen(l_sd, 4)) )
 		{
 		$PUTMSG_FAO(T2R$__CTLERR, a_path, "listen()", l_rc, errno);
-		return	close(l_sd), unlink(a_path), STS$K_WARN;
+		return	close(l_sd), unlink(l_sun.sun_path), STS$K_WARN;
 		}
 
+
 	s_ctl_sd = l_sd;
-	strcpy(s_ctl_path, a_path);
+	__util$str2asc(l_sun.sun_path, &s_ctl_path);					/* With its NUL, for unlink() at the stop */
+
 
 	if ( (l_rc = pthread_create(&s_ctl_tid, NULL, s_ctl_thread, NULL)) )
 		{
 		$PUTMSG_FAO(T2R$__CTLERR, a_path, "pthread_create()", l_rc, l_rc);
 		close(s_ctl_sd);
 		s_ctl_sd = -1;
-		return	unlink(a_path), STS$K_WARN;
+		return	unlink(l_sun.sun_path), STS$K_WARN;
 		}
 
 	return	$PUTMSG_FAO(T2R$__CTLREADY, a_path), STS$K_SUCCESS;
@@ -1085,7 +1103,7 @@ int	t2r$ctl_stop (void)
 	close(s_ctl_sd);
 	s_ctl_sd = -1;
 
-	unlink(s_ctl_path);
+	unlink($ASCPTR(&s_ctl_path));
 
 	return	STS$K_SUCCESS;
 }

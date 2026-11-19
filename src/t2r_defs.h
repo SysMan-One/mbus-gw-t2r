@@ -56,6 +56,11 @@
 **				(a_sd): a request of a client which has gone is dropped; added
 **				T2R$K_LOCK_SLICE_MSEC.
 **
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - t2r$ctl_start() takes the path as an ASC;
+**				T2R$_LISTENER.target and T2R$_SERIAL.devname are ASC, filled by __util$str2asc()
+**				(were char [T2R$K_TTY_DEVNAME + 1]; T2R$K_TTY_DEVNAME is gone). RRL: the unused
+**				IPv4_BYTES/IPv4_BYTES_FMT macros are gone.
+**
 **--
 */
 
@@ -79,18 +84,6 @@
 extern "C" {
 #endif
 
-
-
-
-
-#ifndef IPv4_BYTES
-#define IPv4_BYTES_FMT "%u.%u.%u.%u"
-#define IPv4_BYTES(addr) \
-		(uint8_t) ((addr) & 0xFF), \
-		(uint8_t) (((addr) >> 8) & 0xFF),\
-		(uint8_t) (((addr) >> 16) & 0xFF),\
-		(uint8_t) (((addr) >> 24) & 0xFF)
-#endif
 
 
 
@@ -165,7 +158,6 @@ enum	{
 #define		T2R$K_STOPBITS_MAX	2
 #define		T2R$K_PORT_MIN		1				/* TCP port range				*/
 #define		T2R$K_PORT_MAX		65535
-#define		T2R$K_TTY_DEVNAME	64
 
 
 #define		T2R$K_TS_FNCODE	(MODBUS$K_FN_READ_HOLDING_REGISTERS)
@@ -199,7 +191,7 @@ typedef struct	t2r$_serial {
 	struct timespec						/* See <pdutmo> */
 			inter_pdu_ts;
 
-		char devname[T2R$K_TTY_DEVNAME + 1];			/* "COM1", "/dev/ttyS0" */
+	ASC		devname;					/* "COM1", "/dev/ttyS0" (__util$str2asc(): sts NUL-terminated, for open()) */
 
 
 		int	flags;						/* Optional RS485 specific initialization */
@@ -241,7 +233,7 @@ typedef struct	t2r$_listener {
 	uint32_t	accepted,					/* Connections accepted / rejected since the start, */
 			rejected;					/* written by the dispatcher thread only	*/
 	struct sockaddr_in sk;						/* Socket address structure: TCP, 0.0.0.0:502 */
-		char target[T2R$K_TTY_DEVNAME + 1];			/* "COM1", "/dev/ttyS0" */
+	ASC		target;						/* "COM1", "/dev/ttyS0" (__util$str2asc()) */
 
 	T2R$_SERIAL	*serial;					/* A context to has been defined serial device */
 
@@ -289,10 +281,10 @@ typedef struct	t2r$__session {
 
 int	t2r$net_start_listeners (void);
 int	t2r$net_stop_listeners (void);
-int	t2r$net_sess_walk (int (*a_rtn) (T2R$_SESSION *a_session, void *a_arg), void *a_arg);
+int	t2r$net_sess_walk (int (*a_actrtn) (T2R$_SESSION *a_session, void *a_arg), void *a_arg);
 int	t2r$net_sess_count (void);
 
-int	t2r$ctl_start (const char *a_path);
+int	t2r$ctl_start (const ASC *a_path);
 int	t2r$ctl_stop (void);
 
 
@@ -306,7 +298,7 @@ extern	int	g_trace;							/* Declared in T2R-MAIN, is used by the dump macros */
 		t2r$mbap_print(__MODULE__, __FUNCTION__, __LINE__, a_pref, a_data, a_datalen); } while (0)
 
 void	t2r$mbap_print (const char *a__mod, const char *a__fi, const int a__li,
-		const char *a_pref, const char a_data[], int a_datalen);
+			const char *a_pref, const char *a_data, int a_datalen);
 
 
 #define	$RTU_PRINT(a_pref,a_data,a_datalen,a_crc)	do { if ( g_trace ) \

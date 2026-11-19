@@ -1,6 +1,6 @@
 #define	__MODULE__	"MBUS-CTL"
-#define	__IDENT__	"V.01-01"
-#define	__REV__		"01.01.00"
+#define	__IDENT__	"V.01-01ECO02"
+#define	__REV__		"01.01.02"
 
 /*
 **++
@@ -40,6 +40,10 @@
 **	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The requests and the answers are AVProto TLV PDUs
 **				(src/t2r_ctlproto.h), no text lines; the connection selector of RESET is
 **				checked here (CTLBADSEL); a cut answer is told (CTLCUT).
+**
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - The /SOCKET path stays a counted string (ASC):
+**				s_get_socket() gives the ASC, s_request() and s_gw_started() take it, CTLNOGW
+**				shows it by !AC (was: an ASCIZ copy for !AZ).
 **
 **--
 */
@@ -393,7 +397,7 @@ MBUS$_REC	*l_new;
  *	u_len octets of the TLVs.
  *
  *   INPUTS:
- *	a_path:		The control socket
+ *	a_path:		The control socket (ASC)
  *	a_req:		The request (s_req_init() + __tlv$put())
  *	a_quiet:	1 - do not signal the "cannot reach" (a repeating display retries)
  *
@@ -407,7 +411,7 @@ MBUS$_REC	*l_new;
  *	T2R$__CTLBADANS	- not a PDU of the control channel (signalled)
  */
 static int	s_request (
-	const char	*a_path,
+	const ASC	*a_path,
 		MBUS$_REQ *a_req,
 		int	a_quiet,
 		MBUS$_ANS *a_ans
@@ -418,17 +422,16 @@ unsigned	l_len = 0, l_csr = 0, l_seq = 0, l_type = 0, l_rlen = 0, l_reqsz;
 size_t	l_off;
 ssize_t	l_sent;
 void	*l_reason = NULL;
-char	l_text[T2R$K_CTL_RECMAX];
 AVPROTO_HDR	l_hdr;
 struct sockaddr_un	l_sun = {.sun_family = AF_UNIX};
 struct timeval	l_tmo = {.tv_sec = MBUS$K_ANSTMO_SEC};
 
 	*a_ans = (MBUS$_ANS) {0};
 
-	if ( strlen(a_path) >= sizeof(l_sun.sun_path) )
+	if ( $ASCLEN(a_path) >= sizeof(l_sun.sun_path) )
 		return	a_quiet ? T2R$__CTLNOGW : $PUTMSG_FAO(T2R$__CTLNOGW, a_path, ENAMETOOLONG);
 
-	strcpy(l_sun.sun_path, a_path);
+	memcpy(l_sun.sun_path, $ASCPTR(a_path), $ASCLEN(a_path));	/* l_sun is zeroed: NUL-terminated */
 
 	if ( 0 > (l_sd = socket(AF_UNIX, SOCK_STREAM, 0)) )
 		return	$PUTMSG_FAO(T2R$__CTLNOGW, a_path, errno);
@@ -494,11 +497,10 @@ struct timeval	l_tmo = {.tv_sec = MBUS$K_ANSTMO_SEC};
 		return	STS$K_SUCCESS;
 
 	/* A failure: why */
-	if ( 1 & __tlv$lookup(a_ans->pdu, a_ans->pdusz, NULL, T2R$K_CTL_TAG_REASON, &l_type, &l_reason, &l_rlen) )
-		snprintf(l_text, sizeof(l_text), "%.*s", (int) l_rlen, (char *) l_reason);
-	else	snprintf(l_text, sizeof(l_text), "status %u, no reason given", l_csr);
+	if ( !(1 & __tlv$lookup(a_ans->pdu, a_ans->pdusz, NULL, T2R$K_CTL_TAG_REASON, &l_type, &l_reason, &l_rlen)) )
+		l_rlen = 0; /* FAO !AD will show empty string */
 
-	return	$PUTMSG_FAO(T2R$__CTLANSERR, l_text);
+	return	$PUTMSG_FAO(T2R$__CTLANSERR, l_csr, l_csr, l_rlen, l_reason);
 }
 
 
@@ -605,8 +607,15 @@ unsigned	l_type = 0, l_len = 0;
 void	*l_val = NULL;
 
 	if ( !(1 & s_fld(a_ans, a_rec, a_tag, &l_type, &l_val, &l_len)) || (l_type != TAG$K_BBLOCK) || !l_len )
-		snprintf(a_buf, a_bufsz, "-");
-	else	snprintf(a_buf, a_bufsz, "%.*s", (int) l_len, (char *) l_val);
+		{
+		*a_buf = '-';
+		*(a_buf + 1) = '\0';
+		}
+	else	{
+		l_len = $MIN(a_bufsz, l_len);
+		memcpy(a_buf, l_val, l_len);
+		a_buf[l_len] = '\0';
+		}
 
 	return	a_buf;
 }
@@ -943,23 +952,21 @@ static const MBUS$_REC *	s_rec_first (
  *	a_qual:		The /SOCKET descriptor of the verb
  *
  *   OUTPUTS:
- *	a_path:		The path, ASCIZ
+ *	a_path:		The path (ASC)
  *
  *   RETURNS:
  *	a_path
  */
-static const char *	s_get_socket (
+static const ASC *	s_get_socket (
 		CLI_CTX		*a_ctx,
 		CLI_PQDESC	*a_qual,
-		char		*a_path
+		ASC		*a_path
 		)
 {
-ASC	l_val = {0};
+	*a_path = (ASC) {0};
 
-	if ( !(1 & __cli$get_value(a_ctx, a_qual, &l_val)) || !$ASCLEN(&l_val) )
-		l_val = a_qual->defval;
-
-	snprintf(a_path, ASC$K_SZ + 1, "%.*s", $ASC(&l_val));
+	if ( !(1 & __cli$get_value(a_ctx, a_qual, a_path)) || !$ASCLEN(a_path) )
+		*a_path = a_qual->defval;
 
 	return	a_path;
 }
@@ -1015,18 +1022,19 @@ static int	s_show (
 {
 int	l_rc, l_secs, l_tty = isatty(STDOUT_FILENO), l_lost = 0;
 unsigned	l_state = 0;
-char	l_path[ASC$K_SZ + 1], l_t[48];
+ASC	l_path;
+char	l_t[48];
 MBUS$_REQ	l_req;
 MBUS$_ANS	l_ans;
 struct timespec	l_ts;
 
-	s_get_socket(a_ctx, &s_show_quals[MBUS$K_QUAL_SOCKET], l_path);
+	s_get_socket(a_ctx, &s_show_quals[MBUS$K_QUAL_SOCKET], &l_path);
 
 	if ( !(1 & __cli$present(a_ctx, &s_show_quals[MBUS$K_QUAL_CONT], &l_state)) )
 		{
 		s_req_init(&l_req, a_cmd);
 
-		if ( (1 & (l_rc = s_request(l_path, &l_req, 0, &l_ans))) )
+		if ( (1 & (l_rc = s_request(&l_path, &l_req, 0, &l_ans))) )
 			{
 			a_disp(&l_ans);
 
@@ -1045,7 +1053,7 @@ struct timespec	l_ts;
 	while ( !s_exit_flag )
 		{
 		s_req_init(&l_req, a_cmd);
-		l_rc = s_request(l_path, &l_req, 1, &l_ans);
+		l_rc = s_request(&l_path, &l_req, 1, &l_ans);
 
 		if ( l_tty )
 			fputs("\033[H\033[2J", stdout);				/* Home, clear the screen */
@@ -1062,9 +1070,9 @@ struct timespec	l_ts;
 		else if ( l_rc == (int) T2R$__CTLNOGW )
 			{
 			if ( !l_lost++ )
-				$PUTMSG_FAO(T2R$__CTLNOGW, l_path, errno);
+				$PUTMSG_FAO(T2R$__CTLNOGW, &l_path, errno);
 
-			printf("%s  the gateway is not reachable by %s, waiting ...\n", s_vmstime(time(NULL), l_t), l_path);
+			printf("%s  the gateway is not reachable by %.*s, waiting ...\n", s_vmstime(time(NULL), l_t), $ASC(&l_path));
 			}
 
 		s_ans_free(&l_ans);
@@ -1203,12 +1211,13 @@ static int	s_act_reset_conn (
 int	l_rc;
 unsigned	l_state = 0;
 ASC	l_val = {0};
-char	l_path[ASC$K_SZ + 1], l_sel[ASC$K_SZ + 1], l_peer[24];
+ASC	l_path;
+char	l_sel[ASC$K_SZ + 1], l_peer[24];
 MBUS$_REQ	l_req;
 MBUS$_ANS	l_ans;
 const MBUS$_REC	*l_rec;
 
-	s_get_socket(a_ctx, &s_reset_quals[MBUS$K_QUAL_SOCKET], l_path);
+	s_get_socket(a_ctx, &s_reset_quals[MBUS$K_QUAL_SOCKET], &l_path);
 
 	if ( 1 & __cli$present(a_ctx, &s_reset_quals[MBUS$K_QUAL_ALL], &l_state) )
 		snprintf(l_sel, sizeof(l_sel), "ALL");
@@ -1221,7 +1230,7 @@ const MBUS$_REC	*l_rec;
 	if ( !(1 & (l_rc = s_put_selector(l_sel, &l_req))) )
 		return	l_rc;
 
-	if ( (1 & (l_rc = s_request(l_path, &l_req, 0, &l_ans))) )
+	if ( (1 & (l_rc = s_request(&l_path, &l_req, 0, &l_ans))) )
 		{
 		for (int i = 0; i < l_ans.nr; i++)
 			{
@@ -1259,7 +1268,7 @@ const MBUS$_REC	*l_rec;
  *	condition code of s_request(), T2R$__CTLBADANS - no GATEWAY record
  */
 static int	s_gw_started (
-	const char	*a_path,
+	const ASC	*a_path,
 		int	a_quiet,
 		uint64_t *a_started,
 		uint64_t *a_pid,
@@ -1310,19 +1319,20 @@ static int	s_act_restart_gw (
 int	l_rc, l_wait;
 unsigned	l_state = 0;
 uint64_t	l_started = 0, l_now = 0, l_pid = 0, l_up = 0;
-char	l_path[ASC$K_SZ + 1], l_text[T2R$K_CTL_RECMAX];
+ASC	l_path;
+char	l_text[T2R$K_CTL_RECMAX];
 MBUS$_REQ	l_req;
 MBUS$_ANS	l_ans;
 time_t	l_t0;
 
-	s_get_socket(a_ctx, &s_restart_quals[MBUS$K_QUAL_SOCKET], l_path);
+	s_get_socket(a_ctx, &s_restart_quals[MBUS$K_QUAL_SOCKET], &l_path);
 
 	/* The start time of the running gateway: a new one tells that it has restarted */
-	if ( !(1 & (l_rc = s_gw_started(l_path, 0, &l_started, &l_pid, &l_up))) )
+	if ( !(1 & (l_rc = s_gw_started(&l_path, 0, &l_started, &l_pid, &l_up))) )
 		return	l_rc;
 
 	s_req_init(&l_req, T2R$K_CTL_CMD_RESTART_GATEWAY);
-	l_rc = s_request(l_path, &l_req, 0, &l_ans);
+	l_rc = s_request(&l_path, &l_req, 0, &l_ans);
 
 	for (int i = 0; i < l_ans.nr; i++)					/* Why the settings are bad, or warnings */
 		{
@@ -1349,7 +1359,7 @@ time_t	l_t0;
 		{
 		usleep(500000);
 
-		if ( !(1 & s_gw_started(l_path, 1, &l_now, &l_pid, &l_up)) || (l_now == l_started) )
+		if ( !(1 & s_gw_started(&l_path, 1, &l_now, &l_pid, &l_up)) || (l_now == l_started) )
 			continue;						/* Not yet */
 
 		return	$PUTMSG_FAO(T2R$__CTLBACK, (int) (time(NULL) - l_t0), (unsigned) l_pid, (unsigned) l_up), STS$K_SUCCESS;

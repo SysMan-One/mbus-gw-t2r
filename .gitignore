@@ -4,6 +4,8 @@ CMakeFiles/
 *.pro.user*
 *.user*
 build/*
+build-ctl/*
+.claude/*
 *.swp
 Makefile
 *.o

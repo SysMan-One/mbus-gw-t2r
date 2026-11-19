@@ -210,7 +210,7 @@ void	t2r$mbap_print (
 		const char	*a__fi,
 		const int	a__li,
 		const char	*a_pref,
-		const char	a_data[],
+		const char	*a_data,
 			int	a_datalen
 		)
 {

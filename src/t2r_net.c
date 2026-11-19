@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"V.01-01ECO01"
-#define	__REV__		"01.01.01"
+#define	__IDENT__	"V.01-01ECO02"
+#define	__REV__		"01.01.02"
 
 /*
 **++
@@ -96,6 +96,11 @@
 **				at once (was: one more poll() for POLLOUT - an extra round, the closed client then
 **				was seen as NETPOLLEV and its slot was held a bit longer); the idle time of the
 **				session is counted from the end of the answer.
+**
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - The device name of a serial (an ASC now) goes to
+**				TGTOPNERR, LSNRRDY, RAWSTART, RAWSTOP by !AC. s_sess_nr is stored atomically
+**				under the registry lock and read by an atomic load: t2r$net_sess_count() takes no
+**				lock (was: the registry mutex around one load).
 **--
 */
 
@@ -137,7 +142,8 @@ static const	int	s_one = 1;
 static pthread_mutex_t	s_sess_lock = PTHREAD_MUTEX_INITIALIZER;
 static T2R$_SESSION	*s_sess_head;						/* The newest session first		*/
 static uint32_t		s_sess_seq;						/* The last given session id		*/
-static int		s_sess_nr;						/* Sessions in the registry		*/
+static int		s_sess_nr;						/* Sessions in the registry: written under	*/
+										/* s_sess_lock, read by an atomic load	*/
 
 
 
@@ -170,7 +176,8 @@ static void	s_net_sess_add (
 		s_sess_head->reg_prev = a_session;
 
 	s_sess_head = a_session;
-	s_sess_nr++;
+	__atomic_store_n(&s_sess_nr, s_sess_nr + 1, __ATOMIC_RELAXED);	/* One writer at a time (the lock): a plain	*/
+										/* store, no read-modify-write is needed	*/
 
 	pthread_mutex_unlock(&s_sess_lock);
 }
@@ -204,7 +211,7 @@ static void	s_net_sess_del (
 		a_session->reg_next->reg_prev = a_session->reg_prev;
 
 	a_session->reg_next = a_session->reg_prev = NULL;
-	s_sess_nr--;
+	__atomic_store_n(&s_sess_nr, s_sess_nr - 1, __ATOMIC_RELAXED);
 
 	pthread_mutex_unlock(&s_sess_lock);
 }
@@ -218,7 +225,7 @@ static void	s_net_sess_del (
  *	A non-success status of the routine stops the walk.
  *
  *   INPUTS:
- *	a_rtn:		A routine to call: a_rtn(<session>, <a_arg>)
+ *	a_actrtn:	A routine to call: a_actrtn(<session>, <a_arg>)
  *	a_arg:		An argument to be passed to the routine
  *
  *   IMPLICIT INPUTS:
@@ -228,7 +235,7 @@ static void	s_net_sess_del (
  *	STS$K_SUCCESS, or the status of the routine which has stopped the walk
  */
 int	t2r$net_sess_walk (
-		int	(*a_rtn) (T2R$_SESSION *a_session, void *a_arg),
+		int	(*a_actrtn) (T2R$_SESSION *a_session, void *a_arg),
 		void	*a_arg
 		)
 {
@@ -238,7 +245,7 @@ int	l_rc = STS$K_SUCCESS;
 
 	for (T2R$_SESSION *l_session = s_sess_head; l_session; l_session = l_session->reg_next)
 		{
-		if ( !(1 & (l_rc = a_rtn(l_session, a_arg))) )
+		if ( !(1 & (l_rc = a_actrtn(l_session, a_arg))) )
 			break;
 		}
 
@@ -250,7 +257,8 @@ int	l_rc = STS$K_SUCCESS;
 
 
 /*
- *   DESCRIPTION: Return the number of the live sessions (RESTART waits them to end).
+ *   DESCRIPTION: Return the number of the live sessions (RESTART waits them to end, SHOW GATEWAY shows
+ *	it). One atomic load, no lock: a value of a moment is all the callers need.
  *
  *   IMPLICIT INPUTS:
  *	s_sess_nr
@@ -260,13 +268,7 @@ int	l_rc = STS$K_SUCCESS;
  */
 int	t2r$net_sess_count (void)
 {
-int	l_nr;
-
-	pthread_mutex_lock(&s_sess_lock);
-	l_nr = s_sess_nr;
-	pthread_mutex_unlock(&s_sess_lock);
-
-	return	l_nr;
+	return	__atomic_load_n(&s_sess_nr, __ATOMIC_RELAXED);
 }
 
 
@@ -438,19 +440,12 @@ T2R$_DESC	*l_netbuf_dsc = a_session->netbuf_dsc;
  *   RETURNS:
  *	STS$K_SUCCESS, or the failure status of s_net_sendn() (STS$K_WARN, T2R$__NETSYSERR)
  */
-static int	s_net_mbap_tx (
+static inline int	s_net_mbap_tx (
 		T2R$_SESSION	*a_session
 		)
 {
-int	l_rc;
-
-	if ( !(1 & (l_rc = s_net_sendn(a_session))) )
-		return	l_rc;
-
-	return	STS$K_SUCCESS;
+	return	s_net_sendn(a_session);
 }
-
-
 
 
 
@@ -477,12 +472,12 @@ static int	s_net_raw_session (
 int	l_rc;
 T2R$_LISTENER	*l_listener = a_session->listener;
 
-	$PUTMSG_FAO(T2R$__RAWSTART, a_session->sd, &a_session->sk.sin_addr, ntohs(a_session->sk.sin_port), a_session->target->devname);
+	$PUTMSG_FAO(T2R$__RAWSTART, a_session->sd, &a_session->sk.sin_addr, ntohs(a_session->sk.sin_port), &a_session->target->devname);
 
 	/* The relay updates the counters as it goes: SHOW CONNECTIONS sees them live */
 	l_rc = t2r$tty_raw_relay (a_session->target, a_session->sd, l_listener->idletmo, &a_session->nrx, &a_session->ntx);
 
-	$PUTMSG_FAO(T2R$__RAWSTOP, a_session->sd, a_session->target->devname, a_session->nrx, a_session->ntx);
+	$PUTMSG_FAO(T2R$__RAWSTOP, a_session->sd, &a_session->target->devname, a_session->nrx, a_session->ntx);
 
 	pthread_mutex_lock(&l_listener->rawlock);
 
@@ -1058,7 +1053,7 @@ pthread_t	l_tid;
 		if ( !(1 & (l_rc = t2r$tty_open (l_listener->serial))) && (l_rc != T2R$__DEVABSENT) )
 			{
 			close(l_sd);							/* Don't leak the descriptor */
-			$PUTMSG_FAO(T2R$__TGTOPNERR, &l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), l_listener->serial->devname);
+			$PUTMSG_FAO(T2R$__TGTOPNERR, &l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), &l_listener->serial->devname);
 
 			continue;
 			}
@@ -1072,7 +1067,7 @@ pthread_t	l_tid;
 		l_count++;
 
 		$PUTMSG_FAO(T2R$__LSNRRDY, s_pfd_lsnr[i].fd, &l_listener->sk.sin_addr,
-			ntohs(l_listener->sk.sin_port), l_listener->serial->devname);
+			ntohs(l_listener->sk.sin_port), &l_listener->serial->devname);
 		}
 
 

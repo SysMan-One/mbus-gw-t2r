@@ -65,6 +65,12 @@
 **	07-NOV-2026	CLD	V.01-01 / REV: 01.01.00 - The control channel speaks AVProto TLV: added CTLBADSEL
 **				(mbus-ctl checks the connection selector itself now) and CTLCUT; not released yet,
 **				so the new codes are just appended.
+**
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - Counted strings (!AC, an ASC) instead of !AZ: the
+**				paths of CHECKOK, CTLREADY, CTLBUSY, CTLERR (the settings and /CONTROL values),
+**				CTLNOGW (the /SOCKET path of mbus-ctl) and the device name of a serial in all the
+**				44 messages which show it (DEVxxx, TTYxxx, SERxxx, RS485xx, LSNADDED, LSNRRDY,
+**				TGTOPNERR, RAWSTART/STOP, NOANSWER, CRC16ERR ...). No code changed or moved.
 **--
 */
 
@@ -94,111 +100,111 @@ $DEF_MSG(T2R, SUCCESS,	NETCONN,		"[#!SL] Accepted client connection !%I:!UW (lis
 $DEF_MSG(T2R, SUCCESS,	NETDISCN,		"[#!SL] Closed client connection !%I:!UW")\
 \
 $DEF_MSG(T2R, INFO,	REVISNF,		"Rev: !AC (REV: !AC)") \
-$DEF_MSG(T2R, ERROR,	DEVOPNERR,		"Cannot open the device <!AZ>, errno: !SL") \
-$DEF_MSG(T2R, SUCCESS,	DEVREADY,		"Device <!AZ> [!UL baud, answer tmo: !UL msec, t3.5: !UL usec] --- is ready") \
-$DEF_MSG(T2R, ERROR,	NOANSWER,		"[#!SL:<!AZ>] Did not get an answer in !UL msec --- abort I/O operation") \
-$DEF_MSG(T2R, WARN,	FRAMETMO,		"[#!SL:<!AZ>] Frame is not completed in !UL msec (!UL octets so far)") \
-$DEF_MSG(T2R, ERROR,	BADFRAME,		"[#!SL:<!AZ>] Ill-formed RTU frame length: !UL octets, allowed [!UL..!UL]") \
-$DEF_MSG(T2R, ERROR,	CRC16ERR,		"[#!SL:<!AZ>] RTU CRC16 check error (received: !XW, calculated: !XW)") \
-$DEF_MSG(T2R, WARN,	EXCRPT,			"[#!SL:<!AZ>] Report exception !UL (!AZ) to the network requester") \
-$DEF_MSG(T2R, SUCCESS,	LSNRRDY,		"[#!SL] Listener !%I:!UW [Target: <!AZ>] --- is ready") \
+$DEF_MSG(T2R, ERROR,	DEVOPNERR,		"Cannot open the device <!AC>, errno: !SL") \
+$DEF_MSG(T2R, SUCCESS,	DEVREADY,		"Device <!AC> [!UL baud, answer tmo: !UL msec, t3.5: !UL usec] --- is ready") \
+$DEF_MSG(T2R, ERROR,	NOANSWER,		"[#!SL:<!AC>] Did not get an answer in !UL msec --- abort I/O operation") \
+$DEF_MSG(T2R, WARN,	FRAMETMO,		"[#!SL:<!AC>] Frame is not completed in !UL msec (!UL octets so far)") \
+$DEF_MSG(T2R, ERROR,	BADFRAME,		"[#!SL:<!AC>] Ill-formed RTU frame length: !UL octets, allowed [!UL..!UL]") \
+$DEF_MSG(T2R, ERROR,	CRC16ERR,		"[#!SL:<!AC>] RTU CRC16 check error (received: !XW, calculated: !XW)") \
+$DEF_MSG(T2R, WARN,	EXCRPT,			"[#!SL:<!AC>] Report exception !UL (!AZ) to the network requester") \
+$DEF_MSG(T2R, SUCCESS,	LSNRRDY,		"[#!SL] Listener !%I:!UW [Target: <!AC>] --- is ready") \
 $DEF_MSG(T2R, ERROR,	LSNRERR,		"Listener !%I:!UW --- !AZ error, errno: !SL") \
 $DEF_MSG(T2R, INFO,	EXITST,			"Exit with exit_flag: !SL, rc: !XL") \
 \
 $DEF_MSG(T2R, ERROR,	SYSERR,			"!AZ->!SL, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	NETSYSERR,		"[#!SL] !AZ->!SL, errno: !SL") \
 $DEF_MSG(T2R, WARN,	NETSYSWRN,		"[#!SL] !AZ->!SL, errno: !SL") \
-$DEF_MSG(T2R, ERROR,	TTYSYSERR,		"[#!SL:<!AZ>] !AZ->!SL, errno: !SL") \
-$DEF_MSG(T2R, WARN,	TTYSYSWRN,		"[#!SL:<!AZ>] !AZ->!SL, errno: !SL") \
-$DEF_MSG(T2R, ERROR,	DEVSYSERR,		"<!AZ> !AZ->!SL, errno: !SL") \
-$DEF_MSG(T2R, WARN,	DEVSYSWRN,		"<!AZ> !AZ->!SL, errno: !SL") \
+$DEF_MSG(T2R, ERROR,	TTYSYSERR,		"[#!SL:<!AC>] !AZ->!SL, errno: !SL") \
+$DEF_MSG(T2R, WARN,	TTYSYSWRN,		"[#!SL:<!AC>] !AZ->!SL, errno: !SL") \
+$DEF_MSG(T2R, ERROR,	DEVSYSERR,		"<!AC> !AZ->!SL, errno: !SL") \
+$DEF_MSG(T2R, WARN,	DEVSYSWRN,		"<!AC> !AZ->!SL, errno: !SL") \
 $DEF_MSG(T2R, INFO,	PEERCLOSE,		"[#!SL] --- peer has closed the connection") \
-$DEF_MSG(T2R, WARN,	ALLSENT,			"[#!SL] --- all data has been sent (!UL octets)") \
+$DEF_MSG(T2R, WARN,	ALLSENT,		"[#!SL] --- all data has been sent (!UL octets)") \
 $DEF_MSG(T2R, ERROR,	BADPROTO,		"[#!SL] --- unexpected MBAP protocol identifier !UL") \
 $DEF_MSG(T2R, ERROR,	PDUSHORT,		"[#!SL] --- MODBUS PDU is too short (!SL octets)") \
-$DEF_MSG(T2R, ERROR,	PDULONG,			"[#!SL] --- MODBUS PDU is too long (!SL > !UL octets)") \
-$DEF_MSG(T2R, WARN,	IDLETMO,			"[#!SL] No activity for the past !UL seconds (idletmo) --- close the connection") \
+$DEF_MSG(T2R, ERROR,	PDULONG,		"[#!SL] --- MODBUS PDU is too long (!SL > !UL octets)") \
+$DEF_MSG(T2R, WARN,	IDLETMO,		"[#!SL] No activity for the past !UL seconds (idletmo) --- close the connection") \
 $DEF_MSG(T2R, ERROR,	NETRDTMO,		"[#!SL] No data read (!UL octets) in !UL seconds") \
-$DEF_MSG(T2R, WARN,	REQFAIL,			"[#!SL] Request processing failed --- MODBUS exception: !UL/!XB") \
+$DEF_MSG(T2R, WARN,	REQFAIL,		"[#!SL] Request processing failed --- MODBUS exception: !UL/!XB") \
 $DEF_MSG(T2R, WARN,	NETPOLLEV,		"[#!SL] poll()->!SL, .revents: !XW, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	SESSFAIL,		"[#!SL] !%I:!UW --- cannot start a session thread, pthread_create()->!SL") \
 $DEF_MSG(T2R, WARN,	LSNRABRT,		"[#!SL] Listener !%I:!UW --- is aborted") \
-$DEF_MSG(T2R, ERROR,	TGTOPNERR,		"Listener !%I:!UW --- target <!AZ> cannot be opened") \
+$DEF_MSG(T2R, ERROR,	TGTOPNERR,		"Listener !%I:!UW --- target <!AC> cannot be opened") \
 $DEF_MSG(T2R, ERROR,	NOLSNRUP,		"No listeners have been started!!") \
 $DEF_MSG(T2R, ERROR,	NOROOM,			"No room for output data (!UL > !UL octets)") \
-$DEF_MSG(T2R, ERROR,	MBAPLEN,			"MBAP length field (!UL) exceeds received data (!SL octets)") \
+$DEF_MSG(T2R, ERROR,	MBAPLEN,		"MBAP length field (!UL) exceeds received data (!SL octets)") \
 $DEF_MSG(T2R, ERROR,	REQSHORT,		"Request is too short (!UL < !UL octets)") \
-$DEF_MSG(T2R, ERROR,	TGTNDEF,			"Target device <!AZ> has not been defined") \
+$DEF_MSG(T2R, ERROR,	TGTNDEF,		"Target device <!AZ> has not been defined") \
 $DEF_MSG(T2R, ERROR,	CFGNOSECT,		"No <!AZ> section --- !AZ") \
 $DEF_MSG(T2R, WARN,	CFGTRUNC,		"Only !UL of !UL <!AZ> records will be processed") \
 $DEF_MSG(T2R, ERROR,	SERBADREC,		"[serial #!2ZL] --- !AZ") \
-$DEF_MSG(T2R, ERROR,	SERBADOPT,		"[serial #!2ZL:<!AZ>] --- !AZ") \
-$DEF_MSG(T2R, WARN,	SERNORS485,		"[serial #!2ZL:<!AZ>] --- RS485 option is not supported") \
-$DEF_MSG(T2R, ERROR,	SERBADCHR,		"[serial #!2ZL:<!AZ>] --- <chars> value <!AZ> is ill-formed") \
-$DEF_MSG(T2R, ERROR,	SERRANGE,		"[serial #!2ZL:<!AZ>] --- !AZ !SL is out of range [!SL..!SL]") \
-$DEF_MSG(T2R, ERROR,	SERBADPAR,		"[serial #!2ZL:<!AZ>] --- parity '!AD' is unknown, allowed: [N, E, O]") \
-$DEF_MSG(T2R, INFO,	DEVADDED,		"Added device #!2ZL [<!AZ>, Chars: <!UL, !UL, !AD, !UL>, Answer tmo: !UL msec, Inter RTU PDU: !UL usec] --- added") \
-$DEF_MSG(T2R, INFO,	TSENABLED,		"Time Stamp responder for <!AZ> [Unit: !UL, Function: !UL, Base register: !UL] --- enabled") \
-$DEF_MSG(T2R, INFO,	TSDISABLED,		"Time Stamp responder for <!AZ> --- disabled") \
+$DEF_MSG(T2R, ERROR,	SERBADOPT,		"[serial #!2ZL:<!AC>] --- !AZ") \
+$DEF_MSG(T2R, WARN,	SERNORS485,		"[serial #!2ZL:<!AC>] --- RS485 option is not supported") \
+$DEF_MSG(T2R, ERROR,	SERBADCHR,		"[serial #!2ZL:<!AC>] --- <chars> value <!AZ> is ill-formed") \
+$DEF_MSG(T2R, ERROR,	SERRANGE,		"[serial #!2ZL:<!AC>] --- !AZ !SL is out of range [!SL..!SL]") \
+$DEF_MSG(T2R, ERROR,	SERBADPAR,		"[serial #!2ZL:<!AC>] --- parity '!AD' is unknown, allowed: [N, E, O]") \
+$DEF_MSG(T2R, INFO,	DEVADDED,		"Added device #!2ZL [<!AC>, Chars: <!UL, !UL, !AD, !UL>, Answer tmo: !UL msec, Inter RTU PDU: !UL usec] --- added") \
+$DEF_MSG(T2R, INFO,	TSENABLED,		"Time Stamp responder for <!AC> [Unit: !UL, Function: !UL, Base register: !UL] --- enabled") \
+$DEF_MSG(T2R, INFO,	TSDISABLED,		"Time Stamp responder for <!AC> --- disabled") \
 $DEF_MSG(T2R, ERROR,	NOSERIALS,		"No serials have been defined!!") \
 $DEF_MSG(T2R, ERROR,	LSNBADREC,		"[listener #!2ZL] --- !AZ") \
 $DEF_MSG(T2R, ERROR,	LSNBADBIND,		"[listener #!2ZL] --- <bind> value <!AZ> is ill-formed") \
 $DEF_MSG(T2R, ERROR,	LSNRANGE,		"[listener #!2ZL] --- port number !SL is out of range [!SL..!SL]") \
 $DEF_MSG(T2R, ERROR,	LSNBADADDR,		"[listener #!2ZL] --- inet_pton(<!AZ>)->!SL, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	LSNNOTGT,		"[listener #!2ZL] --- target <!AZ> has not been defined in <serials> section") \
-$DEF_MSG(T2R, INFO,	LSNADDED,		"Added listener #!2ZL [Target: <!AZ>, Net: <!AZ:!%I:!UW>, Connection limit: !UL, Idle tmo: !UL sec, Mode: !AZ] --- added") \
-$DEF_MSG(T2R, ERROR,	NOLSNRS,			"No listeners have been defined!!") \
+$DEF_MSG(T2R, INFO,	LSNADDED,		"Added listener #!2ZL [Target: <!AC>, Net: <!AZ:!%I:!UW>, Connection limit: !UL, Idle tmo: !UL sec, Mode: !AZ] --- added") \
+$DEF_MSG(T2R, ERROR,	NOLSNRS,		"No listeners have been defined!!") \
 $DEF_MSG(T2R, ERROR,	CFGPARSE,		"!AZ:!UL - !AZ, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	SIGERR,			"Cannot establish handler for signal !UL, errno: !SL") \
 $DEF_MSG(T2R, ERROR,	CFGERR,			"Error processing configuration") \
 $DEF_MSG(T2R, FATAL,	CFGABORT,		"Abort execution, check configuration!!") \
-$DEF_MSG(T2R, ERROR,	DEVLOCKERR,		"Cannot get exclusive access for <!AZ> after !UL attempts") \
-$DEF_MSG(T2R, WARN,	TXNODATA,		"[#!SL:<!AZ>] No data to send") \
-$DEF_MSG(T2R, ERROR,	XMITERR,			"[#!SL:<!AZ>] Xmit of !UL octets failed, writev()->!SL, errno: !SL") \
-$DEF_MSG(T2R, ERROR,	XMITSHORT,		"[#!SL:<!AZ>] Sent !SL octets (from !UL), errno: !SL") \
-$DEF_MSG(T2R, WARN,	RXBUFFULL,		"[#!SL:<!AZ>] Input buffer is full (!UL octets) --- stop reading") \
-$DEF_MSG(T2R, ERROR,	RXNODATA,		"[#!SL:<!AZ>] No data has been received") \
-$DEF_MSG(T2R, WARN,	RESPMISM,		"[#!SL:<!AZ>] Slave: (REQ: !UL vs RESP: !UL) or Function (REQ: !UL vs RESP: !UL) --- mismatch") \
+$DEF_MSG(T2R, ERROR,	DEVLOCKERR,		"Cannot get exclusive access for <!AC> after !UL attempts") \
+$DEF_MSG(T2R, WARN,	TXNODATA,		"[#!SL:<!AC>] No data to send") \
+$DEF_MSG(T2R, ERROR,	XMITERR,		"[#!SL:<!AC>] Xmit of !UL octets failed, writev()->!SL, errno: !SL") \
+$DEF_MSG(T2R, ERROR,	XMITSHORT,		"[#!SL:<!AC>] Sent !SL octets (from !UL), errno: !SL") \
+$DEF_MSG(T2R, WARN,	RXBUFFULL,		"[#!SL:<!AC>] Input buffer is full (!UL octets) --- stop reading") \
+$DEF_MSG(T2R, ERROR,	RXNODATA,		"[#!SL:<!AC>] No data has been received") \
+$DEF_MSG(T2R, WARN,	RESPMISM,		"[#!SL:<!AC>] Slave: (REQ: !UL vs RESP: !UL) or Function (REQ: !UL vs RESP: !UL) --- mismatch") \
 $DEF_MSG(T2R, WARN,	BADSPEED,		"Cannot translate speed !UL baud to the internal representation, use 9600") \
-$DEF_MSG(T2R, WARN,	NOTTTY,			"isatty(!SL)->!SL --- invalid I/O descriptor for <!AZ>") \
-$DEF_MSG(T2R, WARN,	RS485OFF,		"<!AZ> ioctl(!AZ)->!SL, errno: !SL --- RS485 support is disabled") \
-$DEF_MSG(T2R, SUCCESS,	RS485ON,			"<!AZ> RS485 support is enabled") \
-$DEF_MSG(T2R, ERROR,	DEVINIERR,		"Device <!AZ> --- cannot be initialized") \
-$DEF_MSG(T2R, INFO,	DEVINIT,			"Device <!AZ> --- has been initialized") \
-$DEF_MSG(T2R, ERROR,	DEVCLSERR,		"[#!SL:<!AZ>] --- close failed") \
-$DEF_MSG(T2R, WARN,	DEVNOTINI,		"Device <!AZ> has not been initialized") \
-$DEF_MSG(T2R, ERROR,	DEVBUSY,			"[#!SL:<!AZ>] --- cannot be allocated for exclusive I/O") \
+$DEF_MSG(T2R, WARN,	NOTTTY,			"isatty(!SL)->!SL --- invalid I/O descriptor for <!AC>") \
+$DEF_MSG(T2R, WARN,	RS485OFF,		"<!AC> ioctl(!AZ)->!SL, errno: !SL --- RS485 support is disabled") \
+$DEF_MSG(T2R, SUCCESS,	RS485ON,		"<!AC> RS485 support is enabled") \
+$DEF_MSG(T2R, ERROR,	DEVINIERR,		"Device <!AC> --- cannot be initialized") \
+$DEF_MSG(T2R, INFO,	DEVINIT,		"Device <!AC> --- has been initialized") \
+$DEF_MSG(T2R, ERROR,	DEVCLSERR,		"[#!SL:<!AC>] --- close failed") \
+$DEF_MSG(T2R, WARN,	DEVNOTINI,		"Device <!AC> has not been initialized") \
+$DEF_MSG(T2R, ERROR,	DEVBUSY,		"[#!SL:<!AC>] --- cannot be allocated for exclusive I/O") \
 $DEF_MSG(T2R, WARN,	CONNLIMIT,		"[#!SL] !%I:!UW --- the listener has reached its connection limit (!UL) --- the connection is rejected") \
 $DEF_MSG(T2R, ERROR,	LSNOPTRNG,		"[listener #!2ZL] --- !AZ !SL is out of range [!SL..!SL]") \
-$DEF_MSG(T2R, ERROR,	TXDRAINTMO,		"[#!SL:<!AZ>] --- the request has not been transmitted in !UL msec, !SL octets are dropped") \
-$DEF_MSG(T2R, WARN,	ECHOMISM,		"[#!SL:<!AZ>] Echo of the write request: address !UL, value/quantity !UL (REQ: !UL, !UL) --- mismatch") \
-$DEF_MSG(T2R, WARN,	LATEANS,			"[#!SL:<!AZ>] !UL octets have arrived after the failed exchange (a late answer?) --- dropped") \
-$DEF_MSG(T2R, ERROR,	DEVLOST,			"[#!SL:<!AZ>] !AZ, errno: !SL --- the device is lost, it will be reopened every !UL msec") \
-$DEF_MSG(T2R, WARN,	DEVABSENT,		"Device <!AZ> is absent --- it will be opened every !UL msec, MODBUS requests get exception 10, RAW clients are disconnected meanwhile") \
-$DEF_MSG(T2R, INFO,	RAWSTART,		"[#!SL] !%I:!UW --- the raw session on <!AZ> has been started") \
-$DEF_MSG(T2R, INFO,	RAWSTOP,			"[#!SL] the raw session on <!AZ> is finished: !UQ octets to the line, !UQ octets from the line") \
-$DEF_MSG(T2R, WARN,	RAWKICK,			"[#!SL] the raw session is taken over by !%I:!UW (#!SL) --- the old one is shut down") \
-$DEF_MSG(T2R, WARN,	RAWBUSY,			"[#!SL] !%I:!UW --- the raw listener is busy and <takeover> is off --- the connection is rejected") \
+$DEF_MSG(T2R, ERROR,	TXDRAINTMO,		"[#!SL:<!AC>] --- the request has not been transmitted in !UL msec, !SL octets are dropped") \
+$DEF_MSG(T2R, WARN,	ECHOMISM,		"[#!SL:<!AC>] Echo of the write request: address !UL, value/quantity !UL (REQ: !UL, !UL) --- mismatch") \
+$DEF_MSG(T2R, WARN,	LATEANS,		"[#!SL:<!AC>] !UL octets have arrived after the failed exchange (a late answer?) --- dropped") \
+$DEF_MSG(T2R, ERROR,	DEVLOST,		"[#!SL:<!AC>] !AZ, errno: !SL --- the device is lost, it will be reopened every !UL msec") \
+$DEF_MSG(T2R, WARN,	DEVABSENT,		"Device <!AC> is absent --- it will be opened every !UL msec, MODBUS requests get exception 10, RAW clients are disconnected meanwhile") \
+$DEF_MSG(T2R, INFO,	RAWSTART,		"[#!SL] !%I:!UW --- the raw session on <!AC> has been started") \
+$DEF_MSG(T2R, INFO,	RAWSTOP,		"[#!SL] the raw session on <!AC> is finished: !UQ octets to the line, !UQ octets from the line") \
+$DEF_MSG(T2R, WARN,	RAWKICK,		"[#!SL] the raw session is taken over by !%I:!UW (#!SL) --- the old one is shut down") \
+$DEF_MSG(T2R, WARN,	RAWBUSY,		"[#!SL] !%I:!UW --- the raw listener is busy and <takeover> is off --- the connection is rejected") \
 $DEF_MSG(T2R, ERROR,	LSNBADMODE,		"[listener #!2ZL] --- unknown <mode> value <!AZ>, use MODBUS or RAW") \
 $DEF_MSG(T2R, ERROR,	LSNRAWSHR,		"[listener #!2ZL] --- target <!AZ> is used by the listener on port !UW too, a RAW listener needs the serial line for itself") \
 $DEF_MSG(T2R, ERROR,	LSNRAWOPT,		"[listener #!2ZL] --- <!AZ> is not allowed in the !AZ mode") \
 \
-$DEF_MSG(T2R, SUCCESS,	CTLREADY,		"Control channel <!AZ> --- is ready") \
+$DEF_MSG(T2R, SUCCESS,	CTLREADY,		"Control channel <!AC> --- is ready") \
 $DEF_MSG(T2R, INFO,	CTLOFF,			"Control channel is disabled by /CONTROL=NONE") \
-$DEF_MSG(T2R, WARN,	CTLBUSY,			"Control channel <!AZ> is served by another running gateway --- this one goes on without the control channel") \
-$DEF_MSG(T2R, WARN,	CTLERR,			"Control channel <!AZ> !AZ->!SL, errno: !SL --- the gateway goes on without the control channel") \
+$DEF_MSG(T2R, WARN,	CTLBUSY,		"Control channel <!AC> is served by another running gateway --- this one goes on without the control channel") \
+$DEF_MSG(T2R, WARN,	CTLERR,			"Control channel <!AC> !AZ->!SL, errno: !SL --- the gateway goes on without the control channel") \
 $DEF_MSG(T2R, WARN,	CTLSYSWRN,		"Control channel: !AZ->!SL, errno: !SL") \
 $DEF_MSG(T2R, INFO,	CTLRESET,		"[#!SL] !%I:!UW (connection !UL) --- is reset by the operator") \
 $DEF_MSG(T2R, INFO,	CTLRESTART,		"RESTART GATEWAY by the operator: the settings are good --- restarting") \
 $DEF_MSG(T2R, ERROR,	CTLCHKFAIL,		"RESTART GATEWAY is refused: the settings check has failed (status !SL) --- the gateway goes on as it is") \
-$DEF_MSG(T2R, SUCCESS,	CHECKOK,			"Settings <!AZ> --- are good: !UL serial(s), !UL listener(s)") \
+$DEF_MSG(T2R, SUCCESS,	CHECKOK,		"Settings <!AC> --- are good: !UL serial(s), !UL listener(s)") \
 $DEF_MSG(T2R, INFO,	RESTARTING,		"Restarting <!AZ> with the same command line (!UL connection(s) still alive)") \
-$DEF_MSG(T2R, FATAL,	EXECERR,			"Restart: execv(<!AZ>)->!SL, errno: !SL --- the gateway stops") \
-$DEF_MSG(T2R, ERROR,	CTLNOGW,			"Cannot reach the gateway by <!AZ>, errno: !SL --- is it running? Is it the right /SOCKET?") \
-$DEF_MSG(T2R, ERROR,	CTLANSERR,		"The gateway says: !AZ") \
+$DEF_MSG(T2R, FATAL,	EXECERR,		"Restart: execv(<!AZ>)->!SL, errno: !SL --- the gateway stops") \
+$DEF_MSG(T2R, ERROR,	CTLNOGW,		"Cannot reach the gateway by <!AC>, errno: !SL --- is it running? Is it the right /SOCKET?") \
+$DEF_MSG(T2R, ERROR,	CTLANSERR,		"The gateway return status: !SL (!XL), reason: <!AD>") \
 $DEF_MSG(T2R, ERROR,	CTLBADANS,		"Ill-formed answer of the gateway: <!AZ>") \
-$DEF_MSG(T2R, INFO,	CTLWAIT,			"The gateway is restarting, waiting for it at most !UL seconds ...") \
-$DEF_MSG(T2R, SUCCESS,	CTLBACK,			"The gateway has restarted in !UL second(s): pid !UL, !UL listener(s) up") \
+$DEF_MSG(T2R, INFO,	CTLWAIT,		"The gateway is restarting, waiting for it at most !UL seconds ...") \
+$DEF_MSG(T2R, SUCCESS,	CTLBACK,		"The gateway has restarted in !UL second(s): pid !UL, !UL listener(s) up") \
 $DEF_MSG(T2R, WARN,	CTLNOBACK,		"The gateway has not come back in !UL seconds --- see its log") \
 $DEF_MSG(T2R, SUCCESS,	CTLRESETN,		"!UL connection(s) reset") \
 $DEF_MSG(T2R, ERROR,	CTLBADSEL,		"Bad connection <!AZ> --- give an id, a.b.c.d, a.b.c.d:port or /ALL (see SHOW CONNECTIONS)") \

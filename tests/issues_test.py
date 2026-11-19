@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 #
-# Self-contained reproducers of the X.00-13 field reports (pty pair + fake RTU slave + gateway + MBAP clients):
+# Self-contained reproducers of the field reports and fixed bugs (pty pair + fake RTU slave + gateway + MBAP clients):
 #
-#   tests/issues_test.py [--gw ./build/mbusgw-t2r] icrnl|late|replug|all
+#   tests/issues_test.py [--gw ./build/mbusgw-t2r] icrnl|late|replug|rawreplug|gone|all
 #
 #   icrnl	- the gateway's tty is left with ICRNL (a fresh port), the answers carry 0x0D octets: no CRC16ERR expected
 #   late	- the slave answers a bit later than <iotmo>, two clients write and read back their own registers:
 #		  no foreign data with the success status is expected
 #   rawreplug	- the same for a RAW listener: no device - the client gets a FIN at once, a running session is closed
+#   gone	- V.01-01ECO01: a client which closes while its request waits for a busy line (a dead unit ahead
+#		  of it) is dropped - no line I/O, its <connlm> slot is free for the next client; a half-closed
+#		  client (shutdown(SHUT_WR)) gets its answer on a free line, not after such a wait; <idletmo>
+#		  still ends an idle session after an answer
 #   replug	- the device behind a symlink disappears (the pty master is closed) and comes back (a new pty): the busy
 #		  and the idle cases, and the device absent at the start; exception 0x0A while it is away, normal answers after
 #
@@ -16,6 +20,7 @@
 # MODIFICATION HISTORY:
 #	02-NOV-2026	CLD	X.00-13ECO07: Initial revision.
 #	02-NOV-2026	CLD	X.00-14ECO02: rawreplug - a RAW listener with an absent / unplugged / returned device.
+#	17-NOV-2026	CLD	V.01-01ECO01: gone - a client gone while waiting for a busy line, half-close, idletmo.
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -24,7 +29,7 @@ ap.add_argument('--gw', default='./build/mbusgw-t2r')
 ap.add_argument('--port', type=int, default=5602)
 ap.add_argument('--secs', type=int, default=30)
 ap.add_argument('--lategd', type=int, default=None, help='late: <lategd> of the serial, the gateway default if omitted')
-ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'all'])
+ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'gone', 'all'])
 a = ap.parse_args()
 GW = os.path.abspath(a.gw)
 TMP = tempfile.mkdtemp(prefix='t2r_issues_')
@@ -70,12 +75,13 @@ class Line:
 
 
 class Slave(threading.Thread):
-    """A fake RTU device (unit 1): holding registers, FC 3, 6, 16; an optional answer delay."""
+    """A fake RTU device (unit 1): holding registers, FC 3, 6, 16; an optional answer delay; units in mute never answer."""
 
-    def __init__(self, line, regs=None, delay=None):
+    def __init__(self, line, regs=None, delay=None, mute=()):
         super().__init__(daemon=True)
-        self.line, self.regs, self.delay = line, dict(regs or {}), delay
+        self.line, self.regs, self.delay, self.mute = line, dict(regs or {}), delay, set(mute)
         self.answered, self.stop = 0, False
+        self.muted = threading.Event()		# Set when a frame to a mute unit has arrived
         line.slave = self
         self.start()
 
@@ -98,6 +104,9 @@ class Slave(threading.Thread):
                 if crc16(req[:-2]) != req[-2] | (req[-1] << 8):
                     buf = b''
                     continue
+                if req[0] in self.mute:
+                    self.muted.set()
+                    continue			# A dead device
                 if self.delay:
                     time.sleep(self.delay())
                 unit, sa, qty = req[0], *struct.unpack('>HH', req[2:6])
@@ -371,7 +380,94 @@ def t_rawreplug():
     return res
 
 
-tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug}
+def t_gone():
+    line = Line()
+    sl = Slave(line, regs={0: 0x1234}, mute=(9,))
+    port = a.port + 5
+    gw = Gateway(line.name, port, iotmo=1500, extra='lategd = 300;', lextra='connlm = 2; idletmo = 3;')
+    rd = lambda unit: bytes([unit, 3]) + struct.pack('>HH', 0, 1)
+    mbap = lambda pdu: struct.pack('>HHH', 1, 0, len(pdu)) + pdu
+    res = True
+
+    def half():
+        """Send a request, shutdown(SHUT_WR), read: the answer, b'' for a FIN, None if nothing came in 6 s."""
+        sk = socket.create_connection(('127.0.0.1', port), timeout=6)
+        try:
+            sk.sendall(mbap(rd(1)))
+            sk.shutdown(socket.SHUT_WR)
+            return sk.recv(64)
+        except socket.timeout:
+            return None
+        except OSError:
+            return b''
+        finally:
+            sk.close()
+
+    def holder():
+        """A request to the dead unit 9 holds the line for iotmo + lategd; returns once the line is taken by it."""
+        sl.muted.clear()
+        c = Client(port)
+        threading.Thread(target=lambda: (c.req(rd(9)), c.close()), daemon=True).start()
+        if not sl.muted.wait(3):
+            raise RuntimeError('the request to the dead unit has not reached the line')
+        time.sleep(0.05)
+
+    try:
+        d = half()
+        res &= report('gone/halfclose-free', d is not None and len(d) == 11 and d[7] == 3, f'answer {d.hex() if d else d}')
+
+        time.sleep(0.5)
+        holder()
+        n0 = sl.answered
+        b = socket.create_connection(('127.0.0.1', port), timeout=5)	# Takes the 2nd <connlm> slot, waits for the line
+        b.sendall(mbap(rd(1)))
+        time.sleep(0.8)							# More than one lock slice in the queue
+        b.close()
+        time.sleep(0.8)							# Its session notices it within a slice
+        ok, nb = False, sl.answered - n0				# B's request must not have reached the line
+        try:
+            c = Client(port)						# Would be CONNLIMIT if B still held its slot
+            try:
+                ok = c.read(0)[0]
+            finally:
+                c.close()
+        except (OSError, ConnectionError):
+            pass
+        time.sleep(0.3)
+        res &= report('gone/queued-close', ok and nb == 0 and sl.answered - n0 == 1 and gw.count('CONNLIMIT') == 0,
+                      f'next client ok {ok}, RTU answers {nb} before it and {sl.answered - n0} in all (0 and 1 expected), '
+                      f'CONNLIMIT {gw.count("CONNLIMIT")}')
+
+        time.sleep(2)
+        holder()
+        n0 = sl.answered
+        d = half()
+        time.sleep(2)							# The holder's hold is over: a request run late would show now
+        res &= report('gone/halfclose-busy', d == b'' and sl.answered == n0,
+                      f'reply {d.hex() if d else d} (a FIN expected), RTU answers {sl.answered - n0} (0 expected)')
+
+        time.sleep(0.5)
+        c = Client(port)
+        try:
+            c.read(0)
+            t = time.monotonic()
+            c.sk.settimeout(10)
+            try:
+                e = c.sk.recv(64)
+            except OSError:
+                e = None
+            dt = time.monotonic() - t
+        finally:
+            c.close()
+        res &= report('gone/idletmo', e == b'' and 2.5 < dt < 8, f'closed after {dt:.1f} s (idletmo 3, checked once a 3 s poll)')
+    except (OSError, ConnectionError, RuntimeError, AssertionError) as x:
+        res = report('gone', False, f'aborted: {x!r}')
+    finally:
+        gw.stop(); line.close()
+    return res
+
+
+tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug, 'gone': t_gone}
 rc = all([tests[t]() for t in (tests if a.test == 'all' else [a.test])])
 print(f'logs in {TMP}')
 sys.exit(0 if rc else 1)

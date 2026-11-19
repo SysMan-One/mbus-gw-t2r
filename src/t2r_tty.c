@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-01ECO01"
-#define	__REV__		"01.01.01"
+#define	__IDENT__	"V.01-01ECO02"
+#define	__REV__		"01.01.02"
 
 /*
 **++
@@ -128,6 +128,10 @@
 **				in the queue, then an RTU exchange whose answer was sent into an RST). An RST counts
 **				always, a FIN only after the request has waited for a busy line: a half-closed
 **				client (shutdown(SHUT_WR), "nc -N") on a free line still gets its answer.
+**
+**	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - .devname of a serial is an ASC: the messages take
+**				it by !AC, open() its sts (kept NUL-terminated), the traces print it by "%.*s".
+**				RRL: t2r$tty_raw_relay() indexes its two pollfd by FD$K_NET/FD$K_TTY (was 0/1).
 **--
 */
 #include	<time.h>
@@ -158,6 +162,7 @@
 extern int	g_exit_flag, g_trace;
 
 /* Signal a condition unless a_quiet is set; the condition value is the result either way */
+enum {OPEN$K_QUIET = 1, OPEN$K_NOQUIET = 0};
 #define	$SIGQ(a_quiet, a_sts, ...)	((a_quiet) ? (a_sts) : $PUTMSG_FAO(a_sts, __VA_ARGS__))
 
 static const struct timespec	s_reopen_ts = {.tv_sec = T2R$K_REOPEN_MSEC / 1000, .tv_nsec = (T2R$K_REOPEN_MSEC % 1000) * 1000000L};
@@ -267,7 +272,7 @@ int	l_rc, l_last;
 
 			if ( !(l_rc = pthread_mutex_timedlock(&a_serial->lock, &l_send)) )
 				{
-				//$IFTRACE(g_trace, "Got exclusive access to <%s> ...", a_serial->devname);
+				//$IFTRACE(g_trace, "Got exclusive access to <%.*s> ...", $ASC(&a_serial->devname));
 				return	STS$K_SUCCESS;
 				}
 
@@ -282,11 +287,11 @@ int	l_rc, l_last;
 			clock_gettime(CLOCK_REALTIME_COARSE, &l_now);
 			}
 
-		$PUTMSG_FAO(T2R$__DEVSYSWRN, a_serial->devname, "pthread_mutex_timedlock()", l_rc, errno);
+		$PUTMSG_FAO(T2R$__DEVSYSWRN, &a_serial->devname, "pthread_mutex_timedlock()", l_rc, errno);
 		}
 
 
-	return	$PUTMSG_FAO(T2R$__DEVLOCKERR, a_serial->devname, 3);
+	return	$PUTMSG_FAO(T2R$__DEVLOCKERR, &a_serial->devname, 3);
 }
 
 
@@ -310,7 +315,7 @@ static inline int s_tty_unlock (
 int	l_rc;
 
 	if ( (l_rc = pthread_mutex_unlock(&a_serial->lock)) )
-		return	$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "pthread_mutex_unlock()", l_rc, errno);
+		return	$PUTMSG_FAO(T2R$__DEVSYSERR, &a_serial->devname, "pthread_mutex_unlock()", l_rc, errno);
 
 	return	STS$K_SUCCESS;
 }
@@ -372,7 +377,7 @@ struct timespec l_now_ts;
 	clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
 	__util$add_time (&l_now_ts, &s_reopen_ts, &a_serial->reopen_ts);
 
-	return	$PUTMSG_FAO(T2R$__DEVLOST, l_fd, a_serial->devname, a_why, a_errno, T2R$K_REOPEN_MSEC);
+	return	$PUTMSG_FAO(T2R$__DEVLOST, l_fd, &a_serial->devname, a_why, a_errno, T2R$K_REOPEN_MSEC);
 }
 
 
@@ -426,7 +431,7 @@ struct timespec	l_now_ts, l_end_ts, l_deadline_ts, l_tmo_ts, l_step_ts = {.tv_ns
 		{
 		if ( 0 > (l_rc = ioctl(a_serial->fd, TIOCOUTQ, &l_outq)) )
 			{
-			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "ioctl(TIOCOUTQ)", l_rc, errno);
+			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "ioctl(TIOCOUTQ)", l_rc, errno);
 			break;
 			}
 
@@ -439,7 +444,7 @@ struct timespec	l_now_ts, l_end_ts, l_deadline_ts, l_tmo_ts, l_step_ts = {.tv_ns
 			{
 			tcflush(a_serial->fd, TCOFLUSH);
 
-			return	$PUTMSG_FAO(T2R$__TXDRAINTMO, a_serial->fd, a_serial->devname,
+			return	$PUTMSG_FAO(T2R$__TXDRAINTMO, a_serial->fd, &a_serial->devname,
 					(unsigned) (l_air_usec / 1000) + a_serial->anstmo_msec, l_outq);
 			}
 		}
@@ -484,7 +489,7 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 
 
 	if ( !a_req_pdu->len )
-		return	$PUTMSG_FAO(T2R$__TXNODATA, a_serial->fd, a_serial->devname),
+		return	$PUTMSG_FAO(T2R$__TXNODATA, a_serial->fd, &a_serial->devname),
 				STS$K_SUCCESS;
 
 	l_len = 0;									/* Total lenght of data to be sent */
@@ -510,7 +515,7 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 		if ( s_tty_gone_errno (l_errno = errno) )
 			return	s_tty_lost (a_serial, "tcflush()", l_errno);
 
-		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, l_errno);
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcflush()", l_rc, l_errno);
 		}
 
 
@@ -524,10 +529,10 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 		{
 		if ( s_tty_gone_errno (l_errno = errno) )
 			l_rc = s_tty_lost (a_serial, "writev()", l_errno);
-		else	l_rc = $PUTMSG_FAO(T2R$__XMITERR, a_serial->fd, a_serial->devname, l_len, l_rc, l_errno);
+		else	l_rc = $PUTMSG_FAO(T2R$__XMITERR, a_serial->fd, &a_serial->devname, l_len, l_rc, l_errno);
 		}
 	else if ( l_rc != l_len )
-		l_rc = $PUTMSG_FAO(T2R$__XMITSHORT, a_serial->fd, a_serial->devname, l_rc, l_len, errno);
+		l_rc = $PUTMSG_FAO(T2R$__XMITSHORT, a_serial->fd, &a_serial->devname, l_rc, l_len, errno);
 	else	{
 		/*
 		 * Wait until the UART has really shifted out the last octet: the post-delay and the
@@ -668,10 +673,10 @@ uint8_t	*l_data;
 	if ( 0 > (l_rc = poll(&l_pfd, 1, a_serial->anstmo_msec)) )
 		{
 		if ( errno != EINTR )
-			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "poll()", l_rc, errno);
+			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, &a_serial->devname, "poll()", l_rc, errno);
 		}
 	else if ( !l_rc )
-		return	$PUTMSG_FAO(T2R$__NOANSWER, a_serial->fd, a_serial->devname, a_serial->anstmo_msec);
+		return	$PUTMSG_FAO(T2R$__NOANSWER, a_serial->fd, &a_serial->devname, a_serial->anstmo_msec);
 	else if ( l_pfd.revents & (POLLHUP | POLLERR | POLLNVAL) )
 		return	s_tty_lost (a_serial, "poll() hangup", 0);
 
@@ -703,14 +708,14 @@ uint8_t	*l_data;
 
 		if ( 0 < __util$cmp_time (&l_now_ts, &l_deadline_ts) )
 			{
-			$PUTMSG_FAO(T2R$__FRAMETMO, a_serial->fd, a_serial->devname, a_serial->anstmo_msec,
+			$PUTMSG_FAO(T2R$__FRAMETMO, a_serial->fd, &a_serial->devname, a_serial->anstmo_msec,
 				a_resp_pdu->len);
 			break;
 			}
 
 		if ( 0 >= (l_space = a_resp_pdu->sz - a_resp_pdu->len) )
 			{
-			$PUTMSG_FAO(T2R$__RXBUFFULL, a_serial->fd, a_serial->devname, a_resp_pdu->len);
+			$PUTMSG_FAO(T2R$__RXBUFFULL, a_serial->fd, &a_serial->devname, a_resp_pdu->len);
 			break;
 			}
 
@@ -719,7 +724,7 @@ uint8_t	*l_data;
 			if ( errno == EINTR )
 				continue;
 
-			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "poll()", l_rc, errno);
+			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, &a_serial->devname, "poll()", l_rc, errno);
 			}
 
 		if ( !l_rc )
@@ -738,7 +743,7 @@ uint8_t	*l_data;
 			if ( s_tty_gone_errno (l_errno) )
 				return	s_tty_lost (a_serial, "read()", l_errno);
 
-			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", l_rc, l_errno);
+			return	$PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, &a_serial->devname, "read()", l_rc, l_errno);
 			}
 
 		if ( !l_rc )
@@ -761,10 +766,10 @@ uint8_t	*l_data;
 	 * Validate a framing of the has been received data
 	 */
 	if ( !a_resp_pdu->len )
-		return	$PUTMSG_FAO(T2R$__RXNODATA, a_serial->fd, a_serial->devname);
+		return	$PUTMSG_FAO(T2R$__RXNODATA, a_serial->fd, &a_serial->devname);
 
 	if ( (a_resp_pdu->len < MODBUS$SZ_MINRTU) || (a_resp_pdu->len > MODBUS$SZ_MAXPDU) )
-		return	$PUTMSG_FAO(T2R$__BADFRAME, a_serial->fd, a_serial->devname, a_resp_pdu->len,
+		return	$PUTMSG_FAO(T2R$__BADFRAME, a_serial->fd, &a_serial->devname, a_resp_pdu->len,
 				MODBUS$SZ_MINRTU, MODBUS$SZ_MAXPDU);
 
 	$RTU_PRINT("Rcvd", a_resp_pdu->data, a_resp_pdu->len, 0);
@@ -781,7 +786,7 @@ uint8_t	*l_data;
 	l_crc = s_modbus_crc_calculate (l_data, a_resp_pdu->len - 2);
 
 	if ( l_crc != l_crc_rcvd )
-		return	$PUTMSG_FAO(T2R$__CRC16ERR, a_serial->fd, a_serial->devname, l_crc_rcvd, l_crc);
+		return	$PUTMSG_FAO(T2R$__CRC16ERR, a_serial->fd, &a_serial->devname, l_crc_rcvd, l_crc);
 
 	/*
 	 * Check that the answer belongs to the has been sent request
@@ -791,7 +796,7 @@ uint8_t	*l_data;
 
 	if ( (l_req_pdu->slave != l_resp_pdu->slave)
 		|| (l_req_pdu->fncode != (l_resp_pdu->fncode & (~MODBUS$M_FN_EXCEPTION))) )
-		return	$PUTMSG_FAO(T2R$__RESPMISM, a_serial->fd, a_serial->devname, l_req_pdu->slave, l_resp_pdu->slave,
+		return	$PUTMSG_FAO(T2R$__RESPMISM, a_serial->fd, &a_serial->devname, l_req_pdu->slave, l_resp_pdu->slave,
 				l_req_pdu->fncode, l_resp_pdu->fncode);
 
 	/*
@@ -811,7 +816,7 @@ uint8_t	*l_data;
 					{
 					const uint8_t	*l_rq = (const uint8_t *) a_req_pdu->data;
 
-					return	$PUTMSG_FAO(T2R$__ECHOMISM, a_serial->fd, a_serial->devname,
+					return	$PUTMSG_FAO(T2R$__ECHOMISM, a_serial->fd, &a_serial->devname,
 							(l_data[2] << 8) | l_data[3], (l_data[4] << 8) | l_data[5],
 							(l_rq[2] << 8) | l_rq[3], (l_rq[4] << 8) | l_rq[5]);
 					}
@@ -1015,10 +1020,10 @@ int	l_rc;
 		return	STS$K_SUCCESS;
 
 	if ( !(l_rc = isatty(a_serial->fd)) )
-		return	$PUTMSG_FAO(T2R$__NOTTTY, a_serial->fd, l_rc, a_serial->devname);
+		return	$PUTMSG_FAO(T2R$__NOTTTY, a_serial->fd, l_rc, &a_serial->devname);
 
 	if ( 0 > (l_rc = tcsetattr(a_serial->fd, TCSAFLUSH, &a_serial->savedtios)))
-		$PUTMSG_FAO(T2R$__DEVSYSERR, a_serial->devname, "tcsetattr()", l_rc, errno);
+		$PUTMSG_FAO(T2R$__DEVSYSERR, &a_serial->devname, "tcsetattr()", l_rc, errno);
 
 	close(a_serial->fd);
 	a_serial->fd = -1;
@@ -1072,14 +1077,14 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 	l_flags |= O_CLOEXEC;
 #endif
 
-	if ( 0 > (a_serial->fd = open(a_serial->devname, l_flags)) )
-		return	$SIGQ(a_quiet, T2R$__DEVOPNERR, a_serial->devname, errno);
+	if ( 0 > (a_serial->fd = open($ASCPTR(&a_serial->devname), l_flags)) )	/* sts is NUL-terminated */
+		return	$SIGQ(a_quiet, T2R$__DEVOPNERR, &a_serial->devname, errno);
 
 	memset(&a_serial->savedtios, 0, sizeof(struct termios));
 
 	if ( (l_rc = tcgetattr(a_serial->fd , &a_serial->savedtios)) )
 		return	close(a_serial->fd), a_serial->fd = -1,
-			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "tcgetattr()", l_rc, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, &a_serial->devname, "tcgetattr()", l_rc, errno);
 
 	a_serial->tios = a_serial->savedtios;						/* Make local copy */
 
@@ -1092,11 +1097,11 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 	if ( 0 > ( l_rc = cfsetispeed(&a_serial->tios, l_speed)) )			/* Set line rate */
 		return	close(a_serial->fd ), a_serial->fd = -1,
-			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "cfsetispeed()", l_rc, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, &a_serial->devname, "cfsetispeed()", l_rc, errno);
 
 	if ( 0 > ( l_rc = cfsetospeed(&a_serial->tios, l_speed)) )			/* Set line rate */
 		return	close(a_serial->fd ), a_serial->fd = -1,
-			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "cfsetospeed()", l_rc, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, &a_serial->devname, "cfsetospeed()", l_rc, errno);
 
 
 	/* C_CFLAG      Control options
@@ -1169,7 +1174,7 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 	if ( tcsetattr(a_serial->fd, TCSANOW, &a_serial->tios) < 0 )
 		return	close(a_serial->fd), a_serial->fd = -1,
-			$SIGQ(a_quiet, T2R$__DEVSYSERR, a_serial->devname, "tcsetattr()", -1, errno);
+			$SIGQ(a_quiet, T2R$__DEVSYSERR, &a_serial->devname, "tcsetattr()", -1, errno);
 
 
 #ifdef HAVE_TIOCRS485
@@ -1177,12 +1182,12 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 		{
 		struct serial_rs485 rs485conf = {0};
 
-		$IFTRACE(g_trace, "Trying to enable RS-485 support for %s", a_serial->devname);
+		$IFTRACE(g_trace, "Trying to enable RS-485 support for %.*s", $ASC(&a_serial->devname));
 
 		if ( 0 > (l_rc = ioctl(a_serial->fd, TIOCGRS485, &rs485conf)) )
 			{
 			a_serial->flags &=  ~T2R$M_SERIAL_RS485;
-			$PUTMSG_FAO(T2R$__RS485OFF, a_serial->devname, "TIOCGRS485", l_rc, errno);
+			$PUTMSG_FAO(T2R$__RS485OFF, &a_serial->devname, "TIOCGRS485", l_rc, errno);
 			}
 		else	{
 			rs485conf.flags |= SER_RS485_ENABLED;
@@ -1190,9 +1195,9 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 			if ( 0 > (l_rc = ioctl(a_serial->fd, TIOCSRS485, &rs485conf)) )	/* Set, not Get */
 				{
 				a_serial->flags &=  ~T2R$M_SERIAL_RS485;
-				$PUTMSG_FAO(T2R$__RS485OFF, a_serial->devname, "TIOCSRS485", l_rc, errno);
+				$PUTMSG_FAO(T2R$__RS485OFF, &a_serial->devname, "TIOCSRS485", l_rc, errno);
 				}
-			else	$PUTMSG_FAO(T2R$__RS485ON, a_serial->devname);
+			else	$PUTMSG_FAO(T2R$__RS485ON, &a_serial->devname);
 			}
 
 		}
@@ -1406,14 +1411,14 @@ int	t2r$tty_open (
 int	l_rc, l_waited;
 
 	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
-		return	$PUTMSG_FAO(T2R$__DEVINIERR, a_serial->devname);
+		return	$PUTMSG_FAO(T2R$__DEVINIERR, &a_serial->devname);
 
 	if ( a_serial->state > T2R$K_STATE_IDLE )
-		l_rc = $PUTMSG_FAO(T2R$__DEVINIT, a_serial->devname);
-	else if ( 1 & (l_rc = s_tty_open (a_serial, 0)) )
+		l_rc = $PUTMSG_FAO(T2R$__DEVINIT, &a_serial->devname);
+	else if ( 1 & (l_rc = s_tty_open (a_serial, OPEN$K_NOQUIET /* Enable diagnostic messages */ )) )
 		{
 		a_serial->state = T2R$K_STATE_READY;
-		$PUTMSG_FAO(T2R$__DEVREADY, a_serial->devname, a_serial->baud, a_serial->anstmo_msec,
+		$PUTMSG_FAO(T2R$__DEVREADY, &a_serial->devname, a_serial->baud, a_serial->anstmo_msec,
 			a_serial->inter_pdu_usec);
 		}
 	else	{									/* Absent: the listener works, the device */
@@ -1425,7 +1430,7 @@ int	l_rc, l_waited;
 		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
 		__util$add_time (&l_now_ts, &s_reopen_ts, &a_serial->reopen_ts);
 
-		l_rc = $PUTMSG_FAO(T2R$__DEVABSENT, a_serial->devname, T2R$K_REOPEN_MSEC);
+		l_rc = $PUTMSG_FAO(T2R$__DEVABSENT, &a_serial->devname, T2R$K_REOPEN_MSEC);
 		}
 
 	s_tty_unlock (a_serial);
@@ -1458,10 +1463,10 @@ int	t2r$tty_close (
 int	l_rc, l_waited;
 
 	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
-		return	$PUTMSG_FAO(T2R$__DEVCLSERR, a_serial->fd, a_serial->devname);
+		return	$PUTMSG_FAO(T2R$__DEVCLSERR, a_serial->fd, &a_serial->devname);
 
 	if ( !a_serial->state )
-		l_rc = $PUTMSG_FAO(T2R$__DEVNOTINI, a_serial->devname);
+		l_rc = $PUTMSG_FAO(T2R$__DEVNOTINI, &a_serial->devname);
 	else	l_rc = s_tty_close (a_serial), a_serial->state = T2R$K_STATE_IDLE;
 
 	s_tty_unlock (a_serial);
@@ -1535,7 +1540,7 @@ char	l_buf[MODBUS$SZ_MAXPDU];
 			if ( errno == EINTR )
 				continue;
 
-			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "poll()", l_rc, errno);
+			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "poll()", l_rc, errno);
 			break;
 			}
 
@@ -1550,7 +1555,7 @@ char	l_buf[MODBUS$SZ_MAXPDU];
 			if ( (errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR) )
 				continue;
 
-			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "read()", l_rc, errno);
+			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "read()", l_rc, errno);
 			break;
 			}
 
@@ -1564,7 +1569,7 @@ char	l_buf[MODBUS$SZ_MAXPDU];
 		}
 
 	if ( l_dropped )
-		$PUTMSG_FAO(T2R$__LATEANS, a_serial->fd, a_serial->devname, l_dropped);
+		$PUTMSG_FAO(T2R$__LATEANS, a_serial->fd, &a_serial->devname, l_dropped);
 
 	return	STS$K_SUCCESS;
 }
@@ -1603,12 +1608,12 @@ struct timespec l_now_ts;
 
 	__util$add_time (&l_now_ts, &s_reopen_ts, &a_serial->reopen_ts);
 
-	if ( !(1 & s_tty_open (a_serial, 1)) )
+	if ( !(1 & s_tty_open (a_serial, OPEN$K_QUIET /* Disable diagnostic messages */ )) )
 		return	T2R$__DEVABSENT;
 
 	a_serial->nodev = 0;
 
-	$PUTMSG_FAO(T2R$__DEVREADY, a_serial->devname, a_serial->baud, a_serial->anstmo_msec, a_serial->inter_pdu_usec);
+	$PUTMSG_FAO(T2R$__DEVREADY, &a_serial->devname, a_serial->baud, a_serial->anstmo_msec, a_serial->inter_pdu_usec);
 
 	return	STS$K_SUCCESS;
 }
@@ -1712,7 +1717,7 @@ MODBUS_REQ_T	*l_req_pdu;
 			{
 			l_rc = s_make_exception_resp(a_req_dsc, a_resp_dsc, *a_excode = l_rcv = MODBUS$K_EXCEPTION_ILLEGAL_DATA_ADDRESS);
 
-			$PUTMSG_FAO(T2R$__EXCRPT, a_serial->fd, a_serial->devname, l_rcv, t2r$modbus_exc2str (l_rcv));
+			$PUTMSG_FAO(T2R$__EXCRPT, a_serial->fd, &a_serial->devname, l_rcv, t2r$modbus_exc2str (l_rcv));
 			}
 
 		return	l_rc;
@@ -1731,7 +1736,7 @@ MODBUS_REQ_T	*l_req_pdu;
 		return	l_rc;							/* The client has gone while waiting */
 
 	if ( !(1 & l_rc) )
-		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
+		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, &a_serial->devname);
 
 	if ( s_tty_peer_gone (a_sd, l_waited) )				/* A FIN counts after a wait only */
 		{
@@ -1750,7 +1755,7 @@ MODBUS_REQ_T	*l_req_pdu;
 	if ( !(1 & l_rc) && !a_serial->nodev )
 		{
 		s_tty_flush (a_serial);
-		$IFTRACE(g_trace, "[#%d:<%s>] --- do flush on I/O error", a_serial->fd, a_serial->devname);
+		$IFTRACE(g_trace, "[#%d:<%.*s>] --- do flush on I/O error", a_serial->fd, $ASC(&a_serial->devname));
 		}
 
 	l_nodev = a_serial->nodev;
@@ -1759,13 +1764,13 @@ MODBUS_REQ_T	*l_req_pdu;
 	if ( !(1 & l_rc) && l_nodev )
 		{
 		l_rc = s_make_exception_resp(a_req_dsc, a_resp_dsc, *a_excode = MODBUS$K_EXCEPTION_GW_NO_PATH);
-		$IFTRACE(g_trace, "[#-1:<%s>] --- the device is absent, exception %d", a_serial->devname, *a_excode);
+		$IFTRACE(g_trace, "[#-1:<%.*s>] --- the device is absent, exception %d", $ASC(&a_serial->devname), *a_excode);
 		}
 	else if ( !(1 & l_rc) )
 		{
 		l_rc = s_make_exception_resp(a_req_dsc, a_resp_dsc, *a_excode = l_rcv = MODBUS$K_EXCEPTION_SERVER_DEVICE_FAILURE);
 
-		$PUTMSG_FAO(T2R$__EXCRPT, a_serial->fd, a_serial->devname, l_rcv, t2r$modbus_exc2str (l_rcv));
+		$PUTMSG_FAO(T2R$__EXCRPT, a_serial->fd, &a_serial->devname, l_rcv, t2r$modbus_exc2str (l_rcv));
 		}
 
 	return	l_rc;
@@ -1809,6 +1814,8 @@ MODBUS_REQ_T	*l_req_pdu;
  *	T2R$__DEVLOST	- the device has gone during the session
  *	otherwise	- the condition code of the signalled failure (NETSYSERR, TTYSYSERR, ...)
  */
+
+
 int	t2r$tty_raw_relay (
 		T2R$_SERIAL	*a_serial,
 			int	a_sd,
@@ -1817,21 +1824,23 @@ int	t2r$tty_raw_relay (
 		uint64_t	*a_tty2net
 			)
 {
+enum {FD$K_NET = 0, FD$K_TTY = 1, FD$K_MAX};
 int	l_waited, l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0, l_errno;
 ssize_t	l_cnt;
-struct pollfd	l_pfd[2];
+struct pollfd	l_pfd[FD$K_MAX];
 struct timespec	l_now, l_lastio;
 uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
+
 
 	*a_net2tty = *a_tty2net = 0;
 
 	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
-		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, a_serial->devname);
+		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, &a_serial->devname);
 
 	if ( !(1 & (l_rc = s_tty_reopen (a_serial))) )					/* Absent: the client gets a FIN at once */
 		{
 		s_tty_unlock (a_serial);
-		$IFTRACE(g_trace, "[#%d] <%s> is absent --- the raw session is not started", a_sd, a_serial->devname);
+		$IFTRACE(g_trace, "[#%d] <%.*s> is absent --- the raw session is not started", a_sd, $ASC(&a_serial->devname));
 
 		/*
 		 * A FIN, not an RST: the octets which the client has already sent are read out first - a
@@ -1855,13 +1864,13 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 			return	l_sts;
 			}
 
-		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, a_serial->devname, "tcflush()", l_rc, l_errno);
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcflush()", l_rc, l_errno);
 		}
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &l_lastio);
 
-	l_pfd[0].fd = a_sd;
-	l_pfd[1].fd = a_serial->fd;
+	l_pfd[FD$K_NET].fd = a_sd;
+	l_pfd[FD$K_TTY].fd = a_serial->fd;
 
 	while ( !g_exit_flag )
 		{
@@ -1871,12 +1880,12 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 		 * while the last portion still goes to the line: POLLHUP is reported whatever .events are, a
 		 * polled socket would spin the loop until a slow line has swallowed the data.
 		 */
-		l_pfd[0].fd = (l_hup && l_n2t_len) ? -1 : a_sd;
-		l_pfd[0].events = (l_n2t_len ? 0 : POLLIN) | (l_t2n_len ? POLLOUT : 0);
-		l_pfd[1].events = ((l_t2n_len || l_hup) ? 0 : POLLIN) | (l_n2t_len ? POLLOUT : 0);
-		l_pfd[0].revents = l_pfd[1].revents = 0;
+		l_pfd[FD$K_NET].fd = (l_hup && l_n2t_len) ? -1 : a_sd;
+		l_pfd[FD$K_NET].events = (l_n2t_len ? 0 : POLLIN) | (l_t2n_len ? POLLOUT : 0);
+		l_pfd[FD$K_TTY].events = ((l_t2n_len || l_hup) ? 0 : POLLIN) | (l_n2t_len ? POLLOUT : 0);
+		l_pfd[FD$K_NET].revents = l_pfd[FD$K_TTY].revents = 0;
 
-		if ( 0 > (l_rc = poll(l_pfd, 2, T2R$K_RAW_POLL_MSEC)) )
+		if ( 0 > (l_rc = poll(l_pfd, FD$K_MAX, T2R$K_RAW_POLL_MSEC)) )
 			{
 			if ( errno == EINTR )
 				continue;
@@ -1901,27 +1910,27 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 		l_lastio = l_now;
 
-		if ( l_pfd[1].revents & (POLLERR | POLLHUP | POLLNVAL) )			/* An USB adapter has gone, ... */
+		if ( l_pfd[FD$K_TTY].revents & (POLLERR | POLLHUP | POLLNVAL) )			/* An USB adapter has gone, ... */
 			{
 			l_sts = s_tty_lost (a_serial, "poll() hangup", 0);
 			break;
 			}
 
-		if ( l_pfd[0].revents & (POLLERR | POLLNVAL) )
+		if ( l_pfd[FD$K_NET].revents & (POLLERR | POLLNVAL) )
 			{
-			$PUTMSG_FAO(T2R$__NETPOLLEV, a_sd, l_rc, l_pfd[0].revents, errno);
+			$PUTMSG_FAO(T2R$__NETPOLLEV, a_sd, l_rc, l_pfd[FD$K_NET].revents, errno);
 			l_sts = STS$K_WARN;
 			break;
 			}
 
-		if ( l_pfd[0].revents & POLLHUP )						/* Nobody will read the line -> client data */
+		if ( l_pfd[FD$K_NET].revents & POLLHUP )						/* Nobody will read the line -> client data */
 			l_hup = 1, l_t2n_len = l_t2n_off = 0;
 
 		/*
 		 * Client -> line. POLLHUP comes together with the last data of a closed connection: the data is
 		 * read first, the close is seen as recv() == 0 on the next round.
 		 */
-		if ( (!l_n2t_len) && (l_pfd[0].revents & (POLLIN | POLLHUP)) )
+		if ( (!l_n2t_len) && (l_pfd[FD$K_NET].revents & (POLLIN | POLLHUP)) )
 			{
 			if ( !(l_cnt = recv(a_sd, l_n2t, sizeof(l_n2t), MSG_DONTWAIT)) )
 				{
@@ -1941,7 +1950,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 				l_n2t_len = (int) l_cnt;
 				l_n2t_off = 0;
 
-				$IFTRACE(g_trace, "[#%d] client -> <%s>: %d octets", a_sd, a_serial->devname, l_n2t_len);
+				$IFTRACE(g_trace, "[#%d] client -> <%.*s>: %d octets", a_sd, $ASC(&a_serial->devname), l_n2t_len);
 				}
 			}
 
@@ -1952,7 +1961,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 				if ( ((l_errno = errno) != EAGAIN) && (l_errno != EWOULDBLOCK) && (l_errno != EINTR) )
 					{
 					l_sts = s_tty_gone_errno (l_errno) ? s_tty_lost (a_serial, "write()", l_errno)
-						: (int) $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "write()", (int) l_cnt, l_errno);
+						: (int) $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, &a_serial->devname, "write()", (int) l_cnt, l_errno);
 					break;
 					}
 				}
@@ -1966,14 +1975,14 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 			}
 
 		/* Line -> client. VMIN = VTIME = 0: read() == 0 is "no data yet", not a hangup */
-		if ( (!l_t2n_len) && (l_pfd[1].revents & POLLIN) )
+		if ( (!l_t2n_len) && (l_pfd[FD$K_TTY].revents & POLLIN) )
 			{
 			if ( 0 > (l_cnt = read(a_serial->fd, l_t2n, sizeof(l_t2n))) )
 				{
 				if ( ((l_errno = errno) != EAGAIN) && (l_errno != EWOULDBLOCK) && (l_errno != EINTR) )
 					{
 					l_sts = s_tty_gone_errno (l_errno) ? s_tty_lost (a_serial, "read()", l_errno)
-						: (int) $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, a_serial->devname, "read()", (int) l_cnt, l_errno);
+						: (int) $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, &a_serial->devname, "read()", (int) l_cnt, l_errno);
 					break;
 					}
 				}
@@ -1982,7 +1991,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 				l_t2n_len = (int) l_cnt;
 				l_t2n_off = 0;
 
-				$IFTRACE(g_trace, "[#%d] <%s> -> client: %d octets", a_sd, a_serial->devname, l_t2n_len);
+				$IFTRACE(g_trace, "[#%d] <%.*s> -> client: %d octets", a_sd, $ASC(&a_serial->devname), l_t2n_len);
 				}
 			}
 
