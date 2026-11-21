@@ -60,8 +60,14 @@
 #				configuration files are conffiles; built by .github/workflows/release.yml.
 #
 #	28-OCT-2026	RRL	X.00-13ECO06: The .deb of a cross build: T2R_DEB_ARCH names the Debian
-#				architecture of the package (mipsel, mips64el) - CPack takes the one of
+#				architecture of the package (mipsel, mips64el; armhf, mips later) - CPack takes the one of
 #				the build host otherwise. The OpenWrt packages are built from openwrt/.
+#
+#	04-NOV-2026	CLD	The .rpm package by CPack (cpack -G RPM; cmake/rpm/): the same layout as
+#				of the .deb, the configuration files are %config(noreplace), the scriptlets
+#				are those of the .deb; T2R_RPM_ARCH names the rpm architecture of a cross
+#				build (armv7hl, mips, mipsel, mips64el); T2R_DEB_SHLIBDEPS=OFF for the .deb
+#				of mips (no libc6:mips in Debian 12). The version/ident are not changed.
 #
 #	06-NOV-2026	CLD	V.01-01: The control utility mbus-ctl (src/mbus_ctl.c) is built and installed
 #				next to the gateway (sbin/), the gateway got the module src/t2r_ctl.c (the
@@ -79,6 +85,10 @@
 #				With the prefix /usr there is no symlink /usr/sbin/mbus-ctl: it replaced
 #				the utility itself by a link to itself.
 #
+#	21-NOV-2026	CLD	The branch of the .rpm merged: the .rpm takes the unit made by configure_file()
+#				(as the .deb); the link /usr/sbin/mbus-ctl is a plain file of the .rpm
+#				(not %config), /usr/sbin belongs to filesystem.
+#
 #	USAGE (see README.md for the whole installation sequence):
 #		$ mkdir ./build && cd ./build
 #		$ cmake ../ -DCMAKE_BUILD_TYPE=Release
@@ -89,6 +99,10 @@
 #	The .deb package (see .github/workflows/release.yml):
 #		$ cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON
 #		$ make -s && cpack -G DEB
+#
+#	The .rpm package (needs rpmbuild; -DT2R_RPM_ARCH=<arch> for a cross build):
+#		$ cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON
+#		$ make -s && cpack -G RPM
 #
 #	The OpenWrt packages (.ipk, .apk): the feed openwrt/, see README.md.
 #--
@@ -292,7 +306,7 @@ install (CODE "
 
 #	The systemd unit goes to /usr/lib/systemd/system only for the package: 'make install' to /opt/
 #	does not touch the system directories.
-option(T2R_SYSTEMD_UNIT "Install the systemd unit (for the .deb package)" OFF)
+option(T2R_SYSTEMD_UNIT "Install the systemd unit (for the .deb and .rpm packages)" OFF)
 
 if (T2R_SYSTEMD_UNIT)
 	install (FILES ${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service DESTINATION /usr/lib/systemd/system)
@@ -342,7 +356,18 @@ set (CPACK_DEBIAN_FILE_NAME		DEB-DEFAULT)		# <name>_<version>-<release>_<arch>.d
 set (CPACK_DEBIAN_PACKAGE_RELEASE	1)
 set (CPACK_DEBIAN_PACKAGE_SECTION	"net")
 set (CPACK_DEBIAN_PACKAGE_HOMEPAGE	"https://github.com/napilab/mbus-gw-t2r")
-set (CPACK_DEBIAN_PACKAGE_SHLIBDEPS	ON)			# libc6 (>= ...) by dpkg-shlibdeps
+
+#	libc6 (>= ...) by dpkg-shlibdeps; a cross build for an architecture which Debian 12 has no more
+#	(mips) has no libc6:<arch> package for dpkg-shlibdeps to look at: -DT2R_DEB_SHLIBDEPS=OFF
+#	gives the only dependency - the glibc of the build - explicitly.
+option (T2R_DEB_SHLIBDEPS "Dependencies of the .deb by dpkg-shlibdeps" ON)
+
+if (T2R_DEB_SHLIBDEPS)
+	set (CPACK_DEBIAN_PACKAGE_SHLIBDEPS	ON)
+else ()
+	set (CPACK_DEBIAN_PACKAGE_SHLIBDEPS	OFF)
+	set (CPACK_DEBIAN_PACKAGE_DEPENDS	"libc6 (>= 2.34)")
+endif ()
 set (CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
 	${CMAKE_CURRENT_BINARY_DIR}/deb/conffiles
 	${CMAKE_CURRENT_SOURCE_DIR}/cmake/deb/postinst
@@ -352,10 +377,63 @@ set (CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
 set (CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
 
 #	A cross build names the architecture of the package: dpkg of the build host would give its own
-set (T2R_DEB_ARCH "" CACHE STRING "The Debian architecture of the .deb of a cross build (mipsel, mips64el)")
+set (T2R_DEB_ARCH "" CACHE STRING "The Debian architecture of the .deb of a cross build (armhf, mips, mipsel, mips64el)")
 
 if (T2R_DEB_ARCH)
 	set (CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${T2R_DEB_ARCH}")
+endif ()
+
+#------------------------------------------------------------------------------------------------------
+#	The .rpm package: 'cpack -G RPM' in the build directory (needs rpmbuild). The same file layout as
+#	of the .deb; the configuration files are %config(noreplace) - rpm keeps the tuned ones
+#	on an upgrade; the unit is installed disabled, the scriptlets are cmake/rpm/{post,preun,postun}.
+#
+#	The dependency scan of rpmbuild is off: the host of a cross build cannot scan a foreign ELF, so
+#	the only run-time requirement - the glibc of the build (2.34, Debian 12) - is given explicitly.
+#	libconfig and StarLet are linked statically (T2R_STATIC_LIBCONFIG) - nothing else is needed.
+#
+set (CPACK_RPM_FILE_NAME		RPM-DEFAULT)		# <name>-<version>-<release>.<arch>.rpm
+set (CPACK_RPM_PACKAGE_RELEASE		1)
+set (CPACK_RPM_PACKAGE_LICENSE		"Apache-2.0 and LGPL-2.1")	# see NOTICE: libconfig
+set (CPACK_RPM_PACKAGE_GROUP		"Applications/Communications")
+set (CPACK_RPM_PACKAGE_URL		"https://github.com/napilab/mbus-gw-t2r")
+set (CPACK_RPM_PACKAGE_AUTOREQPROV	OFF)
+set (CPACK_RPM_PACKAGE_REQUIRES		"glibc >= 2.34")
+set (CPACK_RPM_POST_INSTALL_SCRIPT_FILE		${CMAKE_CURRENT_SOURCE_DIR}/cmake/rpm/post)
+set (CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE	${CMAKE_CURRENT_SOURCE_DIR}/cmake/rpm/preun)
+set (CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE	${CMAKE_CURRENT_SOURCE_DIR}/cmake/rpm/postun)
+set (CPACK_PACKAGE_RELOCATABLE		OFF)			# the unit is in /usr/lib/...: not relocatable
+set (CPACK_RPM_PACKAGE_DESCRIPTION	"A yet another gateway for MODBUS (TCP to RTU): the TCP clients to the RS-485/RS-232 serial lines.
+The unit mbusgw-t2r.service is installed disabled: tune the settings file, then 'systemctl enable --now mbusgw-t2r'.")
+set (CPACK_RPM_USER_FILELIST
+	"%config(noreplace) ${T2R_CONFDIR}/modbus-t2r.conf"
+	"%config(noreplace) ${T2R_CONFDIR}/modbus-t2r_settings.conf"
+)
+
+#	CPack marks the files installed to an absolute path (the unit) as %config, and owns the
+#	directories of systemd: the unit is an ordinary file, the directories belong to systemd.
+#	The link /usr/sbin/mbus-ctl (see T2R_SYSTEMD_UNIT above) is a plain file of the package too, and
+#	/usr/sbin belongs to filesystem.
+if (T2R_SYSTEMD_UNIT)
+	list (APPEND CPACK_RPM_USER_FILELIST "%attr(0644,root,root) /usr/lib/systemd/system/mbusgw-t2r.service")
+	if (NOT CMAKE_INSTALL_FULL_SBINDIR STREQUAL "/usr/sbin")
+		list (APPEND CPACK_RPM_USER_FILELIST "%attr(-,root,root) /usr/sbin/${T2R_CTL_TARGET}")	# a bare path trips CPackRPM of CMake 3.25
+	endif ()
+endif ()
+set (CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/lib/systemd;/usr/lib/systemd/system;/usr/sbin;/opt")
+
+#	A cross build names the architecture of the package (x86_64, armv7hl, aarch64, mips, mipsel,
+#	mips64el) - CPack takes the one of the build host otherwise. The binary is of a foreign
+#	architecture: rpmbuild must neither strip it by the strip of the host nor make a debuginfo.
+set (T2R_RPM_ARCH "" CACHE STRING "The rpm architecture of the .rpm of a cross build (armv7hl, mips, mipsel, mips64el)")
+
+set (CPACK_RPM_SPEC_MORE_DEFINE "%define _build_id_links none")		# no /usr/lib/.build-id/ links
+
+if (T2R_RPM_ARCH)
+	set (CPACK_RPM_PACKAGE_ARCHITECTURE "${T2R_RPM_ARCH}")
+	set (CPACK_RPM_SPEC_MORE_DEFINE "%define _build_id_links none
+%define __os_install_post %{nil}
+%define debug_package %{nil}")
 endif ()
 
 include (CPack)

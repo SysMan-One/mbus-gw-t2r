@@ -1,5 +1,5 @@
 #++
-#   DESCRIPTION: The .deb packages of the gateway (amd64, arm64) for a GitHub Release
+#   DESCRIPTION: The .deb/.rpm packages of the gateway (amd64, arm64, ...) for a GitHub Release
 #
 #   AUTHOR: Ruslan R. Laishev (BMF, The BadAss SysMan)
 #
@@ -16,8 +16,15 @@
 #	trixie, Ubuntu 22.04 and newer); libconfig and StarLet are linked statically.
 #	Every package is installed and started on bookworm, trixie and noble before the release.
 #
-#	The .deb for mipsel and mips64el is a cross build on bookworm (Debian 13 has no MIPS); it is
-#	started under qemu-user (no MIPS image of Debian to install it into). The OpenWrt packages
+#	The .rpm (cpack -G RPM, the same build tree as of the .deb: x86_64, aarch64) is installed and
+#	started on Fedora and Rocky Linux 9 (glibc >= 2.34) before the release.
+#
+#	The .deb and .rpm for armhf (armv7hl), mips, mipsel and mips64el are cross builds on bookworm
+#	(Debian 13 has no MIPS); they are started under qemu-user (no image of Debian/Fedora to install
+#	them into). Debian 12 has no mips (big endian) any more: the cross compiler is there, but no
+#	libc6:mips / libconfig-dev:mips, so libconfig is built from the Debian source package for it
+#	(static, to /opt/cross) and the .deb depends on "libc6 (>= 2.34)" given explicitly.
+#	The OpenWrt packages
 #	are built by the official SDK containers from the feed openwrt/: .ipk by 24.10, .apk by 25.12;
 #	those of x86_64 and mips_24kc are installed and started in the OpenWrt rootfs images.
 #
@@ -43,6 +50,12 @@
 #				V is a product version, X (v<VERSION>) is a field test one; the leading zeros of
 #				the fields are dropped for the package version and the Release title.
 #
+#	04-NOV-2026	CLD	The .deb for armhf and mips (cross, as mipsel/mips64el); the .rpm for x86_64,
+#				armv7hl, aarch64, mips, mipsel and mips64el (CPack RPM, cmake/rpm/), the
+#				rpm install test on Fedora and Rocky Linux 9 (x86_64, aarch64), the .rpm are
+#				in SHA256SUMS and in the Release notes. The artifacts are linux-<arch> now
+#				(.deb + .rpm of an architecture), were deb-<arch>.
+#
 #	06-NOV-2026	CLD	V.01-01: the installed packages (.deb, .ipk/.apk) must carry a working mbus-ctl.
 #
 #	10-NOV-2026	CLD	SHA256SUMS is signed with minisign (the MINISIGN_KEY secret, checked with
@@ -55,6 +68,10 @@
 #				the __IDENT__ of src/t2r_main.c, the package version is aa.bb.cc without the
 #				leading zeros (V.01-01ECO02 -> 1.1.2, V.01-01 -> 1.1.0) and must be the one of
 #				__REV__; the X.* tags start the run too. v<VERSION> and V<MM>.<NN>.<E> as before.
+#
+#	21-NOV-2026	CLD	The branch of the .rpm merged: the .rpm are in SHA256SUMS (signed) and in the
+#				Release; the rpm install test checks mbus-ctl and the link /usr/sbin/mbus-ctl,
+#				and runs on x86_64 too (arch is a key of its matrix, not only of include).
 #--
 
 name: release
@@ -81,8 +98,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - { arch: amd64, runner: ubuntu-24.04 }
-          - { arch: arm64, runner: ubuntu-24.04-arm }
+          - { arch: amd64, rpm: x86_64,  runner: ubuntu-24.04 }
+          - { arch: arm64, rpm: aarch64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
     container: debian:bookworm
     steps:
@@ -90,7 +107,7 @@ jobs:
         run: |
           apt-get update
           apt-get install --yes --no-install-recommends build-essential cmake pkg-config \
-            libconfig-dev dpkg-dev file git ca-certificates
+            libconfig-dev dpkg-dev file git ca-certificates rpm
 
       - uses: actions/checkout@v5
         with:
@@ -108,14 +125,23 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON
           cmake --build build -j "$(nproc)"
-          cd build && cpack -G DEB
+          cd build && cpack -G DEB && cpack -G RPM
 
-      - name: Check the package
+      - name: Check the packages
         run: |
           deb=$(ls build/*.deb)
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb"
           case "$deb" in *_${{ matrix.arch }}.deb) ;; *) echo "Wrong architecture: $deb"; exit 1;; esac
+          rpm=$(ls build/*.rpm)
+          case "$rpm" in *.${{ matrix.rpm }}.rpm) ;; *) echo "Wrong architecture: $rpm"; exit 1;; esac
+          rpm -qpi "$rpm"
+          rpm -qp --scripts "$rpm"
+          rpm -qp --requires "$rpm"
+          rpm -qp --qf '[%{FILENAMES} %{FILEFLAGS:fflags}\n]' "$rpm" | tee rpm.files
+          grep -q 'modbus-t2r_settings.conf cn$' rpm.files      # %config(noreplace)
+          grep -q 'modbus-t2r.conf cn$' rpm.files
+          grep -q '^/usr/lib/systemd/system/mbusgw-t2r.service' rpm.files
           file build/mbusgw-t2r
           readelf -d build/mbusgw-t2r | grep NEEDED
           if readelf -d build/mbusgw-t2r | grep -q 'libconfig'; then
@@ -124,8 +150,10 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: deb-${{ matrix.arch }}
-          path: build/*.deb
+          name: linux-${{ matrix.arch }}
+          path: |
+            build/*.deb
+            build/*.rpm
           if-no-files-found: error
 
   test:
@@ -144,7 +172,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: deb-${{ matrix.arch }}
+          name: linux-${{ matrix.arch }}
 
       - name: Install, upgrade-in-place and start the gateway
         run: |
@@ -160,25 +188,89 @@ jobs:
           /opt/mbusgw-t2r/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
           apt-get remove --yes mbusgw-t2r
 
-  deb-cross:
+  test-rpm:
+    name: test ${{ matrix.rpm }} on ${{ matrix.distro }}
+    needs: deb
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ['fedora:latest', 'rockylinux:9']
+        arch: [amd64, arm64]                 # a real key: an include alone would give arm64 twice
+        include:
+          - { arch: amd64, rpm: x86_64,  runner: ubuntu-24.04 }
+          - { arch: arm64, rpm: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.distro }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}
+
+      - name: Install, upgrade-in-place, keep the configuration and start the gateway
+        run: |
+          dnf install --assumeyes ./*.rpm
+          test -f /usr/lib/systemd/system/mbusgw-t2r.service
+          test -f /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+          echo '# tuned by hand' >> /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+          rpm -Uvh --replacepkgs ./*.rpm                    # %config(noreplace): the tuned file stays
+          grep -q '^# tuned by hand' /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+          if ldd /opt/mbusgw-t2r/sbin/mbusgw-t2r | grep 'not found'; then exit 1; fi
+          out=$(/opt/mbusgw-t2r/sbin/mbusgw-t2r 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q 'REVISNF'
+          /opt/mbusgw-t2r/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
+          test -x /usr/sbin/mbus-ctl
+          rpm -e mbusgw-t2r
+          test ! -e /usr/sbin/mbus-ctl
+          test ! -e /opt/mbusgw-t2r/sbin/mbusgw-t2r
+          test ! -e /usr/lib/systemd/system/mbusgw-t2r.service
+
+  cross:
     name: build ${{ matrix.arch }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { arch: mipsel,   triplet: mipsel-linux-gnu,         qemu: qemu-mipsel }
-          - { arch: mips64el, triplet: mips64el-linux-gnuabi64,  qemu: qemu-mips64el }
+          - { arch: mipsel,   triplet: mipsel-linux-gnu,         qemu: qemu-mipsel,   rpm: mipsel,   proc: mipsel,   libconfig: apt, sysroot: / }
+          - { arch: mips64el, triplet: mips64el-linux-gnuabi64,  qemu: qemu-mips64el, rpm: mips64el, proc: mips64el, libconfig: apt, sysroot: / }
+          - { arch: armhf,    triplet: arm-linux-gnueabihf,      qemu: qemu-arm,      rpm: armv7hl,  proc: armv7l,   libconfig: apt, sysroot: / }
+          - { arch: mips,     triplet: mips-linux-gnu,           qemu: qemu-mips,     rpm: mips,     proc: mips,     libconfig: src, sysroot: /usr/mips-linux-gnu }
     runs-on: ubuntu-24.04
     container: debian:bookworm
     env:
       ARCH: ${{ matrix.arch }}
       TRIPLET: ${{ matrix.triplet }}
+      PROC: ${{ matrix.proc }}
     steps:
+      #	Debian 12 has no mips (big endian): no libc6:mips and libconfig-dev:mips to install, the
+      #	compiler and its C library (libc6-dev-mips-cross, /usr/mips-linux-gnu) are there
       - name: Install prerequisites
         run: |
-          dpkg --add-architecture "$ARCH"
+          pkgs="build-essential cmake pkg-config dpkg-dev file git ca-certificates crossbuild-essential-$ARCH qemu-user rpm cpio"
+          if [ "${{ matrix.libconfig }}" = apt ]; then
+            dpkg --add-architecture "$ARCH"
+            pkgs="$pkgs libconfig-dev:$ARCH"
+          else
+            pkgs="$pkgs autoconf automake libtool flex bison"
+          fi
           apt-get update
-          apt-get install --yes --no-install-recommends build-essential cmake pkg-config \
-            dpkg-dev file git ca-certificates crossbuild-essential-$ARCH libconfig-dev:$ARCH qemu-user
+          apt-get install --yes --no-install-recommends $pkgs
+
+      - name: Build and install libconfig (static) from the Debian source package
+        if: matrix.libconfig == 'src'
+        run: |
+          sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
+          apt-get update
+          mkdir /tmp/libconfig && cd /tmp/libconfig
+          apt-get source --download-only libconfig
+          dpkg-source -x libconfig_*.dsc src
+          cd src
+          ./configure --host="$TRIPLET" --prefix=/opt/cross --disable-shared --enable-static \
+            --disable-cxx --disable-examples --disable-tests
+          make -j "$(nproc)" -C lib
+          make -C lib install
+          ls -l /opt/cross/lib/libconfig.a /opt/cross/lib/pkgconfig/libconfig.pc
+          file /opt/cross/lib/libconfig.a
 
       - uses: actions/checkout@v5
         with:
@@ -189,40 +281,55 @@ jobs:
           git clone --depth 1 "$STARLET_REPO" /tmp/starlet
           git -C /tmp/starlet log -1 --format='StarLet: %H %cd'
           cmake -S /tmp/starlet -B /tmp/starlet/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$ARCH" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
+            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$PROC" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
             -DCMAKE_INSTALL_PREFIX=/opt/cross
           cmake --build /tmp/starlet/build -j "$(nproc)"
           cmake --install /tmp/starlet/build
 
       - name: Build the gateway and the package
         run: |
-          export PKG_CONFIG_LIBDIR="/usr/lib/$TRIPLET/pkgconfig:/usr/share/pkgconfig"
+          export PKG_CONFIG_LIBDIR="/opt/cross/lib/pkgconfig:/usr/lib/$TRIPLET/pkgconfig:/usr/share/pkgconfig"
+          shlibdeps=ON; test "${{ matrix.libconfig }}" = apt || shlibdeps=OFF      # no libc6:mips for dpkg-shlibdeps
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON \
-            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$ARCH" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
-            -DCMAKE_PREFIX_PATH=/opt/cross -DT2R_DEB_ARCH="$ARCH"
+            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$PROC" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
+            -DCMAKE_PREFIX_PATH=/opt/cross -DT2R_DEB_ARCH="$ARCH" -DT2R_DEB_SHLIBDEPS="$shlibdeps" \
+            -DT2R_RPM_ARCH=${{ matrix.rpm }}
           grep -q '^HAVE_TIOCRS485:INTERNAL=1' build/CMakeCache.txt || { echo 'No RS-485 (TIOCSRS485)'; exit 1; }
           cmake --build build -j "$(nproc)"
-          cd build && cpack -G DEB
+          cd build && cpack -G DEB && cpack -G RPM
 
-      - name: Check the package
+      - name: Check the packages
         run: |
           deb=$(ls build/*.deb)
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb"
           case "$deb" in *_${ARCH}.deb) ;; *) echo "Wrong architecture: $deb"; exit 1;; esac
+          rpm=$(ls build/*.rpm)
+          case "$rpm" in *.${{ matrix.rpm }}.rpm) ;; *) echo "Wrong architecture: $rpm"; exit 1;; esac
+          rpm -qpi "$rpm"
+          rpm -qp --scripts "$rpm"
+          rpm -qp --requires "$rpm"
+          rpm -qp --qf '[%{FILENAMES} %{FILEFLAGS:fflags}\n]' "$rpm" | tee rpm.files
+          grep -q 'modbus-t2r_settings.conf cn$' rpm.files      # %config(noreplace)
+          grep -q 'modbus-t2r.conf cn$' rpm.files
+          grep -q '^/usr/lib/systemd/system/mbusgw-t2r.service' rpm.files
+          # The binary in the .rpm is the built one (a cross build is not stripped)
+          rpm2cpio "$rpm" | cpio -i --quiet --to-stdout ./opt/mbusgw-t2r/sbin/mbusgw-t2r | cmp - build/mbusgw-t2r
           file build/mbusgw-t2r
           readelf -d build/mbusgw-t2r | grep NEEDED
           if readelf -d build/mbusgw-t2r | grep -q 'libconfig'; then
             echo "libconfig is linked dynamically"; exit 1
           fi
-          out=$(${{ matrix.qemu }} -L / build/mbusgw-t2r 2>&1 || true)
+          out=$(${{ matrix.qemu }} -L ${{ matrix.sysroot }} build/mbusgw-t2r 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q 'REVISNF'
 
       - uses: actions/upload-artifact@v6
         with:
-          name: deb-${{ matrix.arch }}
-          path: build/*.deb
+          name: linux-${{ matrix.arch }}
+          path: |
+            build/*.deb
+            build/*.rpm
           if-no-files-found: error
 
   openwrt:
@@ -334,7 +441,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [test, deb-cross, openwrt-test]
+    needs: [test, test-rpm, cross, openwrt-test]
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || startsWith(github.ref, 'refs/tags/X.') || startsWith(inputs.tag, 'v') || startsWith(inputs.tag, 'V') || startsWith(inputs.tag, 'X.')
     runs-on: ubuntu-24.04
     steps:
@@ -345,7 +452,7 @@ jobs:
 
       - uses: actions/download-artifact@v7
         with:
-          pattern: '{deb,owrt}-*'
+          pattern: '{linux,owrt}-*'
           merge-multiple: true
 
       - name: Collect the files and SHA256SUMS
@@ -376,11 +483,11 @@ jobs:
           done
           git -C src archive --format=tar.gz --prefix="mbusgw-t2r-$ident/" \
             -o "$PWD/mbusgw-t2r-$ident.tar.gz" HEAD
-          ls -l *.deb *.ipk *.apk *.pdf *.tar.gz
-          for pkg in *.deb *.ipk *.apk; do      # The tag must be the package version
-            case "$pkg" in mbusgw-t2r_${VER}-*) ;; *) echo "$pkg does not match $TAG"; exit 1;; esac
+          ls -l *.deb *.rpm *.ipk *.apk *.pdf *.tar.gz
+          for pkg in *.deb *.rpm *.ipk *.apk; do      # The tag must be the package version
+            case "$pkg" in mbusgw-t2r_${VER}-*|mbusgw-t2r-${VER}-*) ;; *) echo "$pkg does not match $TAG"; exit 1;; esac
           done
-          sha256sum *.deb *.ipk *.apk *.tar.gz > SHA256SUMS
+          sha256sum *.deb *.rpm *.ipk *.apk *.tar.gz > SHA256SUMS
           cat SHA256SUMS
           echo "VER=$VER" >> "$GITHUB_ENV"
 
@@ -416,10 +523,16 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
+            gh release upload "$TAG" *.deb *.rpm *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
           else
-            gh release create "$TAG" *.deb *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "mbusgw-t2r ${VER}" --notes-file - <<EOF
-          The .deb for amd64 and arm64 is tested on Debian 12, Debian 13 and Ubuntu 24.04 (any system with glibc >= 2.34 should do); for mipsel and mips64el it is built for Debian 12. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`. Install: \`sudo apt install ./mbusgw-t2r_${VER}-1_<arch>.deb\`.
+            gh release create "$TAG" *.deb *.rpm *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "mbusgw-t2r ${VER}" --notes-file - <<EOF
+          | File | For | Install |
+          |---|---|---|
+          | \`mbusgw-t2r_${VER}-1_<arch>.deb\` | Debian, Ubuntu | \`sudo apt install ./mbusgw-t2r_${VER}-1_<arch>.deb\` |
+          | \`mbusgw-t2r-${VER}-1.<arch>.rpm\` | RHEL, Rocky, Fedora | \`sudo dnf install ./mbusgw-t2r-${VER}-1.<arch>.rpm\` |
+          | \`mbusgw-t2r_${VER}-*_<arch>.ipk\` / \`.apk\` | OpenWrt 24.10 / 25.12 | see below |
+
+          Arch names: deb \`amd64 arm64 armhf mips mipsel mips64el\`, rpm \`x86_64 aarch64 armv7hl mips mipsel mips64el\`. The .deb and .rpm for amd64/arm64 (x86_64/aarch64) are tested on Debian 12, Debian 13, Ubuntu 24.04, Fedora and Rocky Linux 9 (any system with glibc >= 2.34 should do); those for armhf, mips, mipsel and mips64el are cross builds for glibc >= 2.34 (Debian 12), started under qemu-user only. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`; the configuration files in /opt/mbusgw-t2r/etc are kept on an upgrade.
 
           OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${VER}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${VER}-*_<arch>.apk\`); libconfig and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
 
