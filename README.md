@@ -195,7 +195,9 @@ as `Keeping the existing ...`.
 The default prefix is `/opt/mbusgw-t2r` --- a self-contained tree, removed as a whole. To install
 elsewhere give the prefix at the Step 3: `cmake ../ -DCMAKE_INSTALL_PREFIX=/usr/local ...` ---
 the binary then goes to `/usr/local/sbin/`, the configuration files to
-`/usr/local/etc/mbusgw-t2r/`, the docs to `/usr/local/share/doc/mbusgw-t2r/`.
+`/usr/local/etc/mbusgw-t2r/`, the docs to `/usr/local/share/doc/mbusgw-t2r/`. The systemd unit
+(the copy in the docs, and the installed one with `-DT2R_SYSTEMD_UNIT=ON`) carries the paths of
+the prefix given.
 
 **USB-to-serial adapters FTDI** (FT232/FT2232/FT4232): install the udev rule which sets their
 `latency_timer` to 1 msec --- the answers get faster and are never cut:
@@ -234,7 +236,7 @@ statically. The package puts the gateway to `/opt/mbusgw-t2r/` and the systemd u
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.1.0-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.1.3-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -256,8 +258,8 @@ OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_1.1.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.1.0-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.1.3-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.1.3-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`

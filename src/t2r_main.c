@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-01ECO02"
-#define	__REV__		"01.01.02"
+#define	__IDENT__	"V.01-01ECO03"
+#define	__REV__		"01.01.03"
 
 /*
 **++
@@ -224,6 +224,10 @@
 **				1.6.10 of the OpenWrt kits included), every message shows the device name by
 **				!AC; s_settings_find_n_get_serial() compares the length and the text. s_save_argv():
 **				a failed strdup() frees the copies made before it (was: a leak).
+**
+**	21-NOV-2026	CLD	V.01-01ECO03 / REV: 01.01.03 (package version 1.1.3) - The delivery change (no C
+**				source change): the systemd unit follows the installation prefix (CMakeLists.txt,
+**				contrib/mbusgw-t2r.service.in), no self-link /usr/sbin/mbus-ctl with the prefix /usr.
 **--
 */
 

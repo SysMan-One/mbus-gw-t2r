@@ -17,7 +17,7 @@
 #	06-NOV-2026	CLD	V.01-01: ExecReload= by mbus-ctl RESTART GATEWAY; it waits until the gateway
 #				is back (up to /WAIT=30 s): 'systemctl reload' returns when it is done (RRL).
 #
-#	21-NOV-2026	CLD	The paths come from the installation prefix (configure_file): with another
+#	21-NOV-2026	CLD	V.01-01ECO03: the paths come from the installation prefix (configure_file): with another
 #				prefix (-DCMAKE_INSTALL_PREFIX=/usr/local) the unit started a missing
 #				/opt/mbusgw-t2r/sbin/mbusgw-t2r.
 #--

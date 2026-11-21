@@ -72,7 +72,7 @@
 #	07-NOV-2026	CLD	V.01-01: src/t2r_ctlproto.h - the AVProto TLV protocol of the control channel,
 #				shared by the gateway and mbus-ctl.
 #
-#	21-NOV-2026	CLD	The systemd unit is made from contrib/mbusgw-t2r.service.in by
+#	21-NOV-2026	CLD	V.01-01ECO03: The systemd unit is made from contrib/mbusgw-t2r.service.in by
 #				configure_file(): its ExecStart=/ExecReload= follow the installation
 #				prefix - with -DCMAKE_INSTALL_PREFIX=/usr/local it started a missing
 #				/opt/mbusgw-t2r/sbin/mbusgw-t2r. The default prefix gives the same unit.
