@@ -72,6 +72,13 @@
 #	07-NOV-2026	CLD	V.01-01: src/t2r_ctlproto.h - the AVProto TLV protocol of the control channel,
 #				shared by the gateway and mbus-ctl.
 #
+#	21-NOV-2026	CLD	The systemd unit is made from contrib/mbusgw-t2r.service.in by
+#				configure_file(): its ExecStart=/ExecReload= follow the installation
+#				prefix - with -DCMAKE_INSTALL_PREFIX=/usr/local it started a missing
+#				/opt/mbusgw-t2r/sbin/mbusgw-t2r. The default prefix gives the same unit.
+#				With the prefix /usr there is no symlink /usr/sbin/mbus-ctl: it replaced
+#				the utility itself by a link to itself.
+#
 #	USAGE (see README.md for the whole installation sequence):
 #		$ mkdir ./build && cd ./build
 #		$ cmake ../ -DCMAKE_BUILD_TYPE=Release
@@ -246,6 +253,9 @@ else ()
 	set (T2R_CONFDIR "${CMAKE_INSTALL_FULL_SYSCONFDIR}/mbusgw-t2r")
 endif ()
 
+#	The systemd unit with the paths of this prefix (the binaries, the settings file, the docs)
+configure_file (contrib/mbusgw-t2r.service.in ${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service @ONLY)
+
 install (TARGETS ${T2R_TARGET} ${T2R_CTL_TARGET}
 	RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
@@ -261,7 +271,7 @@ install (FILES
 	docs/UserGuide_EN.pdf
 	docs/UserGuide_RU.pdf
 	contrib/99-ftdi-latency.rules
-	contrib/mbusgw-t2r.service
+	${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service
 	DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
@@ -285,15 +295,18 @@ install (CODE "
 option(T2R_SYSTEMD_UNIT "Install the systemd unit (for the .deb package)" OFF)
 
 if (T2R_SYSTEMD_UNIT)
-	install (FILES contrib/mbusgw-t2r.service DESTINATION /usr/lib/systemd/system)
+	install (FILES ${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service DESTINATION /usr/lib/systemd/system)
 
 	#  The package puts mbus-ctl into PATH: /usr/sbin/mbus-ctl -> <prefix>/sbin/mbus-ctl
-	#  (the gateway itself is started by the unit and stays under the prefix only)
-	execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink
-		"${CMAKE_INSTALL_FULL_SBINDIR}/${T2R_CTL_TARGET}"
-		"${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link")	# file (CREATE_LINK) is 3.14+
-	install (FILES "${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link"
-		DESTINATION /usr/sbin RENAME ${T2R_CTL_TARGET})
+	#  (the gateway itself is started by the unit and stays under the prefix only); with the prefix
+	#  /usr the utility is there already - the link would replace it by a link to itself
+	if (NOT CMAKE_INSTALL_FULL_SBINDIR STREQUAL "/usr/sbin")
+		execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink
+			"${CMAKE_INSTALL_FULL_SBINDIR}/${T2R_CTL_TARGET}"
+			"${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link")	# file (CREATE_LINK) is 3.14+
+		install (FILES "${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link"
+			DESTINATION /usr/sbin RENAME ${T2R_CTL_TARGET})
+	endif ()
 endif ()
 
 #	'make uninstall': removes everything from install_manifest.txt; the configuration files
