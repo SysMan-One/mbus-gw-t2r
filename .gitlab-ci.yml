@@ -13,13 +13,15 @@
 #				before the gateway; the gateway is built out of the source tree.
 #
 #	22-NOV-2026	CLD	V.01-03: yaLIBCFG instead of libconfig, built from its release tag after StarLet.
+#
+#	22-NOV-2026	CLD	V.01-03ECO01: yaLIBCFG X.01-03ECO01 (a number with a leading zero is octal).
 #--
 
 image: gcc
 variables:
   STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
   YALIBCFG_REPO: "https://github.com/SysMan-One/yaLIBCFG.git"
-  YALIBCFG_TAG: "X.01-01"
+  YALIBCFG_TAG: "X.01-03ECO01"
 
 before_script:
   - echo "Install prerequisites ..."

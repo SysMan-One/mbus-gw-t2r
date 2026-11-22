@@ -143,14 +143,14 @@ $ sudo cmake --install .
 ####	Шаг 3. Установить пакет yaLIBCFG
 
 ```
-$ git clone --depth 1 --branch X.01-01 https://github.com/SysMan-One/yaLIBCFG.git
+$ git clone --depth 1 --branch X.01-03ECO01 https://github.com/SysMan-One/yaLIBCFG.git
 $ cmake -S yaLIBCFG -B yaLIBCFG/build -DCMAKE_BUILD_TYPE=Release \
 	-DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
 $ cmake --build yaLIBCFG/build
 $ sudo cmake --install yaLIBCFG/build
 ```
 
-Это yaLIBCFG, релиз X.01-01 (https://github.com/SysMan-One/yaLIBCFG). Если StarLet стоит не в
+Это yaLIBCFG, релиз X.01-03ECO01 (https://github.com/SysMan-One/yaLIBCFG). Если StarLet стоит не в
 префиксе по умолчанию, добавьте к первому cmake `-DCMAKE_PREFIX_PATH=<префикс StarLet>`.
 
 ####	Шаг 4. Собрать шлюз
@@ -251,7 +251,7 @@ glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ub
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.3.0-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.3.1-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -272,7 +272,7 @@ glibc 2.34 или новее. Перед релизом он лишь запус
 выключенной:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.3.0-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.3.1-1.x86_64.rpm
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -291,8 +291,8 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 сеть роутеру для установки не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 Пакет ставит шлюз в `/usr/sbin/mbusgw-t2r`, настройки — в `/etc/mbusgw-t2r/`, службу procd —
@@ -344,7 +344,7 @@ StarLet, yaLIBCFG и шлюз на amd64 и arm64 и прогоняет тест
 1. ставит `cmake`;
 2. клонирует StarLet из `https://gitlab.com/SysMan-One/utility_routines.git`, собирает его и ставит
    в `/usr/local` (адрес задан переменной `STARLET_REPO` — замените его, чтобы брать StarLet из зеркала);
-3. клонирует yaLIBCFG из его релизного тега (`YALIBCFG_TAG`, `X.01-01`), собирает его и ставит;
+3. клонирует yaLIBCFG из его релизного тега (`YALIBCFG_TAG`, `X.01-03ECO01`), собирает его и ставит;
 4. собирает шлюз в каталоге `build/` (Debug).
 
 Задание только проверяет, что код компилируется: шлюз оно не устанавливает и бинарник не сохраняет.

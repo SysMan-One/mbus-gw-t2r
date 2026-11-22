@@ -109,6 +109,9 @@
 #	22-NOV-2026	CLD	V.01-03: yaLIBCFG (find_package(yaLIBCFG), static, the StarLet family) reads the
 #				settings file instead of libconfig: pkg-config, T2R_STATIC_LIBCONFIG and the library
 #				directories of libconfig are gone; the .rpm license is Apache-2.0 only (NOTICE).
+#
+#	22-NOV-2026	CLD	V.01-03ECO01: yaLIBCFG 1.3 (X.01-03) at least - a number with a leading zero is octal;
+#				the builds take X.01-03ECO01.
 #--
 
 cmake_minimum_required (VERSION 3.10)
@@ -155,7 +158,7 @@ set ( CMAKE_COLOR_MAKEFILE   ON )
 #   yaLIBCFG - the settings file (the libconfig syntax, a schema, the positional diagnostics): a
 #   static library of the StarLet family, found as StarLet is (CMAKE_PREFIX_PATH); see README.md.
 #
-find_package(yaLIBCFG 1.0 REQUIRED CONFIG)
+find_package(yaLIBCFG 1.3 REQUIRED CONFIG)				# X.01-03: octal numbers as libconfig (cfg$errcount() since X.01-02)
 message (STATUS "yaLIBCFG: ${yaLIBCFG_VERSION} from ${yaLIBCFG_DIR}")
 
 find_package(StarLet REQUIRED)						# The installed UTILITY$ROUTINES package,

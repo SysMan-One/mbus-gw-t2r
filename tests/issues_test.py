@@ -31,6 +31,7 @@
 #	22-NOV-2026	CLD	V.01-02ECO02: late - lategd = 100 msec by default (was the gateway default 50 - a 10 msec margin over the
 #				lateness of the slave; a slow CI runner gave foreign_r 1, TheWorks 47-30).
 #	22-NOV-2026	CLD	V.01-03: flow - the refused settings are told by the yaLIBCFG schema (CFG-E-..., CFGREJECT).
+#	22-NOV-2026	CLD	V.01-03ECO01: settings - a leading zero is octal (yaLIBCFG X.01-03), 08 is BADNUM, the ! comment.
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -567,23 +568,28 @@ serials = (
 '''
     good = '''# comments stay comments
 Listeners = ( { BIND = "TCP:127.0.0.1:5997"; Target = "/dev/null"; Mode = "raw"; } );
-SERIALS = ( { Device = "/dev/null"; Chars = "115200,8,e,1"; Flow = "rts/cts"; lategd = 0; } );
+SERIALS = ( { Device = "/dev/null"; Chars = "115200,8,e,1"; Flow = "rts/cts"; lategd = 0; ts_enabled = 1; ts_base_reg0 = 0135; } );  ! a DCL comment
 '''
     res = True
     case = '''listeners = ( { bind = "TCP:127.0.0.1:5996"; target = "/DEV/null"; } );
 serials = ( { device = "/dev/null"; chars = "9600,8,N,1"; }, { device = "/DEV/NULL"; chars = "9600,8,N,1"; } );
 '''
-    for name, text in (('bad', bad), ('good', good), ('case', case)):
+    octal = good.replace('0135', '08')					# Not an octal number: BADNUM
+    for name, text in (('bad', bad), ('good', good), ('case', case), ('octal', octal)):
         conf = os.path.join(TMP, f'settings_{name}.conf')
         open(conf, 'w').write(text)
         p = subprocess.run([GW, '/settings=' + conf, '/check', '/control=NONE'], capture_output=True, text=True, timeout=10)
         out = p.stdout + p.stderr
+        if name == 'octal':
+            res &= report('settings/octal', p.returncode != 0 and 'CFG-E-BADNUM' in out and 'CFGREJECT' in out, f'exit {p.returncode}, BADNUM {"CFG-E-BADNUM" in out}')
+            continue
         if name == 'case':					# Two devices told apart by the case only: a target could not choose
             res &= report('settings/case', p.returncode != 0 and 'differ by the case only' in out and 'CFGREJECT' in out,
                           f'exit {p.returncode}, refused {"differ by the case only" in out}')
             continue
         if name == 'good':
-            res &= report('settings/good', p.returncode == 0 and 'CHECKOK' in out, f'exit {p.returncode}, CHECKOK {"CHECKOK" in out}')
+            res &= report('settings/good', p.returncode == 0 and 'CHECKOK' in out and 'Base register: 93]' in out,	# 0135 is octal
+                          f'exit {p.returncode}, CHECKOK {"CHECKOK" in out}, octal 0135 = 93 {"Base register: 93]" in out}')
             continue
         want = [('target', 'is not a <device> of <serials>', 'line 2'), ('udp', 'UDP is not implemented', 'line 3'),
                 ('typo', 'CFG-E-UNKNOWN', 'conlm'), ('databits', 'data bits 9 is out of range', 'line 6'),

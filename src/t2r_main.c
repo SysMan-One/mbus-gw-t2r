@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-03"
-#define	__REV__		"01.03.00"
+#define	__IDENT__	"V.01-03ECO01"
+#define	__REV__		"01.03.01"
 
 /*
 **++
@@ -260,6 +260,10 @@
 **				<ts_unit> 0..255, <ts_fncode> 1..127, <ts_base_reg0> 0..65535, more than 128 serials or
 **				listeners (was CFGTRUNC), two devices told apart by the case only. RRL: the product
 **				version V.01-03; T2R-NET, T2R-TTY, T2R-CTL and MBUS-CTL carry the same ident.
+**
+**	22-NOV-2026	CLD	V.01-03ECO01 / REV: 01.03.01 (package version 1.3.1) - yaLIBCFG X.01-03ECO01 (1.3.1):
+**				CFGREJECT tells the number of the problems again, of a failed parse too (cfg$errcount(), X.01-02); a number with
+**				a leading zero is octal as in libconfig 1.6+ (0135 = 93, 08 is BADNUM), ! starts a comment.
 **--
 */
 
@@ -1185,9 +1189,13 @@ unsigned l_rc;
 	if ( !(1 & (l_rc = cfg$parse_file(a_settings_conf, CFG$M_NOCASE, &l_tree))) )
 		{
 		cfg$puterrs(l_tree);
+
+		if ( !(1 & cfg$errcount(l_tree, &l_nerr, NULL)) || !l_nerr )		/* No tree: no memory */
+			l_nerr = 1;
+
 		cfg$free(l_tree);
 
-		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf);
+		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf, l_nerr);
 		}
 
 	cfg$root(l_tree, &l_root);							/* The check routines look up the serials from it */
@@ -1200,7 +1208,7 @@ unsigned l_rc;
 		if ( !l_nerr )							/* Not the file: the schema, no memory ... */
 			$PUTMSG_FAO(T2R$__SYSERR, "cfg$validate()", (int) l_rc, 0);
 
-		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf);
+		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf, l_nerr ? l_nerr : 1);
 		}
 
 	cfg$puterrs(l_tree);							/* The warnings, if any */

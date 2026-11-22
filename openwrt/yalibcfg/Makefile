@@ -13,17 +13,18 @@
 #	MODIFICATION HISTORY:
 #
 #	22-NOV-2026	CLD	V.01-03: Initial revision (the release X.01-01), replaces libconfig-static.
+#	22-NOV-2026	CLD	V.01-03ECO01: the release X.01-03ECO01 (1.3.1).
 #--
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=yalibcfg
-PKG_VERSION:=1.1.0
+PKG_VERSION:=1.3.1
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/SysMan-One/yaLIBCFG.git
-PKG_SOURCE_VERSION:=d2a9aa698ea41831ebb85c2e180412a9eea58020
+PKG_SOURCE_VERSION:=80bfefb25653fb703c252c496ab6f489f47aff06
 PKG_MIRROR_HASH:=skip
 
 PKG_LICENSE:=Apache-2.0

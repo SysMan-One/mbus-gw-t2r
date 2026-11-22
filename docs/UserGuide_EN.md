@@ -96,7 +96,7 @@ for example:
 %CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000, settings.conf line 6 column 52
 %CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6, settings.conf line 7 column 3
 %CFG-E-CHECK, serials.[device="/dev/null"].chars: parity 'X' is unknown, allowed: N, E, O, settings.conf line 7 column 27
-%T2R-E-CFGREJECT, Settings <settings.conf> are refused, see the CFG messages above --- nothing is applied
+%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 7 problem(s), see the CFG messages above --- nothing is applied
 ```
 
 If there is at least one problem, the **whole file is refused**: nothing is applied and the gateway
@@ -107,6 +107,8 @@ gateway goes on as it is). Fix every line shown and try again. A check which com
 and the gateway went on with the rest of the file. Now one wrong record refuses the whole file. So
 a file which worked before may be refused after the upgrade: check it with
 `mbusgw-t2r /settings=<file> /check` before you restart the gateway.
+
+**Numbers.** Since V.01-03ECO01 a number with a leading zero is **octal**, as libconfig 1.6 and newer read it: `ts_base_reg0 = 0135;` is 93, not 135, and `08` or `09` is an error (`%CFG-E-BADNUM`). Write numbers without leading zeros (`135`). After an upgrade a file which worked before keeps working but may **change its meaning without a word**: before V.01-03ECO01 `0135` was 135. Look for `= 0` followed by a digit in your files. Hexadecimal is `0x87` or `%X87`; `%D`, `%B` and `%O` give decimal, binary and octal. Besides `#`, `//` and `/* */`, an exclamation mark `!` starts a comment to the end of the line, as in DCL.
 
 In the setting path, `listeners.[0]` is the first record of the section (the records count from
 zero, in the order they appear in the file); `serials.[device="/dev/null"]` is the record with this
@@ -275,8 +277,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -405,7 +407,7 @@ dislikes.**
 | `%T2R-W-DEVABSENT, Device <...> is absent --- it will be opened every 1000 msec ...` | At the start the serial port could not be opened (the line above says why); its TCP port works and answers the exception 10 | plug in the adapter --- `DEVREADY` follows; or fix `device` in the settings |
 | The client gets the exception `0x0A` (10) | The serial port of this TCP port is absent or lost (see `DEVLOST`, `DEVABSENT`) | see `DEVLOST` above |
 | the same, `errno: 13` | Permission denied | run with `sudo` or add yourself to the `dialout` group |
-| `%T2R-E-CFGREJECT, Settings <...> are refused, ...` | The settings file has errors. Nothing is applied: the gateway does not start (`/check` fails; `restart gateway` is refused and the gateway goes on as it is) | read the `%CFG-E-...` lines above it: each names the setting, the file, the line and the column. Fix all of them, check with `mbusgw-t2r /settings=<file> /check` (see 7.2). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose `target` is not in `serials`, or a setting the gateway does not know |
+| `%T2R-E-CFGREJECT, Settings <...> are refused: N problem(s), ...` | The settings file has errors. Nothing is applied: the gateway does not start (`/check` fails; `restart gateway` is refused and the gateway goes on as it is) | read the `%CFG-E-...` lines above it: each names the setting, the file, the line and the column. Fix all of them, check with `mbusgw-t2r /settings=<file> /check` (see 7.2). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose `target` is not in `serials`, or a setting the gateway does not know |
 | the same, `errno: 16` | The port is busy: another program holds it | find it: `sudo fuser /dev/ttyUSB0`; stop it |
 | `%T2R-E-NOANSWER, [...] Did not get an answer in 1000 msec` | The request went out, nothing came back | 1) wrong slave address in the client's request; 2) wrong wiring (swap A/B of RS-485); 3) wrong speed/parity --- re-check `chars`; 4) the device is simply off |
 | `%T2R-E-CRC16ERR, [...] (received: X, calculated: Y)` | Octets arrive, but damaged | 1) `chars` does not match the device (most common!); 2) line noise --- check the grounding, the termination resistors, the cable length; 3) two masters on one line |

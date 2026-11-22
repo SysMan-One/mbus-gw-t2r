@@ -84,6 +84,8 @@
 #				StarLet for every target, as StarLet is; libconfig-dev and the libconfig build from the
 #				Debian source package for mips are gone (libc6:<arch> is installed for dpkg-shlibdeps
 #				instead, the matrix key is libc); no "linked dynamically" check of libconfig.
+#
+#	22-NOV-2026	CLD	V.01-03ECO01: yaLIBCFG X.01-03ECO01 (YALIBCFG_TAG).
 #--
 
 name: release
@@ -104,7 +106,7 @@ permissions:
 env:
   STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
   YALIBCFG_REPO: "https://github.com/SysMan-One/yaLIBCFG.git"
-  YALIBCFG_TAG: "X.01-01"
+  YALIBCFG_TAG: "X.01-03ECO01"
 
 jobs:
   deb:

@@ -74,6 +74,9 @@
 #				SERBADREC, SERBADOPT, SERBADCHR, SERRANGE, SERBADPAR, SERBADFLOW, NOSERIALS, LSNBADREC, LSNBADBIND,
 #				LSNRANGE, LSNBADADDR, LSNNOTGT, NOLSNRS, LSNOPTRNG, LSNBADMODE, LSNRAWSHR, LSNRAWOPT, LSNXONRTU are
 #				removed; the new ranges (iotmo, ts_*); the package names in the examples are 1.3.0.
+#
+#	22-NOV-2026	CLD	V.01-03ECO01: CFGREJECT tells the number of the problems; numbers with a leading zero are octal,
+#				the ! comment (yaLIBCFG X.01-03, 3.1); the package names in the examples are 1.3.1.
 #--
 import sys
 
@@ -579,7 +582,7 @@ def s_pack_en ():
 		 P('The whole settings file is checked <b>before anything is applied</b>. The gateway finds the '
 		   'problems at once and prints each of them with the setting path, the file, the line and the column, '
 		   'for example:'),
-		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused,\n    see the CFG messages above --- nothing is applied'),
+		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 7 problem(s),\n    see the CFG messages above --- nothing is applied'),
 		 P('If there is at least one problem, the <b>whole file is refused</b>: nothing is applied and the gateway '
 		   'does not start (/check exits with a failure; restart gateway of mbus-ctl is refused and the gateway '
 		   'goes on as it is). Fix every line shown and try again. A check which compares several settings (a '
@@ -589,6 +592,12 @@ def s_pack_en ():
 		   'the gateway went on with the rest of the file. Now one wrong record refuses the whole file. So a file '
 		   'which worked before may be refused after the upgrade: check it with '
 		   '<font face="Mono">mbusgw-t2r /settings=&lt;file&gt; /check</font> before you restart the gateway.'),
+		 P('<b>Numbers.</b> Since V.01-03ECO01 a number with a leading zero is <b>octal</b>, as libconfig 1.6 and newer read '
+		   'it: <font face="Mono">ts_base_reg0 = 0135;</font> is 93, not 135, and 08 or 09 is an error (CFG-E-BADNUM). '
+		   'Write numbers without leading zeros (135). After an upgrade a file which worked before keeps working but '
+		   'may change its meaning without a word: before V.01-03ECO01 0135 was 135 - look for = 0 followed by a digit. '
+		   'Hexadecimal is 0x87 or %X87; %D, %B and %O give decimal, binary '
+		   'and octal. Besides #, // and /* */, an exclamation mark ! starts a comment to the end of the line, as in DCL.'),
 		 P('In the setting path, listeners.[0] is the first record of the section (the records count from zero, in '
 		   'the order they appear in the file); serials.[device="/dev/null"] is the record with this device. '
 		   'What the check also catches:'),
@@ -719,8 +728,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -870,7 +879,7 @@ def s_pack_en ():
 				'another program. Find it: sudo ss -tlnp | grep 502.'),
 			('%T2R-E-LSNRERR, ... errno: 13', 'The ports below 1024 need root. Run with sudo, or '
 				'take a port above 1024 (e.g. 5502).'),
-			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused', 'The settings file has errors. Nothing is applied: the gateway does not start (/check fails; restart gateway is refused and the gateway goes on as it is). Read the %CFG-E-... lines above it: each names the setting, the file, the line and the column. Fix all of them and check with mbusgw-t2r /settings=&lt;file&gt; /check (see 7.3). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose target is not in serials, or a setting the gateway does not know.'),
+			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused: N problem(s)', 'The settings file has errors. Nothing is applied: the gateway does not start (/check fails; restart gateway is refused and the gateway goes on as it is). Read the %CFG-E-... lines above it: each names the setting, the file, the line and the column. Fix all of them and check with mbusgw-t2r /settings=&lt;file&gt; /check (see 7.3). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose target is not in serials, or a setting the gateway does not know.'),
 			('The data is wrong or shifted', 'The byte order confusion on the client side: the MODBUS '
 				'registers are the big-endian 16-bit words; check how the client assembles the '
 				'32/64-bit values.'),
@@ -1161,7 +1170,7 @@ def s_pack_ru ():
 		 ], [30*mm, 14*mm, 119*mm], a_mono_cols=(0,)),
 		 P('Весь файл настроек проверяется <b>до того, как что-либо применено</b>. Шлюз находит проблемы '
 		   'сразу и печатает каждую с путём настройки, файлом, строкой и столбцом, например:'),
-		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused,\n    see the CFG messages above --- nothing is applied'),
+		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 7 problem(s),\n    see the CFG messages above --- nothing is applied'),
 		 P('Если есть хотя бы одна проблема, <b>весь файл отклоняется</b>: ничего не применяется, и шлюз не '
 		   'запускается (/check завершается неудачей; restart gateway в mbus-ctl отклоняется, а шлюз продолжает '
 		   'работать как работал). Исправьте все показанные строки и повторите. Проверка, которая сравнивает '
@@ -1171,6 +1180,12 @@ def s_pack_ru ():
 		   'шлюз работал дальше с остальным файлом. Теперь одна неправильная запись отклоняет весь файл. Поэтому '
 		   'файл, который раньше работал, после обновления может быть отклонён: проверьте его командой '
 		   '<font face="Mono">mbusgw-t2r /settings=&lt;файл&gt; /check</font>, прежде чем перезапускать шлюз.'),
+		 P('<b>Числа.</b> Начиная с V.01-03ECO01 число с ведущим нулём — <b>восьмеричное</b>, как его читает libconfig 1.6 и '
+		   'новее: <font face="Mono">ts_base_reg0 = 0135;</font> — это 93, а не 135, а 08 или 09 — ошибка (CFG-E-BADNUM). '
+		   'Пишите числа без ведущих нулей (135). После обновления файл, который раньше работал, продолжит работать, '
+		   'но может молча поменять смысл: до V.01-03ECO01 0135 было 135 — поищите = 0 с цифрой после него. '
+		   'Шестнадцатеричное — 0x87 или %X87; %D, %B и %O задают десятичное, '
+		   'двоичное и восьмеричное. Кроме #, // и /* */, комментарий до конца строки начинает восклицательный знак !, как в DCL.'),
 		 P('В пути настройки listeners.[0] — первая запись раздела (записи считаются с нуля, в порядке следования '
 		   'в файле); serials.[device="/dev/null"] — запись с этим device. Что ещё ловит проверка:'),
 		 P('&bull; Настройка, которой шлюз не знает, — ошибка: опечатка не пройдёт. Имена настроек не зависят от '
@@ -1299,8 +1314,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1446,7 +1461,7 @@ def s_pack_ru ():
 				'программа. Найдите: sudo ss -tlnp | grep 502.'),
 			('%T2R-E-LSNRERR, ... errno: 13', 'Порты ниже 1024 требуют root. Запустите под sudo '
 				'или возьмите порт выше 1024 (например 5502).'),
-			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused', 'В файле настроек есть ошибки. Ничего не применено: шлюз не запускается (/check завершается неудачей; restart gateway отклоняется, а шлюз продолжает работать как работал). Читайте строки %CFG-E-... выше: каждая называет настройку, файл, строку и столбец. Исправьте всё и проверьте командой mbusgw-t2r /settings=&lt;файл&gt; /check (см. 7.3). После обновления до V.01-03 файл, который раньше работал, может быть отклонён: например, у слушателя target нет в serials, или в файле настройка, которой шлюз не знает.'),
+			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused: N problem(s)', 'В файле настроек есть ошибки. Ничего не применено: шлюз не запускается (/check завершается неудачей; restart gateway отклоняется, а шлюз продолжает работать как работал). Читайте строки %CFG-E-... выше: каждая называет настройку, файл, строку и столбец. Исправьте всё и проверьте командой mbusgw-t2r /settings=&lt;файл&gt; /check (см. 7.3). После обновления до V.01-03 файл, который раньше работал, может быть отклонён: например, у слушателя target нет в serials, или в файле настройка, которой шлюз не знает.'),
 			('Данные неверные или сдвинутые', 'Путаница порядка байт у клиента: регистры MODBUS — '
 				'16-битные слова big-endian; проверьте, как клиент собирает 32/64-битные значения.'),
 		 ], [52*mm, 111*mm], a_mono_cols=(0,)),

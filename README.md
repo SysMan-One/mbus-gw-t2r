@@ -147,14 +147,14 @@ at the Step 4. StarLet 1.7 or newer is needed.
 ####	Step 3. Install the yaLIBCFG package
 
 ```
-$ git clone --depth 1 --branch X.01-01 https://github.com/SysMan-One/yaLIBCFG.git
+$ git clone --depth 1 --branch X.01-03ECO01 https://github.com/SysMan-One/yaLIBCFG.git
 $ cmake -S yaLIBCFG -B yaLIBCFG/build -DCMAKE_BUILD_TYPE=Release \
 	-DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
 $ cmake --build yaLIBCFG/build
 $ sudo cmake --install yaLIBCFG/build
 ```
 
-This is yaLIBCFG, release X.01-01 (https://github.com/SysMan-One/yaLIBCFG). If StarLet is not in
+This is yaLIBCFG, release X.01-03ECO01 (https://github.com/SysMan-One/yaLIBCFG). If StarLet is not in
 the default prefix, add `-DCMAKE_PREFIX_PATH=<StarLet prefix>` to the first cmake.
 
 ####	Step 4. Build the gateway
@@ -254,7 +254,7 @@ statically. The package puts the gateway to `/opt/mbusgw-t2r/` and the systemd u
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.3.0-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.3.1-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -275,7 +275,7 @@ attached to the releases made after this text was written: `x86_64`, `aarch64`, 
 `%config(noreplace)`, the unit is installed disabled:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.3.0-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.3.1-1.x86_64.rpm
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -294,8 +294,8 @@ OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`
@@ -348,7 +348,7 @@ same steps as above, in the `gcc` Docker image:
 1. installs `cmake`;
 2. clones StarLet from `https://gitlab.com/SysMan-One/utility_routines.git`, builds it and installs it
    into `/usr/local` (the variable `STARLET_REPO` holds the address - change it to use a mirror);
-3. clones yaLIBCFG from its release tag (`YALIBCFG_TAG`, `X.01-01`), builds it and installs it;
+3. clones yaLIBCFG from its release tag (`YALIBCFG_TAG`, `X.01-03ECO01`), builds it and installs it;
 4. builds the gateway in the `build/` directory (Debug).
 
 The job only checks that the code compiles: it does not install the gateway and does not keep the
