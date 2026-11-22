@@ -61,6 +61,9 @@
 #				FLOWNOTSET, LSNXONRTU, RAWSTALL; TXDRAINTMO on an RTS/CTS port; the package names in the examples are 1.1.4.
 #
 #	22-NOV-2026	CLD	V.01-02: the version on the cover, the package names in the examples are 1.2.0.
+#
+#	22-NOV-2026	CLD	V.01-02ECO01: TXDRAINTMO on an RTS/CTS port: a USB adapter gives NOANSWER; the package names
+#				in the examples are 1.2.1.
 #--
 import sys
 
@@ -682,8 +685,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.2.0-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.0-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -821,7 +824,8 @@ def s_pack_en ():
 				'request gets exception 4. The adapter or its USB link hangs: dmesg | tail; replug the '
 				'adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it.'),
 			('TXDRAINTMO on a port with flow = "RTS/CTS"', 'The device (or the cable) holds CTS off, so the gateway '
-				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS; if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data.'),
+				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS; if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data. With a USB adapter a short MODBUS request goes into '
+				'the buffer of the adapter: NOANSWER, not TXDRAINTMO.'),
 			('DEVLOCKERR / DEVBUSY on every request of one port', 'Another request holds the line and does '
 				'not end. Update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial '
 				'driver). Before the restart save what the threads do: for t in /proc/$(pidof mbusgw-t2r)/task/*; '
@@ -1245,8 +1249,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.2.0-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.0-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1380,7 +1384,8 @@ def s_pack_ru ():
 				'исключение 4. Адаптер или его USB-связь зависли: dmesg | tail; переподключите адаптер или '
 				'перезагрузите плату. С X.00-13ECO01 линия из-за этого не блокируется.'),
 			('TXDRAINTMO на порту с flow = "RTS/CTS"', 'Устройство (или кабель) не даёт CTS, и шлюзу нельзя передавать. '
-				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS; если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные.'),
+				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS; если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные. С USB-адаптером короткий запрос MODBUS '
+				'уходит в буфер адаптера: NOANSWER, а не TXDRAINTMO.'),
 			('DEVLOCKERR / DEVBUSY на каждом запросе одного порта', 'Линию держит другой запрос, который не '
 				'заканчивается. Обновитесь до X.00-13ECO01 или новее (старый шлюз мог навсегда зависнуть в '
 				'драйвере порта). Перед перезапуском сохраните, что делают потоки: for t in /proc/$(pidof '

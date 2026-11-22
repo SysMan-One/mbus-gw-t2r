@@ -13,8 +13,8 @@
 #		  client (shutdown(SHUT_WR)) gets its answer on a free line, not after such a wait; <idletmo>
 #		  still ends an idle session after an answer
 #   flow	- V.01-01ECO04: <flow> NONE, RTS/CTS, XON/XOFF (RAW) - the termios of the gateway's tty (a pty has no CTS
-#		  line: the handshake itself is not tested); a RAW client gone while an XOFF stops the pty frees
-#		  it (RAWSTALL; a real UART takes a page into its driver first) and the next session goes out; DSR/DTR, an unknown value, a number, RTS/CTS + rs485 and XON/XOFF under MODBUS are refused
+#		  line: the handshake itself is not tested); a RAW client closed (a FIN) while an XOFF stops the pty
+#		  frees it (RAWSTALL; a real UART takes a page into its driver first) and the next session goes out; DSR/DTR, an unknown value, a number, RTS/CTS + rs485 and XON/XOFF under MODBUS are refused
 #   replug	- the device behind a symlink disappears (the pty master is closed) and comes back (a new pty): the busy
 #		  and the idle cases, and the device absent at the start; exception 0x0A while it is away, normal answers after
 #
@@ -25,6 +25,7 @@
 #	02-NOV-2026	CLD	X.00-14ECO02: rawreplug - a RAW listener with an absent / unplugged / returned device.
 #	17-NOV-2026	CLD	V.01-01ECO01: gone - a client gone while waiting for a busy line, half-close, idletmo.
 #	22-NOV-2026	CLD	V.01-01ECO04: flow - the <flow> key of a serial.
+#	22-NOV-2026	CLD	V.01-02ECO01: flow - the RAW client closes by itself (a FIN), no takeover before RAWSTALL.
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -500,17 +501,20 @@ def t_flow():
                 time.sleep(0.3)
                 c.sendall(b'stuck')
                 time.sleep(0.3)
-                c.close()
-                time.sleep(0.5)
+                c.close()				# A plain close (a FIN), no takeover: RAWSTALL must come by itself
+                t = time.monotonic() + 18		# iotmo + 10 s + 1 + 2048 octets at 115200 (1 s)
+                while gw.count('RAWSTALL') == 0 and time.monotonic() < t:
+                    time.sleep(0.5)
+                stall = gw.count('RAWSTALL') == 1 and gw.count('RAWKICK') == 0
                 c = socket.create_connection(('127.0.0.1', a.port), timeout=5)
                 time.sleep(0.3)
                 c.sendall(b'probe')
-                got, t = b'', time.monotonic() + 18			# The first session ends by RAWSTALL: iotmo + 10 s + 1 + 2048 octets at 115200 (1 s)
+                got, t = b'', time.monotonic() + 5
                 while b'probe' not in got and time.monotonic() < t:
                     if select.select([line.m], [], [], 0.2)[0]:
                         got += os.read(line.m, 256)
                 c.close()
-                io = b'probe' in got and gw.count('RAWSTALL') == 1
+                io = b'probe' in got and stall
             if mode == 'MODBUS':
                 c = Client(a.port)
                 ok, pdu = c.read(0)

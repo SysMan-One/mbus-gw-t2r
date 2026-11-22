@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-02"
-#define	__REV__		"01.02.00"
+#define	__IDENT__	"V.01-02ECO01"
+#define	__REV__		"01.02.01"
 
 /*
 **++
@@ -239,6 +239,10 @@
 **	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 (package version 1.2.0) - RRL: the product version is V.01-02
 **				(the <flow> key of V.01-01ECO04 is a new feature); T2R-NET, T2R-TTY, T2R-CTL and MBUS-CTL
 **				carry the same ident. No code change.
+**
+**	22-NOV-2026	CLD	V.01-02ECO01 / REV: 01.02.01 (package version 1.2.1) - The fix of T2R-TTY: a RAW
+**				client closed while its data waited for a stopped line is seen (RAWSTALL). No change
+**				in this module.
 **--
 */
 

@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-02"
-#define	__REV__		"01.02.00"
+#define	__IDENT__	"V.01-02ECO01"
+#define	__REV__		"01.02.01"
 
 /*
 **++
@@ -144,8 +144,19 @@
 **
 **	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 - RRL: the product version V.01-02 (package 1.2.0), no code
 **				change in this module.
+**
+**	22-NOV-2026	CLD	V.01-02ECO01 / REV: 01.02.01 - t2r$tty_raw_relay(): the close of a client is seen while
+**				its last portion waits for the line: POLLRDHUP is always asked for. A FIN gives no
+**				POLLHUP (only a shutdown() of both directions, the takeover, does), the socket was
+**				polled with no events then - RAWSTALL never fired and a line which took nothing (CTS
+**				off, XOFF) was held up to <idletmo> (found on an FTDI FT232R with the peer off).
+**				A half-closed RAW client loses the answers of the line from its FIN on (RAW has no
+**				half-close: recv() == 0 has always ended the session).
 **--
 */
+#ifndef	_GNU_SOURCE								/* POLLRDHUP; the musl build gives -D_GNU_SOURCE */
+#define	_GNU_SOURCE
+#endif
 #include	<time.h>
 #include	<stdio.h>
 #include	<string.h>
@@ -1943,11 +1954,12 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 		/*
 		 * Only the direction which has a room is read, only the one which has a data is written.
 		 * After a hangup of the client (a close, a shutdown() by a takeover) the socket is left out
-		 * while the last portion still goes to the line: POLLHUP is reported whatever .events are, a
-		 * polled socket would spin the loop until a slow line has swallowed the data.
+		 * while the last portion still goes to the line: POLLHUP is reported whatever .events are and
+		 * POLLRDHUP is asked for always, a polled socket would spin the loop until a slow line has
+		 * swallowed the data.
 		 */
 		l_pfd[FD$K_NET].fd = (l_hup && l_n2t_len) ? -1 : a_sd;
-		l_pfd[FD$K_NET].events = (l_n2t_len ? 0 : POLLIN) | (l_t2n_len ? POLLOUT : 0);
+		l_pfd[FD$K_NET].events = (l_n2t_len ? 0 : POLLIN) | (l_t2n_len ? POLLOUT : 0) | POLLRDHUP;
 		l_pfd[FD$K_TTY].events = ((l_t2n_len || l_hup) ? 0 : POLLIN) | (l_n2t_len ? POLLOUT : 0);
 		l_pfd[FD$K_NET].revents = l_pfd[FD$K_TTY].revents = 0;
 
@@ -2017,14 +2029,21 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 			break;
 			}
 
-		if ( l_pfd[FD$K_NET].revents & POLLHUP )						/* Nobody will read the line -> client data */
+		/*
+		 * Nobody will read the line -> client data. A close by the client is a FIN: POLLRDHUP (asked for
+		 * always, with no POLLIN while the last portion waits for the line), POLLHUP comes only after a
+		 * shutdown() of both directions (the takeover) or an RST. RAW has no half-close: a FIN of
+		 * shutdown(SHUT_WR) ends the session too (recv() == 0 below), here the answers of the line are
+		 * dropped from the FIN on, not from the end of the last portion.
+		 */
+		if ( l_pfd[FD$K_NET].revents & (POLLHUP | POLLRDHUP) )
 			l_hup = 1, l_t2n_len = l_t2n_off = 0;
 
 		/*
-		 * Client -> line. POLLHUP comes together with the last data of a closed connection: the data is
+		 * Client -> line. POLLRDHUP/POLLHUP come together with the last data of a closed connection: the data is
 		 * read first, the close is seen as recv() == 0 on the next round.
 		 */
-		if ( (!l_n2t_len) && (l_pfd[FD$K_NET].revents & (POLLIN | POLLHUP)) )
+		if ( (!l_n2t_len) && (l_pfd[FD$K_NET].revents & (POLLIN | POLLHUP | POLLRDHUP)) )
 			{
 			if ( !(l_cnt = recv(a_sd, l_n2t, sizeof(l_n2t), MSG_DONTWAIT)) )
 				{
