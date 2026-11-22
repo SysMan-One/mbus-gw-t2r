@@ -1,6 +1,6 @@
 #define	__MODULE__	"MBUS-CTL"
-#define	__IDENT__	"V.01-01ECO02"
-#define	__REV__		"01.01.02"
+#define	__IDENT__	"V.01-02"
+#define	__REV__		"01.02.00"
 
 /*
 **++
@@ -45,6 +45,8 @@
 **				s_get_socket() gives the ASC, s_request() and s_gw_started() take it, CTLNOGW
 **				shows it by !AC (was: an ASCIZ copy for !AZ).
 **
+**	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 - RRL: the product version V.01-02 (package 1.2.0), no code
+**				change in this module.
 **--
 */
 

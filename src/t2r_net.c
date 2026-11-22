@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-NET"
-#define	__IDENT__	"V.01-01ECO02"
-#define	__REV__		"01.01.02"
+#define	__IDENT__	"V.01-02"
+#define	__REV__		"01.02.00"
 
 /*
 **++
@@ -101,6 +101,9 @@
 **				TGTOPNERR, LSNRRDY, RAWSTART, RAWSTOP by !AC. s_sess_nr is stored atomically
 **				under the registry lock and read by an atomic load: t2r$net_sess_count() takes no
 **				lock (was: the registry mutex around one load).
+**
+**	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 - RRL: the product version V.01-02 (package 1.2.0), no code
+**				change in this module.
 **--
 */
 

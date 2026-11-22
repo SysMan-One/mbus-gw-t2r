@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-01ECO04"
-#define	__REV__		"01.01.04"
+#define	__IDENT__	"V.01-02"
+#define	__REV__		"01.02.00"
 
 /*
 **++
@@ -235,6 +235,10 @@
 **				RTS/CTS with <rs485> = 1; a MODBUS listener on an XON/XOFF line is rejected
 **				(LSNXONRTU): the kernel would eat the 0x11/0x13 octets of the binary RTU frames.
 **				DEVADDED shows the flow control.
+**
+**	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 (package version 1.2.0) - RRL: the product version is V.01-02
+**				(the <flow> key of V.01-01ECO04 is a new feature); T2R-NET, T2R-TTY, T2R-CTL and MBUS-CTL
+**				carry the same ident. No code change.
 **--
 */
 

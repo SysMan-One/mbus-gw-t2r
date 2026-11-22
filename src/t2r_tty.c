@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-01ECO03"
-#define	__REV__		"01.01.03"
+#define	__IDENT__	"V.01-02"
+#define	__REV__		"01.02.00"
 
 /*
 **++
@@ -141,6 +141,9 @@
 **				gone client waits for a line which does not move (TIOCOUTQ; CTS off, XOFF) only for
 **				<iotmo> + T2R$K_RAW_STALL_SEC + the air time of 2048 octets (RAWSTALL), was: up to <idletmo> with the line taken - the
 **				takeover and every next client waited for it.
+**
+**	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 - RRL: the product version V.01-02 (package 1.2.0), no code
+**				change in this module.
 **--
 */
 #include	<time.h>
