@@ -13,7 +13,7 @@
 #	replaced); without it - only builds and tests the packages of the branch, see the run's artifacts.
 #
 #	The packages are built on Debian 12 (bookworm): the binary needs glibc >= 2.34 only (bookworm,
-#	trixie, Ubuntu 22.04 and newer); libconfig and StarLet are linked statically.
+#	trixie, Ubuntu 22.04 and newer); yaLIBCFG and StarLet are linked statically.
 #	Every package is installed and started on bookworm, trixie and noble before the release.
 #
 #	The .rpm (cpack -G RPM, the same build tree as of the .deb: x86_64, aarch64) is installed and
@@ -22,8 +22,8 @@
 #	The .deb and .rpm for armhf (armv7hl), mips, mipsel and mips64el are cross builds on bookworm
 #	(Debian 13 has no MIPS); they are started under qemu-user (no image of Debian/Fedora to install
 #	them into). Debian 12 has no mips (big endian) any more: the cross compiler is there, but no
-#	libc6:mips / libconfig-dev:mips, so libconfig is built from the Debian source package for it
-#	(static, to /opt/cross) and the .deb depends on "libc6 (>= 2.34)" given explicitly.
+#	libc6:mips for dpkg-shlibdeps, so the .deb of mips depends on "libc6 (>= 2.34)" given explicitly.
+#	StarLet and yaLIBCFG (its release tag YALIBCFG_TAG) are built from their sources for every target.
 #	The OpenWrt packages
 #	are built by the official SDK containers from the feed openwrt/: .ipk by 24.10, .apk by 25.12;
 #	those of x86_64 and mips_24kc are installed and started in the OpenWrt rootfs images.
@@ -79,6 +79,11 @@
 #				which the install removes; "not stripped" is checked by file. rpm -Uvh checks the
 #				digests only (_pkgverify_level digest): the rpm of fedora:latest (45) refused the
 #				unsigned package ("does not verify: no signature").
+#
+#	22-NOV-2026	CLD	V.01-03: yaLIBCFG instead of libconfig: built from its release tag (YALIBCFG_TAG) after
+#				StarLet for every target, as StarLet is; libconfig-dev and the libconfig build from the
+#				Debian source package for mips are gone (libc6:<arch> is installed for dpkg-shlibdeps
+#				instead, the matrix key is libc); no "linked dynamically" check of libconfig.
 #--
 
 name: release
@@ -98,6 +103,8 @@ permissions:
 
 env:
   STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
+  YALIBCFG_REPO: "https://github.com/SysMan-One/yaLIBCFG.git"
+  YALIBCFG_TAG: "X.01-01"
 
 jobs:
   deb:
@@ -113,8 +120,8 @@ jobs:
       - name: Install prerequisites
         run: |
           apt-get update
-          apt-get install --yes --no-install-recommends build-essential cmake pkg-config \
-            libconfig-dev dpkg-dev file git ca-certificates rpm
+          apt-get install --yes --no-install-recommends build-essential cmake \
+            dpkg-dev file git ca-certificates rpm
 
       - uses: actions/checkout@v5
         with:
@@ -127,6 +134,15 @@ jobs:
           cmake -S /tmp/starlet -B /tmp/starlet/build -DCMAKE_BUILD_TYPE=Release
           cmake --build /tmp/starlet/build -j "$(nproc)"
           cmake --install /tmp/starlet/build
+
+      - name: Build and install yaLIBCFG
+        run: |
+          git clone --depth 1 --branch "$YALIBCFG_TAG" "$YALIBCFG_REPO" /tmp/yalibcfg
+          git -C /tmp/yalibcfg log -1 --format='yaLIBCFG: %H %cd'
+          cmake -S /tmp/yalibcfg -B /tmp/yalibcfg/build -DCMAKE_BUILD_TYPE=Release \
+            -DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
+          cmake --build /tmp/yalibcfg/build -j "$(nproc)"
+          cmake --install /tmp/yalibcfg/build
 
       - name: Build the gateway and the package
         run: |
@@ -151,9 +167,6 @@ jobs:
           grep -q '^/usr/lib/systemd/system/mbusgw-t2r.service' rpm.files
           file build/mbusgw-t2r
           readelf -d build/mbusgw-t2r | grep NEEDED
-          if readelf -d build/mbusgw-t2r | grep -q 'libconfig'; then
-            echo "libconfig is linked dynamically"; exit 1
-          fi
 
       - uses: actions/upload-artifact@v6
         with:
@@ -238,10 +251,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: mipsel,   triplet: mipsel-linux-gnu,         qemu: qemu-mipsel,   rpm: mipsel,   proc: mipsel,   libconfig: apt, sysroot: / }
-          - { arch: mips64el, triplet: mips64el-linux-gnuabi64,  qemu: qemu-mips64el, rpm: mips64el, proc: mips64el, libconfig: apt, sysroot: / }
-          - { arch: armhf,    triplet: arm-linux-gnueabihf,      qemu: qemu-arm,      rpm: armv7hl,  proc: armv7l,   libconfig: apt, sysroot: / }
-          - { arch: mips,     triplet: mips-linux-gnu,           qemu: qemu-mips,     rpm: mips,     proc: mips,     libconfig: src, sysroot: /usr/mips-linux-gnu }
+          - { arch: mipsel,   triplet: mipsel-linux-gnu,         qemu: qemu-mipsel,   rpm: mipsel,   proc: mipsel,   libc: apt, sysroot: / }
+          - { arch: mips64el, triplet: mips64el-linux-gnuabi64,  qemu: qemu-mips64el, rpm: mips64el, proc: mips64el, libc: apt, sysroot: / }
+          - { arch: armhf,    triplet: arm-linux-gnueabihf,      qemu: qemu-arm,      rpm: armv7hl,  proc: armv7l,   libc: apt, sysroot: / }
+          - { arch: mips,     triplet: mips-linux-gnu,           qemu: qemu-mips,     rpm: mips,     proc: mips,     libc: none, sysroot: /usr/mips-linux-gnu }
     runs-on: ubuntu-24.04
     container: debian:bookworm
     env:
@@ -249,35 +262,17 @@ jobs:
       TRIPLET: ${{ matrix.triplet }}
       PROC: ${{ matrix.proc }}
     steps:
-      #	Debian 12 has no mips (big endian): no libc6:mips and libconfig-dev:mips to install, the
+      #	Debian 12 has no mips (big endian): no libc6:mips to install (dpkg-shlibdeps needs it), the
       #	compiler and its C library (libc6-dev-mips-cross, /usr/mips-linux-gnu) are there
       - name: Install prerequisites
         run: |
-          pkgs="build-essential cmake pkg-config dpkg-dev file git ca-certificates crossbuild-essential-$ARCH qemu-user rpm cpio"
-          if [ "${{ matrix.libconfig }}" = apt ]; then
+          pkgs="build-essential cmake dpkg-dev file git ca-certificates crossbuild-essential-$ARCH qemu-user rpm cpio"
+          if [ "${{ matrix.libc }}" = apt ]; then
             dpkg --add-architecture "$ARCH"
-            pkgs="$pkgs libconfig-dev:$ARCH"
-          else
-            pkgs="$pkgs autoconf automake libtool flex bison"
+            pkgs="$pkgs libc6:$ARCH"
           fi
           apt-get update
           apt-get install --yes --no-install-recommends $pkgs
-
-      - name: Build and install libconfig (static) from the Debian source package
-        if: matrix.libconfig == 'src'
-        run: |
-          sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
-          apt-get update
-          mkdir /tmp/libconfig && cd /tmp/libconfig
-          apt-get source --download-only libconfig
-          dpkg-source -x libconfig_*.dsc src
-          cd src
-          ./configure --host="$TRIPLET" --prefix=/opt/cross --disable-shared --enable-static \
-            --disable-cxx --disable-examples --disable-tests
-          make -j "$(nproc)" -C lib
-          make -C lib install
-          ls -l /opt/cross/lib/libconfig.a /opt/cross/lib/pkgconfig/libconfig.pc
-          file /opt/cross/lib/libconfig.a
 
       - uses: actions/checkout@v5
         with:
@@ -293,10 +288,20 @@ jobs:
           cmake --build /tmp/starlet/build -j "$(nproc)"
           cmake --install /tmp/starlet/build
 
+      - name: Build and install yaLIBCFG
+        run: |
+          git clone --depth 1 --branch "$YALIBCFG_TAG" "$YALIBCFG_REPO" /tmp/yalibcfg
+          git -C /tmp/yalibcfg log -1 --format='yaLIBCFG: %H %cd'
+          cmake -S /tmp/yalibcfg -B /tmp/yalibcfg/build -DCMAKE_BUILD_TYPE=Release \
+            -DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF \
+            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$PROC" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
+            -DCMAKE_PREFIX_PATH=/opt/cross -DCMAKE_INSTALL_PREFIX=/opt/cross
+          cmake --build /tmp/yalibcfg/build -j "$(nproc)"
+          cmake --install /tmp/yalibcfg/build
+
       - name: Build the gateway and the package
         run: |
-          export PKG_CONFIG_LIBDIR="/opt/cross/lib/pkgconfig:/usr/lib/$TRIPLET/pkgconfig:/usr/share/pkgconfig"
-          shlibdeps=ON; test "${{ matrix.libconfig }}" = apt || shlibdeps=OFF      # no libc6:mips for dpkg-shlibdeps
+          shlibdeps=ON; test "${{ matrix.libc }}" = apt || shlibdeps=OFF          # no libc6:mips for dpkg-shlibdeps
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON \
             -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$PROC" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
             -DCMAKE_PREFIX_PATH=/opt/cross -DT2R_DEB_ARCH="$ARCH" -DT2R_DEB_SHLIBDEPS="$shlibdeps" \
@@ -321,15 +326,12 @@ jobs:
           grep -q 'modbus-t2r.conf cn$' rpm.files
           grep -q '^/usr/lib/systemd/system/mbusgw-t2r.service' rpm.files
           # The binary in the .rpm is the one of the .deb: rpmbuild has not stripped it by the strip of the
-          # host (build/ itself may differ: the install removes a RUNPATH of a libconfig in /opt/cross/lib)
+          # host (build/ itself may differ: the install removes a RUNPATH the build tree may carry)
           rpm2cpio "$rpm" | cpio -i --quiet --to-stdout ./opt/mbusgw-t2r/sbin/mbusgw-t2r > rpm.bin
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./opt/mbusgw-t2r/sbin/mbusgw-t2r | cmp - rpm.bin
           file rpm.bin | grep -q 'not stripped'
           file build/mbusgw-t2r
           readelf -d build/mbusgw-t2r | grep NEEDED
-          if readelf -d build/mbusgw-t2r | grep -q 'libconfig'; then
-            echo "libconfig is linked dynamically"; exit 1
-          fi
           out=$(${{ matrix.qemu }} -L ${{ matrix.sysroot }} build/mbusgw-t2r 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q 'REVISNF'
@@ -377,10 +379,7 @@ jobs:
                 tar -xzOf ipk/control.tar.gz ./control
                 find ipk -type f | sort
                 file ipk/usr/sbin/mbusgw-t2r
-                readelf -d ipk/usr/sbin/mbusgw-t2r | grep NEEDED
-                if readelf -d ipk/usr/sbin/mbusgw-t2r | grep -q 'libconfig'; then
-                  echo "libconfig is linked dynamically"; exit 1
-                fi ;;
+                readelf -d ipk/usr/sbin/mbusgw-t2r | grep NEEDED ;;
               *.apk)                            # mbusgw-t2r-0.13.6-r1.apk -> mbusgw-t2r_0.13.6-r1_<arch>.apk
                 v=${f##*/mbusgw-t2r-}; v=${v%.apk}
                 cp "$f" "out/mbusgw-t2r_${v}_${ARCH}.apk" ;;
@@ -544,7 +543,7 @@ jobs:
 
           Arch names: deb \`amd64 arm64 armhf mips mipsel mips64el\`, rpm \`x86_64 aarch64 armv7hl mips mipsel mips64el\`. The .deb and .rpm for amd64/arm64 (x86_64/aarch64) are tested on Debian 12, Debian 13, Ubuntu 24.04, Fedora and Rocky Linux 9 (any system with glibc >= 2.34 should do); those for armhf, mips, mipsel and mips64el are cross builds for glibc >= 2.34 (Debian 12), started under qemu-user only. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`; the configuration files in /opt/mbusgw-t2r/etc are kept on an upgrade.
 
-          OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${VER}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${VER}-*_<arch>.apk\`); libconfig and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
+          OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${VER}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${VER}-*_<arch>.apk\`); yaLIBCFG and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
 
           To check a download: \`minisign -Vm SHA256SUMS -P RWQl4NAqFsHKkNoHkS52WSZSk+2kb+e58DWYpoi/jVFa6TqOTAm3Ph14\` (\`SHA256SUMS.minisig\` next to it), then \`sha256sum -c --ignore-missing SHA256SUMS\`.
           EOF

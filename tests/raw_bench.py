@@ -81,17 +81,18 @@ try:
     ma, sa, deva = mkpty()
     mb, sb, devb = mkpty()
     checks = [
-        ('C1', f'{{bind="TCP:127.0.0.1:{RAWPORT}"; mode="RAW"; target="{deva}";}}, {{bind="TCP:127.0.0.1:{MBPORT}"; target="{deva}";}}', 'LSNRAWSHR'),
-        ('C2', f'{{bind="TCP:127.0.0.1:{MBPORT}"; target="{deva}";}}, {{bind="TCP:127.0.0.1:{RAWPORT}"; mode="raw"; target="{deva}";}}', 'LSNRAWSHR'),
-        ('C3', f'{{bind="TCP:127.0.0.1:{MBPORT}"; takeover=1; target="{deva}";}}', 'LSNRAWOPT'),
-        ('C4', f'{{bind="TCP:127.0.0.1:{RAWPORT}"; mode="TRANSPARENT"; target="{deva}";}}', 'LSNBADMODE'),
-        ('C5', f'{{bind="TCP:127.0.0.1:{RAWPORT}"; mode="RAW"; connlm=2; target="{deva}";}}', 'LSNOPTRNG'),
+        # V.01-03: the settings are checked by the yaLIBCFG schema - CFG-E-..., and the file is refused (CFGREJECT)
+        ('C1', f'{{bind="TCP:127.0.0.1:{RAWPORT}"; mode="RAW"; target="{deva}";}}, {{bind="TCP:127.0.0.1:{MBPORT}"; target="{deva}";}}', 'needs the serial line for itself'),
+        ('C2', f'{{bind="TCP:127.0.0.1:{MBPORT}"; target="{deva}";}}, {{bind="TCP:127.0.0.1:{RAWPORT}"; mode="raw"; target="{deva}";}}', 'needs the serial line for itself'),
+        ('C3', f'{{bind="TCP:127.0.0.1:{MBPORT}"; takeover=1; target="{deva}";}}', 'not allowed in the MODBUS mode'),
+        ('C4', f'{{bind="TCP:127.0.0.1:{RAWPORT}"; mode="TRANSPARENT"; target="{deva}";}}', '%CFG-E-BADKWD'),
+        ('C5', f'{{bind="TCP:127.0.0.1:{RAWPORT}"; mode="RAW"; connlm=2; target="{deva}";}}', 'only 1 is allowed'),
     ]
     for tag, lsn, code in checks:
         p, lf = start_gw(f'listeners = ( {lsn} );\nserials = ( {serial(deva)} );\n', 'cfg' + tag)
         stop_gw(p)
         log = open(lf).read()
-        assert ('%T2R-E-' + code) in log, f'{tag}: no {code} in the log:\n' + log[-1500:]
+        assert code in log and 'CFGREJECT' in log, f'{tag}: no {code} in the log:\n' + log[-1500:]
         print(f'{tag} PASS ({code})')
     os.close(ma); os.close(sa); os.close(mb); os.close(sb)
 

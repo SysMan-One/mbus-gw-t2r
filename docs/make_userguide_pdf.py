@@ -67,6 +67,13 @@
 #
 #	22-NOV-2026	CLD	V.01-02ECO02: lategd is iotmo / 2 (at least 100) by default, the risk of a late answer to a read;
 #				the code LATEPRETX; the package names in the examples are 1.2.2.
+#
+#	22-NOV-2026	CLD	V.01-03: the settings file is read and checked by yaLIBCFG: the whole file is checked by a schema
+#				before anything is applied, all the problems at once (3.1), the code CFGREJECT and the CFG messages (7.3);
+#				a wrong record is no longer skipped - the file is refused; the codes CFGPARSE, CFGNOSECT, CFGTRUNC,
+#				SERBADREC, SERBADOPT, SERBADCHR, SERRANGE, SERBADPAR, SERBADFLOW, NOSERIALS, LSNBADREC, LSNBADBIND,
+#				LSNRANGE, LSNBADADDR, LSNNOTGT, NOLSNRS, LSNOPTRNG, LSNBADMODE, LSNRAWSHR, LSNRAWOPT, LSNXONRTU are
+#				removed; the new ranges (iotmo, ts_*); the package names in the examples are 1.3.0.
 #--
 import sys
 
@@ -97,7 +104,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'V.01-02'
+VERSION   = 'V.01-03'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -550,7 +557,7 @@ def s_pack_en ():
 			('chars', 'yes', 'The line parameters: speed, data bits, parity, stop bits. '
 				'Speed 50..4000000; data bits 5..8; parity N (none), E (even), O (odd); stop bits 1..2.'),
 			('iotmo', 'no', 'How long to wait for the answer of the device, milliseconds. Default 1000. '
-				'Take it with a margin over the slowest device on the line: an answer which comes later is lost.'),
+				'Take it with a margin over the slowest device on the line: an answer which comes later is lost. Range 1..3600000.'),
 			('lategd', 'no', 'After a failed request (no answer, a broken answer) listen to the line for this many '
 				'milliseconds more and throw away what comes (LATEANS): a late answer must not go to the next '
 				'request. Costs time only after a failure: a request to a dead device takes iotmo + lategd. '
@@ -562,16 +569,38 @@ def s_pack_en ():
 			('flow', 'no', 'The flow control of the line. NONE --- none (the default). RTS/CTS --- the hardware '
 				'handshake: the gateway sends only while the device holds CTS on; needs the RTS and CTS wires; not '
 				'with rs485 = 1. XON/XOFF --- the device stops and starts the gateway by XOFF (0x13) and XON (0x11); '
-				'only for a RAW listener: MODBUS RTU frames carry these octets (LSNXONRTU). Not case-sensitive; '
-				'another value or a number (DSR/DTR too: Linux has no such flow control) rejects the record (SERBADFLOW).'),
+				'only for a RAW listener: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is an error. Not case-sensitive; '
+				'another value or a number (DSR/DTR too: Linux has no such flow control) is an error.'),
 			('ts_enabled', 'no', '1 --- enable the Time Stamp pseudo device (Chapter 5). Default 0.'),
-			('ts_unit', 'no', 'The slave address the pseudo device answers on. Default 135.'),
-			('ts_fncode', 'no', 'The function code it answers to. Default 4.'),
-			('ts_base_reg0', 'no', 'The first register of the time stamp. Default 135.'),
+			('ts_unit', 'no', 'The slave address the pseudo device answers on. Range 0..255. Default 135.'),
+			('ts_fncode', 'no', 'The function code it answers to. Range 1..127. Default 3.'),
+			('ts_base_reg0', 'no', 'The first register of the time stamp. Range 0..65535. Default 8135.'),
 		 ], [30*mm, 18*mm, 115*mm], a_mono_cols=(0,)),
-		 P('If a record is wrong, the gateway skips it and says why --- with the allowed range '
-		   'right in the message:'),
-		 C('%T2R-E-SERRANGE, [serial #00:</dev/ttyUSB0>] --- speed (baud) 31 is out of range [50..4000000]'),
+		 P('The whole settings file is checked <b>before anything is applied</b>. The gateway finds the '
+		   'problems at once and prints each of them with the setting path, the file, the line and the column, '
+		   'for example:'),
+		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused,\n    see the CFG messages above --- nothing is applied'),
+		 P('If there is at least one problem, the <b>whole file is refused</b>: nothing is applied and the gateway '
+		   'does not start (/check exits with a failure; restart gateway of mbus-ctl is refused and the gateway '
+		   'goes on as it is). Fix every line shown and try again. A check which compares several settings (a '
+		   'target against serials, two RAW listeners on one line, XON/XOFF under MODBUS) is made when those '
+		   'settings themselves are right, so such a problem may show up only after the first ones are fixed.'),
+		 P('<b>This has changed in V.01-03.</b> Before it, a wrong record was skipped with a %T2R-E-... message and '
+		   'the gateway went on with the rest of the file. Now one wrong record refuses the whole file. So a file '
+		   'which worked before may be refused after the upgrade: check it with '
+		   '<font face="Mono">mbusgw-t2r /settings=&lt;file&gt; /check</font> before you restart the gateway.'),
+		 P('In the setting path, listeners.[0] is the first record of the section (the records count from zero, in '
+		   'the order they appear in the file); serials.[device="/dev/null"] is the record with this device. '
+		   'What the check also catches:'),
+		 P('&bull; A setting which the gateway does not know is an error --- a typo never passes. The names of the '
+		   'settings are not case-sensitive.'),
+		 P('&bull; Two serials records with the same device are an error (DUPKEY), and so are two whose device '
+		   'differs by capital and small letters only (CHECK): a target could not tell them apart.'),
+		 P('&bull; At most 128 serials records and 128 listeners records.'),
+		 P('&bull; The target of a listener must be a device of serials. The sample file modbus-t2r_settings.conf has '
+		   'its two listeners of /dev/ttyS1 and /dev/ttyS0 commented out for this reason: add the serials records '
+		   'for them first, then remove the comment marks.'),
+		 P('The allowed values are in the tables of this chapter. The messages are explained in section 7.3.'),
 		 P('<b>USB adapters: unplugging is fine.</b> Since X.00-13ECO09 the gateway notices that the adapter has '
 		   'gone (DEVLOST) --- also when nobody is polling --- and closes the port at once. It tries to open the '
 		   'port again by its name every second; meanwhile the clients get the exception 10 '
@@ -588,17 +617,17 @@ def s_pack_en ():
 			('bind', 'yes', 'Where to listen: TCP:&lt;IP address&gt;:&lt;port&gt;. The port is 1..65535; '
 				'0.0.0.0 means every interface. UDP is not supported.'),
 			('target', 'yes', 'Which serial port to forward to. Must match a device from serials '
-				'exactly, character by character.'),
+				'(capital and small letters are not told apart); if there is none, the whole file is refused.'),
 			('connlm', 'no', 'How many TCP clients may be connected to this port at the same time; one more is '
 				'disconnected at once (CONNLIMIT). Default 32, range 1..512.'),
 			('idletmo', 'no', 'A client which sends nothing for this many seconds is disconnected (IDLETMO). '
 				'Default 60, range 1..86400.'),
 			('mode', 'no', 'What the listener does: "MODBUS" (the default) is the MODBUS TCP to RTU gateway, '
 				'"RAW" is a transparent stream of octets (see 3.3). Capital or small letters do not matter; '
-				'any other word is an error (LSNBADMODE).'),
+				'any other word is an error.'),
 			('takeover', 'no', 'RAW only. 1 (the default): a new client kicks the current client out (RAWKICK). '
 				'0: a new client is rejected while another one is connected (RAWBUSY). In the MODBUS mode '
-				'this key is an error (LSNRAWOPT).'),
+				'this key is an error.'),
 			('iotmo', 'no', 'Reserved, not used yet.'),
 		 ], [30*mm, 18*mm, 115*mm], a_mono_cols=(0,)),
 		 P('Port <b>502</b> is the standard MODBUS TCP port, but on Linux the ports below 1024 '
@@ -630,7 +659,7 @@ def s_pack_en ():
 		   'the new one gets the line; the log says RAWKICK. With takeover = 0 the old client stays and the '
 		   'new one is refused (RAWBUSY).'),
 		 P('&bull; <b>The serial port is only for this listener.</b> No other listener, MODBUS or RAW, may use '
-		   'the same target (LSNRAWSHR; the order of the records does not matter). MODBUS listeners may still '
+		   'the same target (an error; the order of the records does not matter). MODBUS listeners may still '
 		   'share a port among themselves.'),
 		 P('&bull; <b>The speed and the parity are taken from the gateway</b>, from the serials record. If the '
 		   'program on the PC sets another speed on its virtual COM port, this is <b>not</b> passed to the '
@@ -690,8 +719,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.2.2-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.2-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -821,8 +850,6 @@ def s_pack_en ():
 				'connlm of this listener; otherwise find who keeps the connections: ss -tn.'),
 			('%T2R-W-IDLETMO, ...', 'A client has sent nothing for idletmo seconds. Normal for a client which '
 				'polls rarely --- it reconnects; to keep the connection, raise idletmo.'),
-			('%T2R-E-LSNRAWSHR, ...', 'A RAW listener wants a serial port which another listener uses. Give the '
-				'RAW listener a serial port of its own, or make it a MODBUS listener.'),
 			('%T2R-W-RAWBUSY, ...', 'A client is already connected to the RAW port and takeover = 0. Normal: '
 				'disconnect the first client, or set takeover = 1.'),
 			('%T2R-E-TXDRAINTMO, ...', 'The USB adapter took the request but did not send it out; the '
@@ -843,10 +870,7 @@ def s_pack_en ():
 				'another program. Find it: sudo ss -tlnp | grep 502.'),
 			('%T2R-E-LSNRERR, ... errno: 13', 'The ports below 1024 need root. Run with sudo, or '
 				'take a port above 1024 (e.g. 5502).'),
-			('%T2R-E-SERRANGE, ... out of range [a..b]', 'A settings value is out of its range; the allowed range is '
-				'right in the message. Fix the value.'),
-			('%T2R-E-NOSERIALS, No serials have been defined!', 'Not a single serials record survived the validation. '
-				'Read the error lines above --- each rejected record says why.'),
+			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused', 'The settings file has errors. Nothing is applied: the gateway does not start (/check fails; restart gateway is refused and the gateway goes on as it is). Read the %CFG-E-... lines above it: each names the setting, the file, the line and the column. Fix all of them and check with mbusgw-t2r /settings=&lt;file&gt; /check (see 7.3). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose target is not in serials, or a setting the gateway does not know.'),
 			('The data is wrong or shifted', 'The byte order confusion on the client side: the MODBUS '
 				'registers are the big-endian 16-bit words; check how the client assembles the '
 				'32/64-bit values.'),
@@ -896,28 +920,12 @@ def s_pack_en ():
 			('NOROOM', 'E', 'An answer does not fit into the buffer — an internal error, please report it.'),
 			('MBAPLEN', 'E', 'The MBAP length field does not match the received data; the request is rejected.'),
 			('REQSHORT', 'E', 'A request is too short to be forwarded to the serial line.'),
-			('TGTNDEF', 'E', 'A listener names a target which is not in the serials section.'),
-			('CFGNOSECT', 'E', 'The settings file has no serials or listeners section; the gateway stops.'),
-			('CFGTRUNC', 'W', 'Too many records in a section; only the first ones are used.'),
-			('SERBADREC', 'E', 'A serials record is broken or has no device; it is skipped.'),
-			('SERBADOPT', 'E', 'A serials record has no chars, or it is too long; the record is skipped.'),
 			('SERNORS485', 'W', 'rs485 = 1 is set, but this build has no RS485 support; the option is ignored.'),
-			('SERBADCHR', 'E', 'The chars value cannot be read; write it like "9600, 8, N, 1".'),
-			('SERRANGE', 'E', 'The speed, data bits or stop bits are out of range; the allowed range is in the message.'),
-			('SERBADPAR', 'E', 'The parity letter is unknown; use N, E or O.'),
-			('SERBADFLOW', 'E', 'The flow value is unknown; use NONE, RTS/CTS or XON/XOFF (DSR/DTR is not supported by Linux).'),
 			('DEVADDED', 'I', 'A serials record is accepted; the line parameters are shown.'),
 			('TSENABLED', 'I', 'The Time Stamp pseudo device is on for this port.'),
 			('TSDISABLED', 'I', 'The Time Stamp pseudo device is off for this port (the default).'),
-			('NOSERIALS', 'E', 'Not a single serials record survived the validation; the gateway stops.'),
-			('LSNBADREC', 'E', 'A listeners record is broken (no bind, no target, UDP); it is skipped.'),
-			('LSNBADBIND', 'E', 'The bind value cannot be read; write it like "TCP:0.0.0.0:502".'),
-			('LSNRANGE', 'E', 'The TCP port number is out of range [1..65535].'),
-			('LSNBADADDR', 'E', 'The IP address in bind is not a valid IPv4 address.'),
-			('LSNNOTGT', 'E', 'The target of a listener is not in the serials section; the record is skipped.'),
 			('LSNADDED', 'I', 'A listeners record is accepted; the address, the port, the target, the limits and the mode are shown (the text ends with ", Mode: MODBUS", ", Mode: RAW" or ", Mode: RAW (takeover)").'),
-			('NOLSNRS', 'E', 'Not a single listeners record survived the validation; the gateway stops.'),
-			('CFGPARSE', 'E', 'The settings file cannot be read or has a syntax error; the file name and the line are shown.'),
+			('CFGREJECT', 'E', 'The settings file is refused: the problems are in the CFG messages above it, nothing is applied and the gateway does not start (see 7.3).'),
 			('SIGERR', 'E', 'A signal handler cannot be set — an internal error, please report it.'),
 			('CFGERR', 'E', 'The configuration cannot be processed; the previous lines say why.'),
 			('CFGABORT', 'F', 'The gateway stops because of the configuration errors above.'),
@@ -940,15 +948,10 @@ def s_pack_en ():
 			('DEVNOTINI', 'W', 'Closing a serial port which was never opened — harmless.'),
 			('DEVBUSY', 'E', 'The serial line cannot be taken for a request; the request gets exception 4.'),
 			('CONNLIMIT', 'W', 'A new TCP client is disconnected at once: the port already has connlm clients.'),
-			('LSNOPTRNG', 'E', 'A listeners option (connlm, idletmo, takeover) is out of range (in the RAW mode connlm may only be 1); the record is skipped.'),
 			('RAWSTART', 'I', 'A RAW session has started: the client address and the serial port are shown. Nothing to do.'),
 			('RAWSTOP', 'I', 'A RAW session has ended; shows how many octets went to the line and how many came from the line. Nothing to do --- the numbers help to see if the data flowed at all.'),
 			('RAWKICK', 'W', 'A new client took the RAW port over (takeover = 1): the old connection is shut down. If this happens again and again by itself, two programs fight for one port --- stop one of them or set takeover = 0.'),
 			('RAWBUSY', 'W', 'A new client is refused: the RAW port is busy and takeover = 0. Wait until the first client leaves, or set takeover = 1.'),
-			('LSNBADMODE', 'E', 'The mode value is unknown; the record is skipped. Write "MODBUS" or "RAW".'),
-			('LSNRAWSHR', 'E', 'The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own.'),
-			('LSNRAWOPT', 'E', 'A listeners option is not allowed in this mode (takeover in the MODBUS mode); the record is skipped. Remove the option or set mode = "RAW".'),
-			('LSNXONRTU', 'E', 'A MODBUS listener wants a serial port with flow = "XON/XOFF"; the record is skipped. Use NONE or RTS/CTS for the port, or make the listener a RAW one.'),
 			('TXDRAINTMO', 'E', 'The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4.'),
 			('ECHOMISM', 'W', 'The answer to a write request is not its echo (another address or value); the request gets exception 4.'),
 			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
@@ -976,7 +979,26 @@ def s_pack_en ():
 			('CTLBADSEL', 'E', 'mbus-ctl reset connection needs a connection: an Id from sho conn, a.b.c.d, a.b.c.d:port or /all.'),
 			('CTLCUT', 'W', 'The answer did not fit into 64 KB (many hundreds of clients): the table is not full.'),
 		 ], [26*mm, 10*mm, 127*mm], a_mono_cols=(0,)),
-		 H2('7.3.  If Nothing Helps'),
+		 H2('7.3.  The CFG Messages (the Check of the Settings File)'),
+		 P('The settings file is read and checked by the library yaLIBCFG; its messages start with %CFG-E- and end '
+		   'with the file, the line and the column of the problem. After all of them the gateway prints '
+		   'CFGREJECT. The ones you will meet:'),
+		 tbl(['Code', 'What it says', 'What to do'], [
+			('SYNTAX', 'The file is not written in the right syntax.', 'Look at the line and the column shown (the real mistake is often just before it): a missing ; or = or a bracket or a quote.'),
+			('OPENIN', 'The file cannot be opened; errno says why (2 = no such file, 13 = no rights).', 'Check the name in /settings= and the rights on the file.'),
+			('UNKNOWN', 'A setting which the gateway does not know.', 'A typo? Compare the name with 3.1 and 3.2.'),
+			('REQUIRED', 'A required setting is missing.', 'Add it (see the Required column of the tables in Chapter 3).'),
+			('VTYPE', 'The value has a wrong type.', 'Write what the message expects: a text in quotes, a number without them, a keyword in quotes from the list.'),
+			('RANGE', 'A number is out of its range; the allowed range is in the message.', 'Fix the value.'),
+			('LENGTH', 'A text is too short or too long; the allowed length is in the message.', 'Fix the value.'),
+			('COUNT', 'Too few or too many records in a section (1..128 are allowed).', 'Add the missing records, or cut the section.'),
+			('BADKWD', 'The value is not one of the allowed words; they are listed in the message.', 'Take one of them.'),
+			('DUPKEY', 'Two records have the same key (for example the same device twice); the line of the first one is shown.', 'Remove one of them.'),
+			('DUPNAME', 'A setting is written twice in one group (capital and small letters are not told apart), or a section twice.', 'Remove one of them.'),
+			('CHECK', 'A rule of the gateway is broken; the message says which (the form of chars or bind, UDP, a target which is not in serials, a serial port of a RAW listener used by another listener, XON/XOFF under MODBUS, RTS/CTS with rs485 = 1, ...).', 'Read the text of the message and fix the setting it names.'),
+		 ], [22*mm, 74*mm, 67*mm], a_mono_cols=(0,)),
+		 P('The full list of the CFG messages is in the yaLIBCFG manual (Appendix A).'),
+		 H2('7.4.  If Nothing Helps'),
 		 P('Collect and attach to your question: 1) the full start-up log with /trace (from '
 		   'REVISNF to the first error); 2) your settings file; 3) the output of '
 		   '<font face="Mono">ls -l &lt;device&gt;</font> and <font face="Mono">dmesg | '
@@ -1118,7 +1140,7 @@ def s_pack_ru ():
 				'Скорость 50..4000000; биты данных 5..8; чётность N (нет), E (чётная), O (нечётная); '
 				'стоп-биты 1..2.'),
 			('iotmo', 'нет', 'Сколько ждать ответа устройства, миллисекунды. По умолчанию 1000. '
-				'Берите с запасом относительно самого медленного устройства на линии: опоздавший ответ теряется.'),
+				'Берите с запасом относительно самого медленного устройства на линии: опоздавший ответ теряется. Диапазон 1..3600000.'),
 			('lategd', 'нет', 'После неудачного запроса (нет ответа, битый ответ) ещё столько миллисекунд слушать '
 				'линию и выбрасывать всё, что пришло (LATEANS): опоздавший ответ не должен уйти следующему запросу. '
 				'Время тратится только после сбоя: запрос к неработающему устройству занимает iotmo + lategd. '
@@ -1130,16 +1152,36 @@ def s_pack_ru ():
 			('flow', 'нет', 'Управление потоком на линии. NONE — без него (по умолчанию). RTS/CTS — аппаратное: '
 				'шлюз передаёт, только пока устройство держит CTS; нужны провода RTS и CTS; нельзя вместе с rs485 = 1. '
 				'XON/XOFF — устройство останавливает и запускает передачу символами XOFF (0x13) и XON (0x11); только '
-				'для RAW-слушателя: в кадрах MODBUS RTU эти октеты встречаются (LSNXONRTU). Регистр не важен; другое '
-				'значение или число (и DSR/DTR: в Linux такого нет) отклоняет запись (SERBADFLOW).'),
+				'для RAW-слушателя: в кадрах MODBUS RTU эти октеты встречаются, поэтому MODBUS-слушатель на таком порту — ошибка. Регистр не важен; другое '
+				'значение или число (и DSR/DTR: в Linux такого нет) — ошибка.'),
 			('ts_enabled', 'нет', '1 — включить псевдоустройство меток времени (глава 5). По умолчанию 0.'),
-			('ts_unit', 'нет', 'Адрес ведомого, на который отвечает псевдоустройство. По умолчанию 135.'),
-			('ts_fncode', 'нет', 'Код функции, на который оно отвечает. По умолчанию 4.'),
-			('ts_base_reg0', 'нет', 'Первый регистр метки времени. По умолчанию 135.'),
+			('ts_unit', 'нет', 'Адрес ведомого, на который отвечает псевдоустройство. Диапазон 0..255. По умолчанию 135.'),
+			('ts_fncode', 'нет', 'Код функции, на который оно отвечает. Диапазон 1..127. По умолчанию 3.'),
+			('ts_base_reg0', 'нет', 'Первый регистр метки времени. Диапазон 0..65535. По умолчанию 8135.'),
 		 ], [30*mm, 14*mm, 119*mm], a_mono_cols=(0,)),
-		 P('Если запись неправильная, шлюз пропускает её и говорит почему — с допустимым '
-		   'диапазоном прямо в сообщении:'),
-		 C('%T2R-E-SERRANGE, [serial #00:</dev/ttyUSB0>] --- speed (baud) 31 is out of range [50..4000000]'),
+		 P('Весь файл настроек проверяется <b>до того, как что-либо применено</b>. Шлюз находит проблемы '
+		   'сразу и печатает каждую с путём настройки, файлом, строкой и столбцом, например:'),
+		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused,\n    see the CFG messages above --- nothing is applied'),
+		 P('Если есть хотя бы одна проблема, <b>весь файл отклоняется</b>: ничего не применяется, и шлюз не '
+		   'запускается (/check завершается неудачей; restart gateway в mbus-ctl отклоняется, а шлюз продолжает '
+		   'работать как работал). Исправьте все показанные строки и повторите. Проверка, которая сравнивает '
+		   'несколько настроек (target с serials, два RAW-слушателя на одной линии, XON/XOFF под MODBUS), '
+		   'выполняется, когда сами эти настройки верны, поэтому такая проблема может показаться только после исправления первых.'),
+		 P('<b>Это изменилось в V.01-03.</b> До неё неправильная запись пропускалась с сообщением %T2R-E-..., а '
+		   'шлюз работал дальше с остальным файлом. Теперь одна неправильная запись отклоняет весь файл. Поэтому '
+		   'файл, который раньше работал, после обновления может быть отклонён: проверьте его командой '
+		   '<font face="Mono">mbusgw-t2r /settings=&lt;файл&gt; /check</font>, прежде чем перезапускать шлюз.'),
+		 P('В пути настройки listeners.[0] — первая запись раздела (записи считаются с нуля, в порядке следования '
+		   'в файле); serials.[device="/dev/null"] — запись с этим device. Что ещё ловит проверка:'),
+		 P('&bull; Настройка, которой шлюз не знает, — ошибка: опечатка не пройдёт. Имена настроек не зависят от '
+		   'регистра.'),
+		 P('&bull; Две записи serials с одним device — ошибка (DUPKEY), как и две, чьи device отличаются только '
+		   'заглавными и строчными буквами (CHECK): target не смог бы их различить.'),
+		 P('&bull; Не более 128 записей serials и 128 записей listeners.'),
+		 P('&bull; target слушателя должен быть device из serials. Поэтому в образце modbus-t2r_settings.conf два '
+		   'слушателя для /dev/ttyS1 и /dev/ttyS0 закомментированы: сначала добавьте для них записи serials, '
+		   'затем уберите знаки комментария.'),
+		 P('Допустимые значения — в таблицах этой главы. Сообщения разобраны в разделе 7.3.'),
 		 P('<b>USB-адаптеры: переподключать можно.</b> С X.00-13ECO09 шлюз замечает, что адаптер пропал '
 		   '(DEVLOST) — даже когда никто не опрашивает устройство — и сразу закрывает порт. Раз в секунду он '
 		   'пытается открыть порт снова по имени; пока адаптера нет, клиенты получают исключение 10 '
@@ -1155,18 +1197,18 @@ def s_pack_ru ():
 		 tbl(['Ключ', 'Обяз.', 'Значение и допустимые величины'], [
 			('bind', 'да', 'Где слушать: TCP:&lt;IP-адрес&gt;:&lt;порт&gt;. Порт 1..65535; '
 				'0.0.0.0 — все интерфейсы. UDP не поддерживается.'),
-			('target', 'да', 'На какой порт пересылать. Должен дословно, символ в символ, '
-				'совпадать с device из serials.'),
+			('target', 'да', 'На какой порт пересылать. Должен совпадать с device из serials '
+				'(заглавные и строчные буквы не различаются); если такого нет, весь файл отклоняется.'),
 			('connlm', 'нет', 'Сколько TCP-клиентов может быть подключено к этому порту одновременно; лишний '
 				'сразу отключается (CONNLIMIT). По умолчанию 32, диапазон 1..512.'),
 			('idletmo', 'нет', 'Клиент, который ничего не присылает столько секунд, отключается (IDLETMO). '
 				'По умолчанию 60, диапазон 1..86400.'),
 			('mode', 'нет', 'Что делает слушатель: "MODBUS" (по умолчанию) — шлюз MODBUS TCP в RTU, "RAW" — '
 				'прозрачный поток октетов (см. 3.3). Заглавные или строчные буквы — не важно; любое другое '
-				'слово — ошибка (LSNBADMODE).'),
+				'слово — ошибка.'),
 			('takeover', 'нет', 'Только для RAW. 1 (по умолчанию): новый клиент вытесняет текущего (RAWKICK). '
 				'0: пока подключён другой клиент, новый отклоняется (RAWBUSY). В режиме MODBUS этот ключ — '
-				'ошибка (LSNRAWOPT).'),
+				'ошибка.'),
 			('iotmo', 'нет', 'Зарезервирован, пока не используется.'),
 		 ], [30*mm, 14*mm, 119*mm], a_mono_cols=(0,)),
 		 P('Порт <b>502</b> — стандартный порт MODBUS TCP, но в Linux порты ниже 1024 требуют '
@@ -1198,7 +1240,7 @@ def s_pack_ru ():
 		   'закрывается, линию получает новый; в журнале будет RAWKICK. При takeover = 0 старый клиент '
 		   'остаётся, а новому отказывают (RAWBUSY).'),
 		 P('&bull; <b>Последовательный порт — только для этого слушателя.</b> Ни один другой слушатель, '
-		   'MODBUS или RAW, не может брать тот же target (LSNRAWSHR; порядок записей не важен). '
+		   'MODBUS или RAW, не может брать тот же target (ошибка; порядок записей не важен). '
 		   'MODBUS-слушатели по-прежнему могут делить порт между собой.'),
 		 P('&bull; <b>Скорость и чётность берутся из шлюза</b>, из записи serials. Если программа на ПК ставит '
 		   'у своего виртуального COM-порта другую скорость, в линию это <b>не</b> передаётся. Задайте верный '
@@ -1257,8 +1299,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.2.2-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.2-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1384,8 +1426,6 @@ def s_pack_ru ():
 				'connlm этого слушателя; иначе найдите, кто держит соединения: ss -tn.'),
 			('%T2R-W-IDLETMO, ...', 'Клиент ничего не присылал idletmo секунд. Нормально для клиента, который '
 				'опрашивает редко — он переподключится; чтобы держать соединение, увеличьте idletmo.'),
-			('%T2R-E-LSNRAWSHR, ...', 'RAW-слушатель хочет последовательный порт, который занят другим слушателем. '
-				'Дайте RAW-слушателю отдельный порт или сделайте его MODBUS-слушателем.'),
 			('%T2R-W-RAWBUSY, ...', 'К RAW-порту уже подключён клиент, а takeover = 0. Нормально: отключите '
 				'первого клиента или поставьте takeover = 1.'),
 			('%T2R-E-TXDRAINTMO, ...', 'USB-адаптер принял запрос, но не передал его в линию; запрос получает '
@@ -1406,10 +1446,7 @@ def s_pack_ru ():
 				'программа. Найдите: sudo ss -tlnp | grep 502.'),
 			('%T2R-E-LSNRERR, ... errno: 13', 'Порты ниже 1024 требуют root. Запустите под sudo '
 				'или возьмите порт выше 1024 (например 5502).'),
-			('%T2R-E-SERRANGE, ... out of range [a..b]', 'Значение в настройках вне диапазона; допустимый диапазон '
-				'написан прямо в сообщении. Исправьте значение.'),
-			('%T2R-E-NOSERIALS, No serials have been defined!', 'Ни одна запись serials не прошла проверку. Читайте '
-				'строки ошибок выше — каждая отброшенная запись объясняет причину.'),
+			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused', 'В файле настроек есть ошибки. Ничего не применено: шлюз не запускается (/check завершается неудачей; restart gateway отклоняется, а шлюз продолжает работать как работал). Читайте строки %CFG-E-... выше: каждая называет настройку, файл, строку и столбец. Исправьте всё и проверьте командой mbusgw-t2r /settings=&lt;файл&gt; /check (см. 7.3). После обновления до V.01-03 файл, который раньше работал, может быть отклонён: например, у слушателя target нет в serials, или в файле настройка, которой шлюз не знает.'),
 			('Данные неверные или сдвинутые', 'Путаница порядка байт у клиента: регистры MODBUS — '
 				'16-битные слова big-endian; проверьте, как клиент собирает 32/64-битные значения.'),
 		 ], [52*mm, 111*mm], a_mono_cols=(0,)),
@@ -1454,28 +1491,12 @@ def s_pack_ru ():
 			('NOROOM', 'E', 'Ответ не помещается в буфер — внутренняя ошибка, сообщите о ней.'),
 			('MBAPLEN', 'E', 'Поле длины MBAP не совпадает с принятыми данными; запрос отклоняется.'),
 			('REQSHORT', 'E', 'Запрос слишком короткий, чтобы передать его в линию.'),
-			('TGTNDEF', 'E', 'Слушатель ссылается на устройство, которого нет в разделе serials.'),
-			('CFGNOSECT', 'E', 'В файле настроек нет раздела serials или listeners; шлюз останавливается.'),
-			('CFGTRUNC', 'W', 'Слишком много записей в разделе; используются только первые.'),
-			('SERBADREC', 'E', 'Запись serials повреждена или без device; пропускается.'),
-			('SERBADOPT', 'E', 'В записи serials нет chars или значение слишком длинное; запись пропускается.'),
 			('SERNORS485', 'W', 'Задано rs485 = 1, но эта сборка без поддержки RS485; опция игнорируется.'),
-			('SERBADCHR', 'E', 'Значение chars не разобрано; пишите так: "9600, 8, N, 1".'),
-			('SERRANGE', 'E', 'Скорость, биты данных или стоп-биты вне диапазона; допустимый диапазон — в сообщении.'),
-			('SERBADPAR', 'E', 'Неизвестная буква чётности; используйте N, E или O.'),
-			('SERBADFLOW', 'E', 'Неизвестное значение flow; используйте NONE, RTS/CTS или XON/XOFF (DSR/DTR в Linux не поддерживается).'),
 			('DEVADDED', 'I', 'Запись serials принята; показаны параметры линии.'),
 			('TSENABLED', 'I', 'Псевдоустройство меток времени включено для этого порта.'),
 			('TSDISABLED', 'I', 'Псевдоустройство меток времени выключено для этого порта (по умолчанию).'),
-			('NOSERIALS', 'E', 'Ни одна запись serials не прошла проверку; шлюз останавливается.'),
-			('LSNBADREC', 'E', 'Запись listeners повреждена (нет bind, нет target, UDP); пропускается.'),
-			('LSNBADBIND', 'E', 'Значение bind не разобрано; пишите так: "TCP:0.0.0.0:502".'),
-			('LSNRANGE', 'E', 'Номер TCP-порта вне диапазона [1..65535].'),
-			('LSNBADADDR', 'E', 'IP-адрес в bind — не правильный адрес IPv4.'),
-			('LSNNOTGT', 'E', 'Устройства из target нет в разделе serials; запись пропускается.'),
 			('LSNADDED', 'I', 'Запись listeners принята; показаны адрес, порт, устройство, ограничения и режим (текст заканчивается на ", Mode: MODBUS", ", Mode: RAW" или ", Mode: RAW (takeover)").'),
-			('NOLSNRS', 'E', 'Ни одна запись listeners не прошла проверку; шлюз останавливается.'),
-			('CFGPARSE', 'E', 'Файл настроек не читается или с синтаксической ошибкой; показаны имя файла и строка.'),
+			('CFGREJECT', 'E', 'Файл настроек отклонён: проблемы указаны в сообщениях CFG выше, ничего не применено, шлюз не запускается (см. 7.3).'),
 			('SIGERR', 'E', 'Не удалось установить обработчик сигнала — внутренняя ошибка, сообщите о ней.'),
 			('CFGERR', 'E', 'Конфигурацию не удалось обработать; причина — в строках выше.'),
 			('CFGABORT', 'F', 'Шлюз останавливается из-за ошибок конфигурации выше.'),
@@ -1498,15 +1519,10 @@ def s_pack_ru ():
 			('DEVNOTINI', 'W', 'Закрытие порта, который не открывался — безвредно.'),
 			('DEVBUSY', 'E', 'Последовательную линию не удалось занять под запрос; запрос получает исключение 4.'),
 			('CONNLIMIT', 'W', 'Новый TCP-клиент сразу отключён: у порта уже connlm клиентов.'),
-			('LSNOPTRNG', 'E', 'Параметр listeners (connlm, idletmo, takeover) вне диапазона (в режиме RAW connlm может быть только 1); запись пропускается.'),
 			('RAWSTART', 'I', 'RAW-сессия началась: показаны адрес клиента и последовательный порт. Делать ничего не нужно.'),
 			('RAWSTOP', 'I', 'RAW-сессия закончилась; показано, сколько октетов ушло в линию и сколько пришло из линии. Делать ничего не нужно — по цифрам видно, шли ли данные вообще.'),
 			('RAWKICK', 'W', 'Новый клиент занял RAW-порт (takeover = 1): старое соединение закрыто. Если это само повторяется снова и снова, две программы борются за один порт — остановите одну из них или поставьте takeover = 0.'),
 			('RAWBUSY', 'W', 'Новому клиенту отказано: RAW-порт занят, а takeover = 0. Подождите, пока первый клиент уйдёт, или поставьте takeover = 1.'),
-			('LSNBADMODE', 'E', 'Значение mode неизвестно; запись пропускается. Пишите "MODBUS" или "RAW".'),
-			('LSNRAWSHR', 'E', 'Последовательный порт RAW-слушателя занят другим слушателем; запись пропускается. Дайте RAW-слушателю свой порт.'),
-			('LSNRAWOPT', 'E', 'Параметр listeners не разрешён в этом режиме (takeover в режиме MODBUS); запись пропускается. Уберите параметр или поставьте mode = "RAW".'),
-			('LSNXONRTU', 'E', 'MODBUS-слушатель хочет порт с flow = "XON/XOFF"; запись пропускается. Поставьте порту NONE или RTS/CTS или сделайте слушатель RAW.'),
 			('TXDRAINTMO', 'E', 'Адаптер не передал запрос в линию вовремя; запрос сброшен и получает исключение 4.'),
 			('ECHOMISM', 'W', 'Ответ на запрос записи — не его эхо (другой адрес или значение); запрос получает исключение 4.'),
 			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),
@@ -1534,7 +1550,26 @@ def s_pack_ru ():
 			('CTLBADSEL', 'E', 'mbus-ctl reset connection нужно указать соединение: Id из sho conn, a.b.c.d, a.b.c.d:порт или /all.'),
 			('CTLCUT', 'W', 'Ответ не поместился в 64 КБ (многие сотни клиентов): таблица неполная.'),
 		 ], [26*mm, 11*mm, 126*mm], a_mono_cols=(0,)),
-		 H2('7.3.  Если ничего не помогло'),
+		 H2('7.3.  Сообщения CFG (проверка файла настроек)'),
+		 P('Файл настроек читает и проверяет библиотека yaLIBCFG; её сообщения начинаются с %CFG-E- и заканчиваются '
+		   'файлом, строкой и столбцом проблемы. После всех них шлюз печатает CFGREJECT. Те, с которыми вы '
+		   'встретитесь:'),
+		 tbl(['Код', 'Что говорит', 'Что делать'], [
+			('SYNTAX', 'Файл написан не по правилам синтаксиса.', 'Посмотрите строку и столбец (настоящая ошибка часто прямо перед ними): пропущены ; или = или скобка или кавычка.'),
+			('OPENIN', 'Файл не открывается; errno говорит почему (2 = нет такого файла, 13 = нет прав).', 'Проверьте имя в /settings= и права на файл.'),
+			('UNKNOWN', 'Настройка, которой шлюз не знает.', 'Опечатка? Сравните имя с разделами 3.1 и 3.2.'),
+			('REQUIRED', 'Нет обязательной настройки.', 'Добавьте её (см. столбец «Обязателен» в таблицах главы 3).'),
+			('VTYPE', 'У значения не тот тип.', 'Пишите то, что ждёт сообщение: текст в кавычках, число без них, слово из списка в кавычках.'),
+			('RANGE', 'Число вне диапазона; допустимый диапазон — в сообщении.', 'Исправьте значение.'),
+			('LENGTH', 'Текст слишком короткий или слишком длинный; допустимая длина — в сообщении.', 'Исправьте значение.'),
+			('COUNT', 'Слишком мало или слишком много записей в разделе (допускается 1..128).', 'Добавьте недостающие записи или сократите раздел.'),
+			('BADKWD', 'Значение не из разрешённых слов; они перечислены в сообщении.', 'Возьмите одно из них.'),
+			('DUPKEY', 'У двух записей один и тот же ключ (например, один device дважды); показана строка первой.', 'Уберите одну из них.'),
+			('DUPNAME', 'Настройка записана дважды в одной группе (заглавные и строчные буквы не различаются) или раздел дважды.', 'Уберите одну из них.'),
+			('CHECK', 'Нарушено правило шлюза; сообщение говорит какое (вид chars или bind, UDP, target, которого нет в serials, последовательный порт RAW-слушателя занят другим слушателем, XON/XOFF при MODBUS, RTS/CTS при rs485 = 1, ...).', 'Прочитайте текст сообщения и исправьте названную им настройку.'),
+		 ], [22*mm, 74*mm, 67*mm], a_mono_cols=(0,)),
+		 P('Полный список сообщений CFG — в руководстве yaLIBCFG (Приложение A).'),
+		 H2('7.4.  Если ничего не помогло'),
 		 P('Соберите и приложите к вопросу: 1) полный журнал запуска с /trace (от REVISNF до '
 		   'первой ошибки); 2) ваш файл настроек; 3) вывод <font face="Mono">ls -l '
 		   '&lt;устройство&gt;</font> и <font face="Mono">dmesg | tail -20</font>; 4) точную '

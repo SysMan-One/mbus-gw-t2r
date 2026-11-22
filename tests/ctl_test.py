@@ -474,7 +474,7 @@ def t_restart():
     good = open(gw.conf).read()
     gw.write_conf(good.replace('listeners', 'listeners = ( {', 1))	# A syntax error
     rc, out = ctl('restart', 'gateway', '/socket=' + gw.sock)
-    check('restart with broken settings: refused, exit 1', rc == 1 and 'check has failed' in out and 'CFGPARSE' in out, out)
+    check('restart with broken settings: refused, exit 1', rc == 1 and 'check has failed' in out and 'CFGREJECT' in out, out)
     time.sleep(4)
     check('restart refused: the gateway goes on', gw.p.poll() is None and gwrec(gw)['pid'] == gw.p.pid)
     gw.write_conf(good)

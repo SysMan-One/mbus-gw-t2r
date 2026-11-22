@@ -75,23 +75,52 @@ listen for TCP clients on every network interface, port 502, and forward them to
 |-----|-----------|---------------|----------------|
 | `device` | **yes** | The serial port file | e.g. `/dev/ttyUSB0` |
 | `chars` | **yes** | The line parameters: `speed, data bits, parity, stop bits` | speed 50..4000000; data bits 5..8; parity `N` (none), `E` (even), `O` (odd); stop bits 1..2 |
-| `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | any positive number |
+| `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | 1..3600000 |
 | `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request: an answer to a read carries nothing of its request, so a device which answers later than `iotmo` + `lategd` can give one client the data of another. Take `lategd` with a margin over how late your devices can be. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 2, but not less than 100; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
 | `rs485` | no | `1` --- ask the kernel to drive the RS-485 direction control (only for ports that support it) | `0` or `1` |
-| `flow` | no | The flow control of the line. `"NONE"` --- no flow control. `"RTS/CTS"` --- the hardware handshake: the gateway sends only while the device holds CTS on; it needs the RTS and CTS wires in the cable; not together with `rs485 = 1`. `"XON/XOFF"` --- the device stops and starts the gateway with the XOFF (0x13) and XON (0x11) characters; **only for a RAW listener**: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is refused (`LSNXONRTU`). Not case-sensitive; another value or a number (also `"DSR/DTR"`: Linux has no such flow control) rejects the record (`SERBADFLOW`). Default: `"NONE"` | `"NONE"`, `"RTS/CTS"`, `"XON/XOFF"` |
+| `flow` | no | The flow control of the line. `"NONE"` --- no flow control. `"RTS/CTS"` --- the hardware handshake: the gateway sends only while the device holds CTS on; it needs the RTS and CTS wires in the cable; not together with `rs485 = 1`. `"XON/XOFF"` --- the device stops and starts the gateway with the XOFF (0x13) and XON (0x11) characters; **only for a RAW listener**: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is an error. Not case-sensitive; another value or a number (also `"DSR/DTR"`: Linux has no such flow control) is an error. Default: `"NONE"` | `"NONE"`, `"RTS/CTS"`, `"XON/XOFF"` |
 | `ts_enabled` | no | `1` --- enable the built-in Time Stamp pseudo device (see section 6) | `0` or `1` |
-| `ts_unit` | no | The slave address the pseudo device answers on | 1..247, default 135 |
-| `ts_fncode` | no | The function code it answers to | default 4 |
-| `ts_base_reg0` | no | The first register number of the time stamp | default 135 |
+| `ts_unit` | no | The slave address the pseudo device answers on | 0..255, default 135 |
+| `ts_fncode` | no | The function code it answers to | 1..127, default 3 |
+| `ts_base_reg0` | no | The first register number of the time stamp | 0..65535, default 8135 |
 
-If a record is wrong, the gateway **skips it and says why** --- with the allowed range in the
-message, for example:
+The whole settings file is checked **before anything is applied**. The gateway finds the
+problems at once and prints each of them with the setting path, the file, the line and the column,
+for example:
 
 ```
-%T2R-E-SERRANGE, [serial #00:</dev/ttyUSB0>] --- speed (baud) 31 is out of range [50..4000000]
+%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>, settings.conf line 2 column 3
+%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP, settings.conf line 3 column 5
+%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56
+%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8, settings.conf line 6 column 27
+%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000, settings.conf line 6 column 52
+%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6, settings.conf line 7 column 3
+%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity 'X' is unknown, allowed: N, E, O, settings.conf line 7 column 27
+%T2R-E-CFGREJECT, Settings <settings.conf> are refused, see the CFG messages above --- nothing is applied
 ```
 
-The record number (`#00`) counts from zero, in the order the records appear in the file.
+If there is at least one problem, the **whole file is refused**: nothing is applied and the gateway
+does not start (`/check` exits with a failure; `restart gateway` of `mbus-ctl` is refused and the
+gateway goes on as it is). Fix every line shown and try again. A check which compares several settings (a `target` against `serials`, two RAW listeners on one line, XON/XOFF under MODBUS) is made when those settings themselves are right, so such a problem may show up only after the first ones are fixed.
+
+**This has changed in V.01-03.** Before it, a wrong record was skipped with a `%T2R-E-...` message
+and the gateway went on with the rest of the file. Now one wrong record refuses the whole file. So
+a file which worked before may be refused after the upgrade: check it with
+`mbusgw-t2r /settings=<file> /check` before you restart the gateway.
+
+In the setting path, `listeners.[0]` is the first record of the section (the records count from
+zero, in the order they appear in the file); `serials.[device="/dev/null"]` is the record with this
+device. What the check also catches:
+
+- a setting which the gateway does not know is an error --- a typo never passes. The names of the
+  settings are not case-sensitive;
+- two `serials` records with the same `device` are an error (`DUPKEY`), and so are two whose `device` differs by capital and small letters only (`CHECK`): a `target` could not tell them apart;
+- at most 128 `serials` records and 128 `listeners` records;
+- the `target` of a listener must be a `device` of `serials`. The sample file
+  `modbus-t2r_settings.conf` has its two listeners of `/dev/ttyS1` and `/dev/ttyS0` commented out for
+  this reason: add the `serials` records for them first, then remove the comment marks.
+
+The allowed values are in the tables of this chapter. The messages are explained in section 7.2.
 
 **USB adapters: unplugging is fine.** Since X.00-13ECO09 the gateway lives through a replug of a
 USB-to-serial adapter (or a hub reset):
@@ -120,11 +149,11 @@ name into `device` (and into `target` of the listener) instead:
 | Key | Required? | What it means | Allowed values |
 |-----|-----------|---------------|----------------|
 | `bind` | **yes** | Where to listen: `TCP:<IP address>:<port>` | port 1..65535; `0.0.0.0` = all interfaces; UDP is not supported |
-| `target` | **yes** | Which serial port to forward to --- must match a `device` from `serials` **exactly** | |
+| `target` | **yes** | Which serial port to forward to --- must match a `device` from `serials` (capital and small letters are not told apart); if there is none, the whole file is refused | |
 | `connlm` | no | How many TCP clients may be connected to this port **at the same time**; one more is disconnected at once (`CONNLIMIT`). Default: 32 | 1..512 |
 | `idletmo` | no | A client which sends nothing for this many **seconds** is disconnected (`IDLETMO`). Default: 60 | 1..86400 |
-| `mode` | no | What the listener does: `"MODBUS"` is the MODBUS TCP to RTU gateway, `"RAW"` is a transparent stream of octets (see 3.3). Capital or small letters --- it does not matter. Any other word is an error (`LSNBADMODE`). Default: `"MODBUS"` | `"MODBUS"`, `"RAW"` |
-| `takeover` | no | **Only for `RAW`.** `1`: a new client kicks the current client out (`RAWKICK`). `0`: a new client is rejected while another one is connected (`RAWBUSY`). In the `MODBUS` mode this key is an error (`LSNRAWOPT`). Default: 1 | 0..1 |
+| `mode` | no | What the listener does: `"MODBUS"` is the MODBUS TCP to RTU gateway, `"RAW"` is a transparent stream of octets (see 3.3). Capital or small letters --- it does not matter. Any other word is an error. Default: `"MODBUS"` | `"MODBUS"`, `"RAW"` |
+| `takeover` | no | **Only for `RAW`.** `1`: a new client kicks the current client out (`RAWKICK`). `0`: a new client is rejected while another one is connected (`RAWBUSY`). In the `MODBUS` mode this key is an error. Default: 1 | 0..1 |
 | `iotmo` | no | Reserved, not used yet | |
 
 In the `RAW` mode two defaults are different: `connlm` may only be 1, and `idletmo` is 86400 (not 60).
@@ -169,7 +198,7 @@ The rules of the RAW mode:
   one gets the line. The log says `RAWKICK`. With `takeover = 0` the old client stays and the
   new one is refused (`RAWBUSY`).
 - **The serial port is only for this listener.** No other listener, MODBUS or RAW, may use the
-  same `target` (`LSNRAWSHR`; the order of the records does not matter). MODBUS listeners may still share a port among themselves.
+  same `target` (an error; the order of the records does not matter). MODBUS listeners may still share a port among themselves.
 - **The speed and the parity are taken from the gateway.** They come from the `serials` record.
   If the program on the PC sets another speed on its virtual COM port, this is **not** passed to the line.
   Set the right `chars` in the `serials` record.
@@ -246,8 +275,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.2.2-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.2.2-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -307,9 +336,9 @@ connection. For a RAW port the columns are `To line` and `From line`.
 **restart gateway** step by step:
 
 1. The gateway checks the settings file in a separate process (`mbusgw-t2r /settings=<file> /check`).
-2. If the file has an error, nothing is restarted. You see the error line, for example
-   `%T2R-E-CFGPARSE, ... syntax error`, the gateway works on with the old settings. Fix the file and
-   try again.
+2. If the file has an error, nothing is restarted. You see the problems, for example
+   `%CFG-E-SYNTAX, ...` and then `%T2R-E-CFGREJECT, ... are refused` (section 7.2); the gateway works
+   on with the old settings. Fix the file and try again.
 3. If the file is good, the gateway disconnects the clients, closes the ports and starts itself
    again with the same command line. The PID stays the same: systemd and procd see nothing.
 4. `mbus-ctl` waits until the gateway answers again and prints `%T2R-S-CTLBACK`. It takes 3--15
@@ -376,6 +405,7 @@ dislikes.**
 | `%T2R-W-DEVABSENT, Device <...> is absent --- it will be opened every 1000 msec ...` | At the start the serial port could not be opened (the line above says why); its TCP port works and answers the exception 10 | plug in the adapter --- `DEVREADY` follows; or fix `device` in the settings |
 | The client gets the exception `0x0A` (10) | The serial port of this TCP port is absent or lost (see `DEVLOST`, `DEVABSENT`) | see `DEVLOST` above |
 | the same, `errno: 13` | Permission denied | run with `sudo` or add yourself to the `dialout` group |
+| `%T2R-E-CFGREJECT, Settings <...> are refused, ...` | The settings file has errors. Nothing is applied: the gateway does not start (`/check` fails; `restart gateway` is refused and the gateway goes on as it is) | read the `%CFG-E-...` lines above it: each names the setting, the file, the line and the column. Fix all of them, check with `mbusgw-t2r /settings=<file> /check` (see 7.2). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose `target` is not in `serials`, or a setting the gateway does not know |
 | the same, `errno: 16` | The port is busy: another program holds it | find it: `sudo fuser /dev/ttyUSB0`; stop it |
 | `%T2R-E-NOANSWER, [...] Did not get an answer in 1000 msec` | The request went out, nothing came back | 1) wrong slave address in the client's request; 2) wrong wiring (swap A/B of RS-485); 3) wrong speed/parity --- re-check `chars`; 4) the device is simply off |
 | `%T2R-E-CRC16ERR, [...] (received: X, calculated: Y)` | Octets arrive, but damaged | 1) `chars` does not match the device (most common!); 2) line noise --- check the grounding, the termination resistors, the cable length; 3) two masters on one line |
@@ -388,7 +418,6 @@ dislikes.**
 | `%T2R-W-EXCRPT, [...] Report exception 4 (SERVER_DEVICE_FAILURE) ...` | The gateway told the TCP client "the serial side failed" | look at the *previous* log line --- it names the real reason (NOANSWER, CRC16ERR, ...) |
 | `%T2R-W-CONNLIMIT, [...] --- the listener has reached its connection limit (N) --- the connection is rejected` | The port already has `connlm` clients connected | if they are all real clients, raise `connlm` of this listener; otherwise find who keeps the connections open: `ss -tn` |
 | `%T2R-W-IDLETMO, [...] No activity for the past N seconds (idletmo) --- close the connection` | A client has sent nothing for `idletmo` seconds | normal for a client which polls rarely --- it reconnects; to keep the connection, raise `idletmo` of this listener |
-| `%T2R-E-LSNRAWSHR, [listener #NN] --- target <...> is used by the listener on port N too, ...` | A RAW listener wants a serial port which another listener uses | give the RAW listener its own serial port, or make the other listener use another one; or make the RAW listener a MODBUS one |
 | `%T2R-W-RAWBUSY, [...] --- the raw listener is busy and <takeover> is off --- the connection is rejected` | A client is already connected to the RAW port and `takeover = 0` | normal. Disconnect the first client, or set `takeover = 1` |
 | `%T2R-E-TXDRAINTMO, [...] --- the request has not been transmitted in N msec` | The USB adapter took the request but did not send it out; the request gets exception 4 | the adapter or its USB link hangs: `dmesg \| tail`; replug the adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it: the next request tries again |
 | `TXDRAINTMO` on a port with `flow = "RTS/CTS"` | The device (or the cable) holds CTS off, so the gateway may not send | check that the cable has the RTS and CTS wires and that the device uses the RTS/CTS handshake; if it does not, set `flow = "NONE"`. On a RAW listener the data from the client just does not go out; if the client goes, its last data may be dropped by `RAWSTALL`. With a USB adapter a short MODBUS request goes into the buffer of the adapter, so you see `NOANSWER`, not `TXDRAINTMO` |
@@ -396,8 +425,6 @@ dislikes.**
 | `%T2R-E-SESSFAIL, [...] --- cannot start a session thread, pthread_create()->11` | Too many TCP clients at once: every client takes a thread, and systemd limits the service (`TasksMax`, 578 on a small board) | find who keeps so many connections open (`ss -tn`); if they are all real, raise the limit: `TasksMax=2048` in the `[Service]` section of the unit, then `systemctl daemon-reload` |
 | `%T2R-E-LSNRERR, Listener 0.0.0.0:502 --- bind() error, errno: 98` | errno 98 = the TCP port is already taken | another gateway instance is running, or another program owns the port: `sudo ss -tlnp \| grep 502` |
 | the same, `errno: 13` | Ports below 1024 need root | run with `sudo`, or use a port >= 1024 (e.g. 5502) |
-| `%T2R-E-SERRANGE, [serial #NN:...] --- ... out of range [a..b]` (or `LSNRANGE`) | A settings value is out of its allowed range | fix the value; the allowed range is right in the message |
-| `%T2R-E-NOSERIALS, No serials have been defined!` | Not a single `serials` record survived the validation | read the error lines above it --- each rejected record says why |
 | The client connects but every answer is an exception `0x04` | See EXCRPT above | the trouble is on the serial side; `/trace` and read backwards |
 | Everything looks fine, but the data is wrong/shifted | Byte order confusion on the client side | MODBUS registers are big-endian 16-bit words; check how your client assembles 32/64-bit values |
 
@@ -441,28 +468,12 @@ dislikes.**
 | `NOROOM` | E | An answer does not fit into the buffer --- an internal error, please report it |
 | `MBAPLEN` | E | The MBAP length field does not match the received data; the request is rejected |
 | `REQSHORT` | E | A request is too short to be forwarded to the serial line |
-| `TGTNDEF` | E | A listener names a target which is not in the serials section |
-| `CFGNOSECT` | E | The settings file has no serials or listeners section; the gateway stops |
-| `CFGTRUNC` | W | Too many records in a section; only the first ones are used |
-| `SERBADREC` | E | A serials record is broken or has no device; it is skipped |
-| `SERBADOPT` | E | A serials record has no chars, or it is too long; the record is skipped |
 | `SERNORS485` | W | rs485 = 1 is set, but this build has no RS485 support; the option is ignored |
-| `SERBADCHR` | E | The chars value cannot be read; write it like "9600, 8, N, 1" |
-| `SERRANGE` | E | The speed, data bits or stop bits are out of range; the allowed range is in the message |
-| `SERBADPAR` | E | The parity letter is unknown; use N, E or O |
-| `SERBADFLOW` | E | The `flow` value is unknown; use NONE, RTS/CTS or XON/XOFF (DSR/DTR is not supported by Linux) |
 | `DEVADDED` | I | A serials record is accepted; the line parameters are shown |
 | `TSENABLED` | I | The Time Stamp pseudo device is on for this port |
 | `TSDISABLED` | I | The Time Stamp pseudo device is off for this port (the default) |
-| `NOSERIALS` | E | Not a single serials record survived the validation; the gateway stops |
-| `LSNBADREC` | E | A listeners record is broken (no bind, no target, UDP); it is skipped |
-| `LSNBADBIND` | E | The bind value cannot be read; write it like "TCP:0.0.0.0:502" |
-| `LSNRANGE` | E | The TCP port number is out of range [1..65535] |
-| `LSNBADADDR` | E | The IP address in bind is not a valid IPv4 address |
-| `LSNNOTGT` | E | The target of a listener is not in the serials section; the record is skipped |
 | `LSNADDED` | I | A listeners record is accepted; the address, the port, the target, the limits and the mode are shown (the text ends with `, Mode: MODBUS`, `, Mode: RAW` or `, Mode: RAW (takeover)`) |
-| `NOLSNRS` | E | Not a single listeners record survived the validation; the gateway stops |
-| `CFGPARSE` | E | The settings file cannot be read or has a syntax error; the file name and the line are shown |
+| `CFGREJECT` | E | The settings file is refused: the problems are in the `%CFG-E-...` lines above it, nothing is applied and the gateway does not start (see 7.2) |
 | `SIGERR` | E | A signal handler cannot be set --- an internal error, please report it |
 | `CFGERR` | E | The configuration cannot be processed; the previous lines say why |
 | `CFGABORT` | F | The gateway stops because of the configuration errors above |
@@ -485,7 +496,6 @@ dislikes.**
 | `DEVNOTINI` | W | Closing a serial port which was never opened --- harmless |
 | `DEVBUSY` | E | The serial line cannot be taken for a request; the request gets exception 4 |
 | `CONNLIMIT` | W | A new TCP client is disconnected at once: the port already has `connlm` clients |
-| `LSNOPTRNG` | E | A listeners option (`connlm`, `idletmo`, `takeover`) is out of range (in the RAW mode `connlm` may only be 1); the record is skipped |
 | `TXDRAINTMO` | E | The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4 |
 | `ECHOMISM` | W | The answer to a write request is not its echo (another address or value); the request gets exception 4 |
 | `DEVLOST` | E | The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile |
@@ -496,10 +506,6 @@ dislikes.**
 | `RAWSTOP` | I | A RAW session has ended; shows how many octets went to the line and how many came from the line. Nothing to do --- the numbers help to see if the data flowed at all |
 | `RAWKICK` | W | A new client took the RAW port over (`takeover = 1`): the old connection is shut down. If this happens by itself again and again, two programs fight for one port --- stop one of them, or set `takeover = 0` |
 | `RAWBUSY` | W | A new client is refused: the RAW port is busy and `takeover = 0`. Wait until the first client leaves, or set `takeover = 1` |
-| `LSNBADMODE` | E | The `mode` value is unknown; the record is skipped. Write `"MODBUS"` or `"RAW"` |
-| `LSNRAWSHR` | E | The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own |
-| `LSNRAWOPT` | E | A listeners option is not allowed in this mode (`takeover` in the MODBUS mode); the record is skipped. Remove the option or set `mode = "RAW"` |
-| `LSNXONRTU` | E | A MODBUS listener wants a serial port with `flow = "XON/XOFF"`; the record is skipped. Use `"NONE"` or `"RTS/CTS"` for this port, or make the listener a RAW one |
 | `CTLREADY` | S | The control channel for `mbus-ctl` is open; the socket file is shown |
 | `CTLOFF` | I | The control channel is switched off by `/control=NONE`; `mbus-ctl` cannot reach this gateway |
 | `CTLBUSY` | W | Another running gateway already uses this socket file; this one works without the control channel. Give each gateway its own `/control=<file>` |
@@ -522,6 +528,29 @@ dislikes.**
 | `CTLCUT` | W | The answer did not fit into 64 KB (many hundreds of clients): the table is not full. Look at one listener's clients in its log |
 
 *(The `S/I/W/E` letter is a part of the printed line: `%T2R-E-CRC16ERR, ...`.)*
+
+### 7.2. The CFG messages (the check of the settings file)
+
+The settings file is read and checked by the library yaLIBCFG; its messages start with `%CFG-E-`
+and end with the file, the line and the column of the problem. After all of them the gateway prints
+`%T2R-E-CFGREJECT`. The ones you will meet:
+
+| Code | What it says | What to do |
+|------|--------------|------------|
+| `SYNTAX` | The file is not written in the right syntax | look at the line and the column shown (the real mistake is often just before it): a missing `;`, `=`, bracket or quote |
+| `OPENIN` | The file cannot be opened; `errno` says why (2 = no such file, 13 = no rights) | check the name in `/settings=` and the rights on the file |
+| `UNKNOWN` | A setting which the gateway does not know | a typo? Compare the name with sections 3.1 and 3.2 |
+| `REQUIRED` | A required setting is missing | add it (see the `Required` column of the tables in chapter 3) |
+| `VTYPE` | The value has a wrong type | write what the message expects: a text in quotes, a number without them, a keyword in quotes from the list |
+| `RANGE` | A number is out of its range; the allowed range is in the message | fix the value |
+| `LENGTH` | A text is too short or too long; the allowed length is in the message | fix the value |
+| `COUNT` | Too few or too many records in a section (1..128 are allowed) | add the missing records, or cut the section |
+| `BADKWD` | The value is not one of the allowed words; they are listed in the message | take one of them |
+| `DUPKEY` | Two records have the same key (for example the same `device` twice); the line of the first one is shown | remove one of them |
+| `DUPNAME` | A setting is written twice in one group (capital and small letters are not told apart), or a section twice | remove one of them |
+| `CHECK` | A rule of the gateway is broken; the message says which (the form of `chars` or `bind`, UDP, a `target` which is not in `serials`, a serial port of a RAW listener used by another listener, `XON/XOFF` under `MODBUS`, `RTS/CTS` with `rs485 = 1`, ...) | read the text of the message and fix the setting it names |
+
+The full list of the `CFG` messages is in the yaLIBCFG manual (Appendix A).
 
 ## 8. If nothing helps
 

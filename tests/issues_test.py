@@ -2,7 +2,7 @@
 #
 # Self-contained reproducers of the field reports and fixed bugs (pty pair + fake RTU slave + gateway + MBAP clients):
 #
-#   tests/issues_test.py [--gw ./build/mbusgw-t2r] icrnl|late|replug|rawreplug|gone|flow|all
+#   tests/issues_test.py [--gw ./build/mbusgw-t2r] icrnl|late|replug|rawreplug|gone|flow|settings|all
 #
 #   icrnl	- the gateway's tty is left with ICRNL (a fresh port), the answers carry 0x0D octets: no CRC16ERR expected
 #   late	- the slave answers a bit later than <iotmo>, two clients write and read back their own registers:
@@ -15,6 +15,8 @@
 #   flow	- V.01-01ECO04: <flow> NONE, RTS/CTS, XON/XOFF (RAW) - the termios of the gateway's tty (a pty has no CTS
 #		  line: the handshake itself is not tested); a RAW client closed (a FIN) while an XOFF stops the pty
 #		  frees it (RAWSTALL; a real UART takes a page into its driver first) and the next session goes out; DSR/DTR, an unknown value, a number, RTS/CTS + rs485 and XON/XOFF under MODBUS are refused
+#   settings	- V.01-03: a file with several mistakes - all are told with their lines (yaLIBCFG schema, CFG-E-...)
+#		  and the file is refused (CFGREJECT); names regardless of case, comments
 #   replug	- the device behind a symlink disappears (the pty master is closed) and comes back (a new pty): the busy
 #		  and the idle cases, and the device absent at the start; exception 0x0A while it is away, normal answers after
 #
@@ -28,6 +30,7 @@
 #	22-NOV-2026	CLD	V.01-02ECO01: flow - the RAW client closes by itself (a FIN), no takeover before RAWSTALL.
 #	22-NOV-2026	CLD	V.01-02ECO02: late - lategd = 100 msec by default (was the gateway default 50 - a 10 msec margin over the
 #				lateness of the slave; a slow CI runner gave foreign_r 1, TheWorks 47-30).
+#	22-NOV-2026	CLD	V.01-03: flow - the refused settings are told by the yaLIBCFG schema (CFG-E-..., CFGREJECT).
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -36,7 +39,7 @@ ap.add_argument('--gw', default='./build/mbusgw-t2r')
 ap.add_argument('--port', type=int, default=5602)
 ap.add_argument('--secs', type=int, default=30)
 ap.add_argument('--lategd', type=int, default=100, help='late: <lategd> of the serial, msec (default 100: the 40 msec lateness of the slave + 60 msec)')
-ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'gone', 'flow', 'all'])
+ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'gone', 'flow', 'settings', 'all'])
 a = ap.parse_args()
 GW = os.path.abspath(a.gw)
 TMP = tempfile.mkdtemp(prefix='t2r_issues_')
@@ -533,11 +536,11 @@ def t_flow():
         finally:
             gw.stop(); line.close()
 
-    for name, ser, lsn, code in (('dsr', 'flow = "DSR/DTR";', '', 'SERBADFLOW'),
-                                 ('bogus', 'flow = "HW";', '', 'SERBADFLOW'),
-                                 ('number', 'flow = 1;', '', 'SERBADFLOW'),
-                                 ('rs485', 'flow = "RTS/CTS"; rs485 = 1;', '', 'SERBADOPT'),
-                                 ('xonmodbus', 'flow = "XON/XOFF";', '', 'LSNXONRTU')):
+    for name, ser, lsn, code in (('dsr', 'flow = "DSR/DTR";', '', 'CFG-E-BADKWD'),		# V.01-03: yaLIBCFG, the schema
+                                 ('bogus', 'flow = "HW";', '', 'CFG-E-BADKWD'),
+                                 ('number', 'flow = 1;', '', 'CFG-E-VTYPE'),
+                                 ('rs485', 'flow = "RTS/CTS"; rs485 = 1;', '', 'RS-485 mode drives RTS'),
+                                 ('xonmodbus', 'flow = "XON/XOFF";', '', 'a MODBUS listener needs NONE or RTS/CTS')):
         conf = os.path.join(TMP, f'flow_{name}.conf')
         open(conf, 'w').write(f'''listeners = ( {{ bind = "TCP:127.0.0.1:{a.port}"; {lsn} target = "/dev/null"; }} );
 serials = ( {{ device = "/dev/null"; chars = "9600, 8, N, 1"; {ser} }} );
@@ -547,11 +550,52 @@ serials = ( {{ device = "/dev/null"; chars = "9600, 8, N, 1"; {ser} }} );
         if name == 'rs485' and 'SERNORS485' in out:	# A build without HAVE_TIOCRS485: rs485 is ignored, RTS/CTS is fine
             res &= report('flow/refused-rs485', p.returncode == 0, f'no RS485 support in this build, exit {p.returncode}')
             continue
-        res &= report(f'flow/refused-{name}', p.returncode != 0 and code in out, f'exit {p.returncode}, {code} {code in out}')
+        res &= report(f'flow/refused-{name}', p.returncode != 0 and code in out and 'CFGREJECT' in out, f'exit {p.returncode}, {code} {code in out}')
     return res
 
 
-tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug, 'gone': t_gone, 'flow': t_flow}
+def t_settings():
+    """V.01-03: the settings are checked by the yaLIBCFG schema - every problem at once, with the line, and the file is refused."""
+    bad = '''listeners = (
+  { bind = "TCP:127.0.0.1:5999"; target = "/dev/ttyQ9"; },                  # line 2: an undefined target
+  { bind = "UDP:127.0.0.1:5998"; target = "/dev/null"; conlm = 4; }       # line 3: UDP, a typo (conlm)
+);
+serials = (
+  { device = "/dev/null"; chars = "9600, 9, N, 1"; iotmo = 0; },            # line 6: data bits, iotmo
+  { device = "/dev/null"; chars = "9600, 8, X, 1"; }                        # line 7: a duplicate device, parity
+);
+'''
+    good = '''# comments stay comments
+Listeners = ( { BIND = "TCP:127.0.0.1:5997"; Target = "/dev/null"; Mode = "raw"; } );
+SERIALS = ( { Device = "/dev/null"; Chars = "115200,8,e,1"; Flow = "rts/cts"; lategd = 0; } );
+'''
+    res = True
+    case = '''listeners = ( { bind = "TCP:127.0.0.1:5996"; target = "/DEV/null"; } );
+serials = ( { device = "/dev/null"; chars = "9600,8,N,1"; }, { device = "/DEV/NULL"; chars = "9600,8,N,1"; } );
+'''
+    for name, text in (('bad', bad), ('good', good), ('case', case)):
+        conf = os.path.join(TMP, f'settings_{name}.conf')
+        open(conf, 'w').write(text)
+        p = subprocess.run([GW, '/settings=' + conf, '/check', '/control=NONE'], capture_output=True, text=True, timeout=10)
+        out = p.stdout + p.stderr
+        if name == 'case':					# Two devices told apart by the case only: a target could not choose
+            res &= report('settings/case', p.returncode != 0 and 'differ by the case only' in out and 'CFGREJECT' in out,
+                          f'exit {p.returncode}, refused {"differ by the case only" in out}')
+            continue
+        if name == 'good':
+            res &= report('settings/good', p.returncode == 0 and 'CHECKOK' in out, f'exit {p.returncode}, CHECKOK {"CHECKOK" in out}')
+            continue
+        want = [('target', 'is not a <device> of <serials>', 'line 2'), ('udp', 'UDP is not implemented', 'line 3'),
+                ('typo', 'CFG-E-UNKNOWN', 'conlm'), ('databits', 'data bits 9 is out of range', 'line 6'),
+                ('iotmo', 'CFG-E-RANGE', 'iotmo'), ('dupdevice', 'CFG-E-DUPKEY', 'line 7'), ('parity', "parity 'X' is unknown", 'line 7')]
+        lines = out.splitlines()
+        miss = [w for w, a, b in want if not any(a in l and b in l for l in lines)]
+        res &= report('settings/bad', p.returncode != 0 and not miss and 'CFGREJECT' in out and 'DEVADDED' not in out,
+                      f'exit {p.returncode}, missing {miss or "none"}, CFGREJECT {"CFGREJECT" in out}')
+    return res
+
+
+tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug, 'gone': t_gone, 'flow': t_flow, 'settings': t_settings}
 rc = all([tests[t]() for t in (tests if a.test == 'all' else [a.test])])
 print(f'logs in {TMP}')
 sys.exit(0 if rc else 1)

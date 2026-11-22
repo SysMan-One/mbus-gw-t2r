@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-CTL"
-#define	__IDENT__	"V.01-02"
-#define	__REV__		"01.02.00"
+#define	__IDENT__	"V.01-03"
+#define	__REV__		"01.03.00"
 
 /*
 **++
@@ -55,6 +55,9 @@
 **	19-NOV-2026	RRL	Reduce usage of  strlen() and ASCIZ.
 **
 **	22-NOV-2026	CLD	V.01-02 / REV: 01.02.00 - RRL: the product version V.01-02 (package 1.2.0), no code
+**				change in this module.
+**
+**	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - RRL: the product version V.01-03 (package 1.3.0), no code
 **				change in this module.
 **--
 */

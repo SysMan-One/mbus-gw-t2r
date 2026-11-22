@@ -77,6 +77,12 @@
 **
 **	22-NOV-2026	CLD	V.01-02ECO02 / REV: 01.02.02 - LATEPRETX is appended (a late answer to an earlier request which
 **				comes before the next request is sent is dropped).
+**
+**	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - CFGREJECT is appended: the settings are checked by the schema of
+**				yaLIBCFG (CFG-E-... with the file, line and column). Not signalled any more, kept for the
+**				numbers: CFGPARSE, CFGNOSECT, CFGTRUNC, SERBADREC, SERBADOPT, SERBADCHR, SERRANGE,
+**				SERBADPAR, SERBADFLOW, NOSERIALS, LSNBADREC, LSNBADBIND, LSNRANGE, LSNBADADDR, LSNNOTGT,
+**				NOLSNRS, LSNOPTRNG, LSNBADMODE, LSNRAWSHR, LSNRAWOPT, LSNXONRTU.
 **--
 */
 
@@ -220,6 +226,7 @@ $DEF_MSG(T2R, ERROR,	LSNXONRTU,		"[listener #!2ZL] --- target <!AZ> has <flow> X
 $DEF_MSG(T2R, WARN,	RAWSTALL,		"[#!SL] <!AC> has sent nothing of the last data for !UL sec after the client has gone (CTS off? an XOFF?) --- !UL octets are dropped") \
 $DEF_MSG(T2R, WARN,	FLOWNOTSET,		"<!AC> the driver has not taken <flow> !AZ --- the line works without this flow control") \
 $DEF_MSG(T2R, WARN,	LATEPRETX,		"[#!SL:<!AC>] !UL octets have arrived just before the request has been sent (a late answer to an earlier request) --- dropped") \
+$DEF_MSG(T2R, ERROR,	CFGREJECT,		"Settings <!AZ> are refused, see the CFG messages above --- nothing is applied") \
 
 
 

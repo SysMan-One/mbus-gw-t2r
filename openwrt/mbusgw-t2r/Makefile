@@ -6,7 +6,7 @@
 #		the feed builds exactly its own commit. The version follows __REV__ of
 #		src/t2r_main.c, as the .deb one does (REV 00.13.06 -> 0.13.6).
 #
-#		libconfig and StarLet are linked statically (../libconfig-static, ../starlet): the
+#		yaLIBCFG and StarLet are linked statically (../yalibcfg, ../starlet): the
 #		package has no dependencies and is installed with no network.
 #
 #		The service is installed disabled, as in the .deb: the settings file has to be tuned
@@ -20,6 +20,7 @@
 #	MODIFICATION HISTORY:
 #
 #	06-NOV-2026	CLD	V.01-01: the package carries the control utility /usr/sbin/mbus-ctl too.
+#	22-NOV-2026	CLD	V.01-03: yaLIBCFG (../yalibcfg) instead of libconfig (../libconfig-static is gone).
 #--
 
 include $(TOPDIR)/rules.mk
@@ -34,7 +35,7 @@ PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Ruslan R. Laishev <zator@yandex.ru>
 
-PKG_BUILD_DEPENDS:=starlet libconfig-static
+PKG_BUILD_DEPENDS:=starlet yalibcfg
 PKG_INSTALL:=1
 
 include $(INCLUDE_DIR)/package.mk

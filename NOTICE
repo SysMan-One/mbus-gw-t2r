@@ -3,8 +3,5 @@ Copyright 2025-2026 StarLet Squad and Ruslan R. Laishev
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-This product includes libconfig (https://hyperrealm.github.io/libconfig/),
-Copyright (C) 2005-2018 Mark A Lindner, licensed under the GNU Lesser General
-Public License, version 2.1. It is linked statically; the complete source code
-of this product is available, so the product can be relinked with a modified
-libconfig.
+It is linked statically with the StarLet utility routines and yaLIBCFG of the same
+authors, both licensed under the Apache License, Version 2.0.

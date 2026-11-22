@@ -11,22 +11,31 @@
 #
 #	14-OCT-2026	RRL	The StarLet package (UTILITY$ROUTINES) is built from its sources and installed
 #				before the gateway; the gateway is built out of the source tree.
+#
+#	22-NOV-2026	CLD	V.01-03: yaLIBCFG instead of libconfig, built from its release tag after StarLet.
 #--
 
 image: gcc
 variables:
   STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
+  YALIBCFG_REPO: "https://github.com/SysMan-One/yaLIBCFG.git"
+  YALIBCFG_TAG: "X.01-01"
 
 before_script:
   - echo "Install prerequisites ..."
   - apt-get update --yes
-  - apt-get install --yes cmake pkg-config libconfig-dev
+  - apt-get install --yes cmake
                   # The StarLet package: libstarlet + headers + find_package(StarLet), into /usr/local
   - echo "Build and install StarLet ..."
   - git clone --depth 1 "$STARLET_REPO" /tmp/starlet
   - cmake -S /tmp/starlet -B /tmp/starlet/build -DCMAKE_BUILD_TYPE=Release
   - cmake --build /tmp/starlet/build -j "$(nproc)"
   - cmake --install /tmp/starlet/build
+  - echo "Build and install yaLIBCFG ..."
+  - git clone --depth 1 --branch "$YALIBCFG_TAG" "$YALIBCFG_REPO" /tmp/yalibcfg
+  - cmake -S /tmp/yalibcfg -B /tmp/yalibcfg/build -DCMAKE_BUILD_TYPE=Release -DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
+  - cmake --build /tmp/yalibcfg/build -j "$(nproc)"
+  - cmake --install /tmp/yalibcfg/build
 
 stages:           # List of stages for jobs, and their order of execution
   - build
