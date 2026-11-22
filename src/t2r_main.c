@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-02ECO01"
-#define	__REV__		"01.02.01"
+#define	__IDENT__	"V.01-02ECO02"
+#define	__REV__		"01.02.02"
 
 /*
 **++
@@ -243,6 +243,10 @@
 **	22-NOV-2026	CLD	V.01-02ECO01 / REV: 01.02.01 (package version 1.2.1) - The fix of T2R-TTY: a RAW
 **				client closed while its data waited for a stopped line is seen (RAWSTALL). No change
 **				in this module.
+**
+**	22-NOV-2026	CLD	V.01-02ECO02 / REV: 01.02.02 (package version 1.2.2) - <lategd> is <iotmo> / 2 by default,
+**				not less than T2R$K_LATEGD_FLOOR (was <iotmo> / 4: a device late by more than a quarter of
+**				<iotmo> gave its answer to the next read of another client, TheWorks 47-30).
 **--
 */
 
@@ -422,7 +426,7 @@ static int s_settings_find_n_get_serial (
  *	parity, stopbits", range checked); optional <rs485>, <flow> (NONE - the default, XON/XOFF,
  *	RTS/CTS; RTS/CTS is refused together with <rs485> = 1), <iotmo> (the answer timeout, msec,
  *	a non-positive value is ignored), <lategd> (the guard window after a failed exchange, msec,
- *	0..T2R$K_LATEGD_MAX, default <iotmo> / 4), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>.
+ *	0..T2R$K_LATEGD_MAX, default <iotmo> / 2, not less than T2R$K_LATEGD_FLOOR), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>.
  *	Compute the octet time and t3.5, init the device lock, fill the global table of serial
  *	devices (at most T2R$K_MAX_SERIALS records). An ill-formed record is rejected with a
  *	diagnostic, processing is continued from the next one.
@@ -601,7 +605,12 @@ char	l_chars[64];
 		if ( config_setting_lookup_int(l_args, "iotmo", &l_int) && (0 < l_int) )
 			l_serial->anstmo_msec = l_int;
 
-		l_serial->lategd_msec = l_serial->anstmo_msec / 4;		/* The guard window after a failed exchange */
+		l_serial->lategd_msec = l_serial->anstmo_msec / 2;		/* The guard window after a failed exchange */
+
+		if ( l_serial->lategd_msec < T2R$K_LATEGD_FLOOR )
+			l_serial->lategd_msec = T2R$K_LATEGD_FLOOR;
+		else if ( l_serial->lategd_msec > T2R$K_LATEGD_MAX )		/* A long <iotmo>: as an explicit one could be */
+			l_serial->lategd_msec = T2R$K_LATEGD_MAX;
 
 		if ( config_setting_lookup_int(l_args, "lategd", &l_int) )
 			{

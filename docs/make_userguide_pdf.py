@@ -64,6 +64,9 @@
 #
 #	22-NOV-2026	CLD	V.01-02ECO01: TXDRAINTMO on an RTS/CTS port: a USB adapter gives NOANSWER; the package names
 #				in the examples are 1.2.1.
+#
+#	22-NOV-2026	CLD	V.01-02ECO02: lategd is iotmo / 2 (at least 100) by default, the risk of a late answer to a read;
+#				the code LATEPRETX; the package names in the examples are 1.2.2.
 #--
 import sys
 
@@ -551,7 +554,9 @@ def s_pack_en ():
 			('lategd', 'no', 'After a failed request (no answer, a broken answer) listen to the line for this many '
 				'milliseconds more and throw away what comes (LATEANS): a late answer must not go to the next '
 				'request. Costs time only after a failure: a request to a dead device takes iotmo + lategd. '
-				'0..60000, default iotmo / 4; 0 --- only the 3.5 character pause, as before X.00-13ECO08.'),
+				'0..60000, default iotmo / 2, but not less than 100; 0 --- only the 3.5 character pause, as before X.00-13ECO08. '
+				'An answer to a read carries nothing of its request: a device later than iotmo + lategd can give one client '
+				'the data of another - take lategd with a margin.'),
 			('rs485', 'no', '1 --- ask the kernel to drive the RS-485 direction control '
 				'(only for the ports which support it). Default 0.'),
 			('flow', 'no', 'The flow control of the line. NONE --- none (the default). RTS/CTS --- the hardware '
@@ -685,8 +690,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.2.2-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.2-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -947,6 +952,7 @@ def s_pack_en ():
 			('TXDRAINTMO', 'E', 'The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4.'),
 			('ECHOMISM', 'W', 'The answer to a write request is not its echo (another address or value); the request gets exception 4.'),
 			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
+			('LATEPRETX', 'W', 'Something came from the line just before a request was sent --- a late answer to an earlier request; it is dropped.'),
 			('DEVLOST', 'E', 'The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile.'),
 			('DEVABSENT', 'W', 'The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second.'),
 			('CTLREADY', 'S', 'The control channel for mbus-ctl is open; the socket file is shown.'),
@@ -1116,7 +1122,9 @@ def s_pack_ru ():
 			('lategd', 'нет', 'После неудачного запроса (нет ответа, битый ответ) ещё столько миллисекунд слушать '
 				'линию и выбрасывать всё, что пришло (LATEANS): опоздавший ответ не должен уйти следующему запросу. '
 				'Время тратится только после сбоя: запрос к неработающему устройству занимает iotmo + lategd. '
-				'0..60000, по умолчанию iotmo / 4; 0 — только пауза в 3,5 символа, как до X.00-13ECO08.'),
+				'0..60000, по умолчанию iotmo / 2, но не меньше 100; 0 — только пауза в 3,5 символа, как до X.00-13ECO08. '
+				'Ответ на чтение не привязан к запросу: устройство, ответившее позже iotmo + lategd, может отдать одному клиенту '
+				'данные другого — берите lategd с запасом.'),
 			('rs485', 'нет', '1 — просить ядро управлять направлением RS-485 (только для портов, '
 				'которые это умеют). По умолчанию 0.'),
 			('flow', 'нет', 'Управление потоком на линии. NONE — без него (по умолчанию). RTS/CTS — аппаратное: '
@@ -1249,8 +1257,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.2.2-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.2.2-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1502,6 +1510,7 @@ def s_pack_ru ():
 			('TXDRAINTMO', 'E', 'Адаптер не передал запрос в линию вовремя; запрос сброшен и получает исключение 4.'),
 			('ECHOMISM', 'W', 'Ответ на запрос записи — не его эхо (другой адрес или значение); запрос получает исключение 4.'),
 			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),
+			('LATEPRETX', 'W', 'Перед отправкой запроса из линии что-то пришло — опоздавший ответ на прежний запрос; он выброшен.'),
 			('DEVLOST', 'E', 'Последовательный порт пропал (выдернут USB-адаптер); он закрыт и открывается снова раз в секунду, запросы пока получают исключение 10.'),
 			('DEVABSENT', 'W', 'При старте последовательный порт не открылся; TCP-порт всё равно работает, порт открывается раз в секунду.'),
 			('CTLREADY', 'S', 'Канал управления для mbus-ctl открыт; показан файл-сокет.'),

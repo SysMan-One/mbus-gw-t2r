@@ -76,7 +76,7 @@ listen for TCP clients on every network interface, port 502, and forward them to
 | `device` | **yes** | The serial port file | e.g. `/dev/ttyUSB0` |
 | `chars` | **yes** | The line parameters: `speed, data bits, parity, stop bits` | speed 50..4000000; data bits 5..8; parity `N` (none), `E` (even), `O` (odd); stop bits 1..2 |
 | `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | any positive number |
-| `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 4; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
+| `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request: an answer to a read carries nothing of its request, so a device which answers later than `iotmo` + `lategd` can give one client the data of another. Take `lategd` with a margin over how late your devices can be. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 2, but not less than 100; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
 | `rs485` | no | `1` --- ask the kernel to drive the RS-485 direction control (only for ports that support it) | `0` or `1` |
 | `flow` | no | The flow control of the line. `"NONE"` --- no flow control. `"RTS/CTS"` --- the hardware handshake: the gateway sends only while the device holds CTS on; it needs the RTS and CTS wires in the cable; not together with `rs485 = 1`. `"XON/XOFF"` --- the device stops and starts the gateway with the XOFF (0x13) and XON (0x11) characters; **only for a RAW listener**: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is refused (`LSNXONRTU`). Not case-sensitive; another value or a number (also `"DSR/DTR"`: Linux has no such flow control) rejects the record (`SERBADFLOW`). Default: `"NONE"` | `"NONE"`, `"RTS/CTS"`, `"XON/XOFF"` |
 | `ts_enabled` | no | `1` --- enable the built-in Time Stamp pseudo device (see section 6) | `0` or `1` |
@@ -246,8 +246,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.2.2-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.2.2-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -491,6 +491,7 @@ dislikes.**
 | `DEVLOST` | E | The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile |
 | `DEVABSENT` | W | The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second |
 | `LATEANS` | W | After a failed request something came from the line within `lategd` --- a late answer; it is dropped |
+| `LATEPRETX` | W | Something came from the line just before a request was sent --- a late answer to an earlier request; it is dropped |
 | `RAWSTART` | I | A RAW session has started: the client address and the serial port are shown. Nothing to do |
 | `RAWSTOP` | I | A RAW session has ended; shows how many octets went to the line and how many came from the line. Nothing to do --- the numbers help to see if the data flowed at all |
 | `RAWKICK` | W | A new client took the RAW port over (`takeover = 1`): the old connection is shut down. If this happens by itself again and again, two programs fight for one port --- stop one of them, or set `takeover = 0` |

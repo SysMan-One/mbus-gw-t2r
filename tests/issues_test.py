@@ -26,6 +26,8 @@
 #	17-NOV-2026	CLD	V.01-01ECO01: gone - a client gone while waiting for a busy line, half-close, idletmo.
 #	22-NOV-2026	CLD	V.01-01ECO04: flow - the <flow> key of a serial.
 #	22-NOV-2026	CLD	V.01-02ECO01: flow - the RAW client closes by itself (a FIN), no takeover before RAWSTALL.
+#	22-NOV-2026	CLD	V.01-02ECO02: late - lategd = 100 msec by default (was the gateway default 50 - a 10 msec margin over the
+#				lateness of the slave; a slow CI runner gave foreign_r 1, TheWorks 47-30).
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -33,7 +35,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--gw', default='./build/mbusgw-t2r')
 ap.add_argument('--port', type=int, default=5602)
 ap.add_argument('--secs', type=int, default=30)
-ap.add_argument('--lategd', type=int, default=None, help='late: <lategd> of the serial, the gateway default if omitted')
+ap.add_argument('--lategd', type=int, default=100, help='late: <lategd> of the serial, msec (default 100: the 40 msec lateness of the slave + 60 msec)')
 ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'gone', 'flow', 'all'])
 a = ap.parse_args()
 GW = os.path.abspath(a.gw)
@@ -206,7 +208,11 @@ def t_icrnl():
 def t_late():
     line = Line()
     Slave(line, delay=lambda: random.uniform(0.180, 0.240))		# iotmo 200: some answers are late by up to 40 msec
-    gw = Gateway(line.name, a.port + 1, iotmo=200, extra='' if a.lategd is None else f'lategd = {a.lategd};')
+    # The guard window must cover the lateness with a margin: an answer to a read carries nothing of its request,
+    # a late one after <lategd> is taken by the next read (foreign_r). The old gateway default (iotmo / 4 = 50) left
+    # 10 msec - a shared CI runner (presumably holding the slave thread longer) failed once (V.01-02ECO01, arm64);
+    # since V.01-02ECO02 the default is iotmo / 2 (100 here), it is given explicitly to keep the test independent of it.
+    gw = Gateway(line.name, a.port + 1, iotmo=200, extra=f'lategd = {a.lategd};')
     stats = {'ok': 0, 'exc': 0, 'foreign_w': 0, 'foreign_r': 0}
     lk = threading.Lock()
 

@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-02ECO01"
-#define	__REV__		"01.02.01"
+#define	__IDENT__	"V.01-02ECO02"
+#define	__REV__		"01.02.02"
 
 /*
 **++
@@ -152,6 +152,12 @@
 **				off, XOFF) was held up to <idletmo> (found on an FTDI FT232R with the peer off).
 **				A half-closed RAW client loses the answers of the line from its FIN on (RAW has no
 **				half-close: recv() == 0 has always ended the session).
+**
+**	22-NOV-2026	CLD	V.01-02ECO02 / REV: 01.02.02 - A late answer to an earlier request is not taken for the
+**				answer to the next one when it comes before the next request is sent: s_tty_rtu_tx() drops
+**				what has come in the pre-delay, after the input flush (LATEPRETX). An answer to a read carries
+**				nothing of its request (TheWorks 47-30, a CI run gave a client the registers of another one);
+**				the main guard is <lategd>, iotmo / 2 by default now (T2R-MAIN).
 **--
 */
 #ifndef	_GNU_SOURCE								/* POLLRDHUP; the musl build gives -D_GNU_SOURCE */
@@ -484,7 +490,8 @@ struct timespec	l_now_ts, l_end_ts, l_deadline_ts, l_tmo_ts, l_step_ts = {.tv_ns
  *	- an empty PDU is skipped (TXNODATA is signalled, success is returned)
  *	- compute CRC16 (the low octet goes first on the wire)
  *	- flush a stale input (tcflush(TCIFLUSH))
- *	- wait the inter-PDU interval (t3.5), writev() PDU + CRC16, s_tty_tx_drain()
+ *	- wait the inter-PDU interval (t3.5), drop an input which has come meanwhile (LATEPRETX)
+ *	- writev() PDU + CRC16, s_tty_tx_drain()
  *	- wait the inter-PDU interval (t3.5) again
  *
  *   INPUTS:
@@ -503,7 +510,7 @@ static int	s_tty_rtu_tx (
 		T2R$_DESC	*a_req_pdu
 		)
 {
-int	l_rc, l_len, l_errno;
+int	l_rc, l_len, l_errno, l_inq;
 uint16_t l_crc;
 uint8_t	l_crcbuf[2];
 enum {	IOV$K_PDU, IOV$K_CRC, IOV$K_MAX};
@@ -545,6 +552,18 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 											/* Predelay ... */
 	for ( l_inter_pdu_ts = a_serial->inter_pdu_ts; nanosleep(&l_inter_pdu_ts,  &l_inter_pdu_ts); );
 
+
+	/*
+	 * The input has been flushed before the pre-delay, nothing has been sent yet: what has come meanwhile
+	 * is a late answer to an earlier request - it must not be taken for the answer to this one. (Not
+	 * after the TX: a pseudo terminal has no air time, a fake device there answers before the computed
+	 * end of the request.)
+	 */
+	if ( !ioctl(a_serial->fd, FIONREAD, &l_inq) && (0 < l_inq) )
+		{
+		tcflush(a_serial->fd, TCIFLUSH);
+		$PUTMSG_FAO(T2R$__LATEPRETX, a_serial->fd, &a_serial->devname, l_inq);
+		}
 
 	clock_gettime(CLOCK_MONOTONIC, &l_start_ts);					/* The air time is counted from here */
 

@@ -64,6 +64,9 @@
 **	22-NOV-2026	CLD	V.01-01ECO04 / REV: 01.01.04 - T2R$K_FLOW_*: the values of T2R$_SERIAL.flow (the
 **				<flow> key of a serials record, was parsed nowhere); T2R$K_RAW_STALL_SEC, T2R$K_RAW_STALL_STEP (RAWSTALL).
 **
+**	22-NOV-2026	CLD	V.01-02ECO02 / REV: 01.02.02 - T2R$K_LATEGD_FLOOR: <lategd> is <iotmo> / 2 by default, not
+**				less than this (a late answer to a read is not given to the next read, TheWorks 47-30).
+**
 **--
 */
 
@@ -121,7 +124,8 @@ enum {
 #define		T2R$K_REOPEN_MSEC	1000				/* An absent or lost device is reopened this often	*/
 #define		T2R$K_CHECK_MSEC	1000				/* The idle lines are checked for a hangup this often	*/
 #define		T2R$K_LOCK_SLICE_MSEC	500				/* A waiter of the line checks its client this often	*/
-#define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 4	*/
+#define		T2R$K_LATEGD_MAX	60000				/* <lategd>, msec; the default is <iotmo> / 2	*/
+#define		T2R$K_LATEGD_FLOOR	100				/* ... but not less than this, msec		*/
 #define		T2R$K_USBGAP_MSEC	20				/* A gap inside of an answer from an USB adapter: 16 msec
 									   of the FTDI latency_timer plus a margin */
 
