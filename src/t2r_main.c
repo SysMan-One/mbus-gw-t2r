@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-02ECO01"
-#define	__REV__		"01.02.01"
+#define	__IDENT__	"V.01-03"
+#define	__REV__		"01.03.00"
 
 /*
 **++
@@ -243,6 +243,19 @@
 **	22-NOV-2026	CLD	V.01-02ECO01 / REV: 01.02.01 (package version 1.2.1) - The fix of T2R-TTY: a RAW
 **				client closed while its data waited for a stopped line is seen (RAWSTALL). No change
 **				in this module.
+**
+**	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 (package version 1.3.0) - The settings file is read by yaLIBCFG
+**				(was libconfig) and checked by a schema (s_cfg_settings[]): the types, ranges and keywords,
+**				the settings nobody knows (a typo), a duplicate <device>, and by the check routines <chars>,
+**				<bind>, an undefined <target>, RTS/CTS with <rs485>, the RAW rules, XON/XOFF under MODBUS.
+**				Every problem is told at once with its file, line and column (CFG-E-...), a single one
+**				refuses the whole file (CFGREJECT) - an ill-formed record was skipped and the gateway went
+**				on with the rest. A check routine runs when the settings it reads are right, so a cross
+**				problem may show only after the first ones are fixed. New limits: a non-positive <iotmo>
+**				is an error (was ignored), <rs485>/<ts_enabled>/<takeover> 0..1 (any non-zero enabled),
+**				<ts_unit> 0..255, <ts_fncode> 1..127, <ts_base_reg0> 0..65535, more than 128 serials or
+**				listeners (was CFGTRUNC), two devices told apart by the case only. RRL: the product
+**				version V.01-03; T2R-NET, T2R-TTY, T2R-CTL and MBUS-CTL carry the same ident.
 **--
 */
 
@@ -254,7 +267,7 @@
 #include	<string.h>
 #include	<errno.h>
 #include	<unistd.h>
-#include	<libconfig.h>
+#include	<stdarg.h>
 
 
 #define		__FAC__	"T2R"
@@ -264,6 +277,7 @@
 #include	"t2r_defs.h"
 #include	"t2r_msgs.h"
 #include	"t2r_modbus.h"
+#include	"yalibcfg.h"							/* After __FAC__: it brings utility_routines.h */
 
 #ifndef	__ARCH__NAME__
 #define	__ARCH__NAME__	"VAX"
@@ -333,13 +347,6 @@ int		g_listeners_nr;						/* Count of records in the table */
 
 
 
-config_t	g_cfg;							/* Lib Config API context */
-
-static KWDENT	s_mode_tbl[] =						/* <mode> of a listener, case-insensitive */
-{
-	{ {$ASCINI("MODBUS")},	{.val = T2R$K_MODE_MODBUS} },
-	{ {$ASCINI("RAW")},	{.val = T2R$K_MODE_RAW} }
-};
 
 static KWDENT	s_flow_tbl[] =						/* <flow> of a serial, case-insensitive; indexed by T2R$K_FLOW_* */
 {
@@ -418,83 +425,564 @@ static int s_settings_find_n_get_serial (
 
 
 /*
- *  DESCRIPTION: Process the <serials> section: mandatory <device>, <chars> ("baud, databits,
- *	parity, stopbits", range checked); optional <rs485>, <flow> (NONE - the default, XON/XOFF,
- *	RTS/CTS; RTS/CTS is refused together with <rs485> = 1), <iotmo> (the answer timeout, msec,
- *	a non-positive value is ignored), <lategd> (the guard window after a failed exchange, msec,
- *	0..T2R$K_LATEGD_MAX, default <iotmo> / 4), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>.
- *	Compute the octet time and t3.5, init the device lock, fill the global table of serial
- *	devices (at most T2R$K_MAX_SERIALS records). An ill-formed record is rejected with a
- *	diagnostic, processing is continued from the next one.
+ * The schema of the settings file (yaLIBCFG, CFG$VALIDATE): every setting with its type, range or
+ * keywords; a setting the schema does not know is an error (a typo never passes in silence). The
+ * cross checks are the check routines below. The whole file is checked before anything is applied
+ * and every problem is told with its file, line and column; a single one refuses the file.
+ */
+static const CFG$KEYWORD	s_cfg_flow_kwd[] =				/* <flow> of a serial */
+{
+	{ "NONE",	T2R$K_FLOW_NONE },
+	{ "XON/XOFF",	T2R$K_FLOW_XONXOFF },
+	{ "RTS/CTS",	T2R$K_FLOW_RTSCTS },
+	{ NULL,		0 }
+};
+
+static const CFG$KEYWORD	s_cfg_mode_kwd[] =				/* <mode> of a listener */
+{
+	{ "MODBUS",	T2R$K_MODE_MODBUS },
+	{ "RAW",	T2R$K_MODE_RAW },
+	{ NULL,		0 }
+};
+
+static unsigned	s_cfg_chk_chars (CFG$NODE *, void *, char *, uint32_t, uint32_t *);
+static unsigned	s_cfg_chk_serial (CFG$NODE *, void *, char *, uint32_t, uint32_t *);
+static unsigned	s_cfg_chk_bind (CFG$NODE *, void *, char *, uint32_t, uint32_t *);
+static unsigned	s_cfg_chk_listener (CFG$NODE *, void *, char *, uint32_t, uint32_t *);
+static unsigned	s_cfg_chk_listeners (CFG$NODE *, void *, char *, uint32_t, uint32_t *);
+static unsigned	s_cfg_chk_serials (CFG$NODE *, void *, char *, uint32_t, uint32_t *);
+
+static const CFG$SCHEMA	s_cfg_serial[] =					/* An element of <serials> */
+{
+	{ .name = "desc",	.type = CFG$K_TYPE_STRING,	.help = "a free text" },
+	{ .name = "device",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_KEY | CFG$M_LENGTH, .min = 1, .max = ASC$K_SZ - 1,
+		.help = "the device file of the serial port" },
+	{ .name = "chars",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_REQUIRED, .check = s_cfg_chk_chars,
+		.help = "speed, data bits, parity, stop bits" },
+	{ .name = "flow",	.type = CFG$K_TYPE_KWD,		.kwd = s_cfg_flow_kwd, .help = "the flow control" },
+	{ .name = "iotmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 1, .max = T2R$K_ANSTMO_MAX,
+		.help = "the answer timeout, msec" },
+	{ .name = "lategd",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = T2R$K_LATEGD_MAX,
+		.help = "the guard window after a failed exchange, msec" },
+	{ .name = "rs485",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 1 },
+	{ .name = "ts_enabled",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 1 },
+	{ .name = "ts_unit",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 255 },
+	{ .name = "ts_fncode",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 1, .max = 127 },
+	{ .name = "ts_base_reg0", .type = CFG$K_TYPE_INT,	.flags = CFG$M_RANGE, .min = 0, .max = 65535 },
+	{ .name = NULL }
+};
+
+static const CFG$SCHEMA	s_cfg_listener[] =					/* An element of <listeners> */
+{
+	{ .name = "bind",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_REQUIRED, .check = s_cfg_chk_bind,
+		.help = "TCP:<address>:<port>" },
+	{ .name = "target",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_REQUIRED | CFG$M_LENGTH, .min = 1, .max = ASC$K_SZ - 1,
+		.help = "the <device> of a serial" },
+	{ .name = "connlm",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = T2R$K_CONNLM_MIN, .max = T2R$K_CONNLM_MAX },
+	{ .name = "idletmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = T2R$K_IDLETMO_MIN, .max = T2R$K_IDLETMO_MAX },
+	{ .name = "iotmo",	.type = CFG$K_TYPE_INT,		.help = "stored, not used yet" },
+	{ .name = "mode",	.type = CFG$K_TYPE_KWD,		.kwd = s_cfg_mode_kwd },
+	{ .name = "takeover",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 1 },
+	{ .name = NULL }
+};
+
+static const CFG$SCHEMA	s_cfg_serial_elem = { .type = CFG$K_TYPE_GROUP, .sub = s_cfg_serial, .check = s_cfg_chk_serial };
+static const CFG$SCHEMA	s_cfg_listener_elem = { .type = CFG$K_TYPE_GROUP, .sub = s_cfg_listener, .check = s_cfg_chk_listener };
+
+static const CFG$SCHEMA	s_cfg_settings[] =					/* The file */
+{
+	{ .name = "listeners",	.type = CFG$K_TYPE_LIST,	.flags = CFG$M_REQUIRED | CFG$M_COUNT, .min = 1, .max = T2R$K_MAX_LISTENERS,
+		.sub = &s_cfg_listener_elem, .check = s_cfg_chk_listeners },
+	{ .name = "serials",	.type = CFG$K_TYPE_LIST,	.flags = CFG$M_REQUIRED | CFG$M_COUNT, .min = 1, .max = T2R$K_MAX_SERIALS,
+		.sub = &s_cfg_serial_elem, .check = s_cfg_chk_serials },
+	{ .name = NULL }
+};
+
+
+
+/*
+ *   DESCRIPTION: Put the text of a refusal into the buffer of a check routine.
+ *
+ *   INPUTS:
+ *	a_msgsz:	The size of the buffer
+ *	a_fmt, ...:	A vsnprintf() format and its arguments (the text, not a message: the library
+ *			puts it out as CFG-E-CHECK with the place in the file)
+ *
+ *   OUTPUTS:
+ *	a_msg:		The text
+ *	a_msglen:	Its length
+ *
+ *   RETURNS:
+ *	STS$K_ERROR (always: the value is refused)
+ */
+static unsigned	s_cfg_refuse (
+			char	*a_msg,
+			uint32_t a_msgsz,
+			uint32_t *a_msglen,
+		const	char	*a_fmt,
+			...
+			)
+{
+va_list	l_ap;
+int	l_len;
+
+	va_start(l_ap, a_fmt);
+	l_len = vsnprintf(a_msg, a_msgsz, a_fmt, l_ap);
+	va_end(l_ap);
+
+	*a_msglen = (l_len < 0) ? 0 : ((uint32_t) l_len >= a_msgsz) ? a_msgsz - 1 : (uint32_t) l_len;
+
+	return	STS$K_ERROR;
+}
+
+
+/*
+ *   DESCRIPTION: Take a string of a node, collapsed (the blanks are dropped) into a local buffer.
+ *
+ *   INPUTS:
+ *	a_base:		The node, or the group of the setting
+ *	a_path:		The setting in a_base, NULL - a_base itself
+ *	a_bufsz:	The size of a_buf
+ *
+ *   OUTPUTS:
+ *	a_buf:		The collapsed string, zero-terminated
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS, STS$K_ERROR (no such string or too long), CFG$_NOTFOUND
+ */
+static unsigned	s_cfg_collapsed (
+		CFG$NODE	*a_base,
+	const	char		*a_path,
+		char		*a_buf,
+		size_t		a_bufsz
+			)
+{
+const char *l_str;
+uint32_t l_len;
+unsigned l_sts;
+
+	if ( !(1 & (l_sts = cfg$get_string(a_base, a_path, &l_str, &l_len))) )
+		return	l_sts;
+
+	if ( l_len >= a_bufsz )
+		return	STS$K_ERROR;
+
+	memcpy(a_buf, l_str, l_len);
+	a_buf[l_len] = '\0';
+	__util$collapse(a_buf, l_len);						/* "115200, 8, N, 1" -> "115200,8,N,1" */
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ *   DESCRIPTION: Parse <chars> of a serial: "speed, data bits, parity, stop bits", range checked.
+ *
+ *   INPUTS:
+ *	a_chars:	The collapsed string
+ *	a_whysz:	The size of a_why
+ *
+ *   OUTPUTS:
+ *	a_speed, a_databits, a_parity, a_stopbits:	The values (the parity is in upper case)
+ *	a_why:		The reason of a refusal
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS, STS$K_ERROR - see a_why
+ */
+static int	s_chars_parse (
+	const	char	*a_chars,
+		int	*a_speed,
+		int	*a_databits,
+		char	*a_parity,
+		int	*a_stopbits,
+		char	*a_why,
+		size_t	a_whysz
+			)
+{
+	if ( 4 != sscanf(a_chars, "%d,%d,%c,%d", a_speed, a_databits, a_parity, a_stopbits) )
+		return	snprintf(a_why, a_whysz, "<%s> is ill-formed, \"speed, data bits, parity, stop bits\" expected, e.g. \"19200, 8, E, 1\"",
+				a_chars), STS$K_ERROR;
+
+	if ( !$ISINRANGE(*a_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX) )
+		return	snprintf(a_why, a_whysz, "speed %d is out of range %d..%d", *a_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX), STS$K_ERROR;
+
+	if ( !$ISINRANGE(*a_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX) )
+		return	snprintf(a_why, a_whysz, "data bits %d is out of range %d..%d", *a_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX),
+				STS$K_ERROR;
+
+	if ( !$ISINRANGE(*a_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX) )
+		return	snprintf(a_why, a_whysz, "stop bits %d is out of range %d..%d", *a_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX),
+				STS$K_ERROR;
+
+	switch ( *a_parity = (char) toupper (*a_parity) )
+		{
+		case	'N':
+		case	'E':
+		case	'O':
+			return	STS$K_SUCCESS;
+		}
+
+	return	snprintf(a_why, a_whysz, "parity '%c' is unknown, allowed: N, E, O", *a_parity), STS$K_ERROR;
+}
+
+
+/*
+ *   DESCRIPTION: Parse <bind> of a listener: "TCP:<IPv4 address>:<port>" (UDP is not implemented).
+ *
+ *   INPUTS:
+ *	a_bind:		The collapsed string
+ *	a_whysz:	The size of a_why
+ *
+ *   OUTPUTS:
+ *	a_sk:		The address and the port
+ *	a_why:		The reason of a refusal
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS, STS$K_ERROR - see a_why
+ */
+static int	s_bind_parse (
+	const	char		*a_bind,
+	struct	sockaddr_in	*a_sk,
+		char		*a_why,
+		size_t		a_whysz
+			)
+{
+char	l_proto[16], l_laddr[32], l_port[8];
+int	l_port_nr, l_rc;
+
+	if ( 3 != sscanf(a_bind, "%15[TCPUDPtcpudp]:%31[0-9.]:%7[0-9]", l_proto, l_laddr, l_port) )
+		return	snprintf(a_why, a_whysz, "<%s> is ill-formed, \"TCP:<address>:<port>\" expected, e.g. \"TCP:0.0.0.0:502\"", a_bind),
+				STS$K_ERROR;
+
+	if ( toupper(*l_proto) == 'U' )						/* listen()/accept() on SOCK_DGRAM does not work */
+		return	snprintf(a_why, a_whysz, "UDP is not implemented, use TCP"), STS$K_ERROR;
+
+	if ( toupper(*l_proto) != 'T' )
+		return	snprintf(a_why, a_whysz, "<%s> is ill-formed, \"TCP:<address>:<port>\" expected", a_bind), STS$K_ERROR;
+
+	if ( !$ISINRANGE((l_port_nr = atoi(l_port)), T2R$K_PORT_MIN, T2R$K_PORT_MAX) )
+		return	snprintf(a_why, a_whysz, "port %d is out of range %d..%d", l_port_nr, T2R$K_PORT_MIN, T2R$K_PORT_MAX), STS$K_ERROR;
+
+	memset(a_sk, 0, sizeof(*a_sk));
+	a_sk->sin_family = AF_INET;
+	a_sk->sin_port = htons ((uint16_t) l_port_nr);
+
+	if ( 1 != (l_rc = inet_pton(AF_INET, l_laddr, &a_sk->sin_addr)) )
+		return	snprintf(a_why, a_whysz, "<%s> is not an IPv4 address (inet_pton()->%d, errno: %d)", l_laddr, l_rc, errno),
+				STS$K_ERROR;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ *   DESCRIPTION: Take a keyword setting by the keywords of its schema entry (validated: one of them).
+ *
+ *   INPUTS:
+ *	a_base:		The group of the setting
+ *	a_path:		The setting
+ *	a_kwd:		The keywords
+ *	a_default:	The value for an absent setting
+ *
+ *   OUTPUTS:
+ *	a_val:		The value of the keyword
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS
+ */
+static unsigned	s_cfg_kwd (
+		CFG$NODE	*a_base,
+	const	char		*a_path,
+	const	CFG$KEYWORD	*a_kwd,
+		int		a_default,
+		int		*a_val
+			)
+{
+const char *l_str;
+uint32_t l_len;
+
+	*a_val = a_default;
+
+	if ( !(1 & cfg$get_string(a_base, a_path, &l_str, &l_len)) )
+		return	STS$K_SUCCESS;
+
+	for ( ; a_kwd->name; a_kwd++ )
+		{
+		if ( (strlen(a_kwd->name) == l_len) && !strncasecmp(a_kwd->name, l_str, l_len) )
+			return	*a_val = (int) a_kwd->value, STS$K_SUCCESS;
+		}
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ *   DESCRIPTION: Find the element of <serials> whose <device> is the given name (case-insensitive).
+ *
+ *   INPUTS:
+ *	a_root:		The root group of the settings
+ *	a_name, a_len:	The device name
+ *
+ *   OUTPUTS:
+ *	a_serial:	The element
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS, CFG$_NOTFOUND
+ */
+static unsigned	s_cfg_find_serial (
+		CFG$NODE	*a_root,
+	const	char		*a_name,
+		uint32_t	a_len,
+		CFG$NODE	**a_serial
+			)
+{
+CFG$NODE *l_list, *l_elem;
+const char *l_str;
+uint32_t l_len;
+unsigned l_sts;
+
+	if ( !(1 & (l_sts = cfg$lookup(a_root, "serials", &l_list))) )
+		return	l_sts;
+
+	for ( l_sts = cfg$first(l_list, &l_elem); 1 & l_sts; l_sts = cfg$next(l_elem, &l_elem) )
+		{
+		if ( (1 & cfg$get_string(l_elem, "device", &l_str, &l_len)) && (l_len == a_len) && !strncasecmp(l_str, a_name, a_len) )
+			return	*a_serial = l_elem, STS$K_SUCCESS;
+		}
+
+	return	CFG$_NOTFOUND;
+}
+
+
+/* A check routine: <chars> of a serial */
+static unsigned	s_cfg_chk_chars (
+		CFG$NODE	*a_node,
+		void		*a_arg,
+		char		*a_msg,
+		uint32_t	a_msgsz,
+		uint32_t	*a_msglen
+			)
+{
+char	l_chars[64], l_parity;
+int	l_speed, l_databits, l_stopbits;
+
+	if ( !(1 & s_cfg_collapsed (a_node, NULL, l_chars, sizeof(l_chars))) )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "the value is too long");
+
+	if ( !(1 & s_chars_parse (l_chars, &l_speed, &l_databits, &l_parity, &l_stopbits, a_msg, a_msgsz)) )
+		return	*a_msglen = (uint32_t) strnlen(a_msg, a_msgsz), STS$K_ERROR;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/* A check routine: a serial as a whole - RTS/CTS is refused together with the RS-485 mode */
+static unsigned	s_cfg_chk_serial (
+		CFG$NODE	*a_node,
+		void		*a_arg,
+		char		*a_msg,
+		uint32_t	a_msgsz,
+		uint32_t	*a_msglen
+			)
+{
+int	l_flow;
+int32_t	l_rs485 = 0;
+
+	s_cfg_kwd (a_node, "flow", s_cfg_flow_kwd, T2R$K_FLOW_NONE, &l_flow);
+	cfg$get_int(a_node, "rs485", &l_rs485);
+
+#ifdef HAVE_TIOCRS485
+	if ( (l_flow == T2R$K_FLOW_RTSCTS) && l_rs485 )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "<flow> RTS/CTS is not allowed with <rs485> = 1: the RS-485 mode drives RTS itself");
+#else
+	(void) l_flow, (void) l_rs485;							/* No RS-485 mode: SERNORS485 tells it */
+#endif
+
+	return	STS$K_SUCCESS;
+}
+
+
+/* A check routine: <bind> of a listener */
+static unsigned	s_cfg_chk_bind (
+		CFG$NODE	*a_node,
+		void		*a_arg,
+		char		*a_msg,
+		uint32_t	a_msgsz,
+		uint32_t	*a_msglen
+			)
+{
+char	l_bind[128];
+struct	sockaddr_in l_sk;
+
+	if ( !(1 & s_cfg_collapsed (a_node, NULL, l_bind, sizeof(l_bind))) )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "the value is too long");
+
+	if ( !(1 & s_bind_parse (l_bind, &l_sk, a_msg, a_msgsz)) )
+		return	*a_msglen = (uint32_t) strnlen(a_msg, a_msgsz), STS$K_ERROR;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ * A check routine: a listener as a whole (a_arg - the root group): <target> names a serial; a RAW
+ * listener has <connlm> 1 only; <takeover> is for RAW only; a MODBUS listener is refused on an
+ * XON/XOFF line - IXON makes the kernel eat the 0x11/0x13 octets of the binary RTU frames.
+ */
+static unsigned	s_cfg_chk_listener (
+		CFG$NODE	*a_node,
+		void		*a_arg,
+		char		*a_msg,
+		uint32_t	a_msgsz,
+		uint32_t	*a_msglen
+			)
+{
+CFG$NODE *l_serial, *l_dummy;
+const char *l_target;
+uint32_t l_len;
+int	l_mode, l_flow;
+int32_t	l_int;
+
+	s_cfg_kwd (a_node, "mode", s_cfg_mode_kwd, T2R$K_MODE_MODBUS, &l_mode);
+
+	if ( (l_mode == T2R$K_MODE_RAW) && (1 & cfg$get_int(a_node, "connlm", &l_int)) && (l_int != 1) )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "<connlm> %d: a RAW listener serves one client, only 1 is allowed", l_int);
+
+	if ( (l_mode != T2R$K_MODE_RAW) && (1 & cfg$lookup(a_node, "takeover", &l_dummy)) )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "<takeover> is not allowed in the MODBUS mode");
+
+	cfg$get_string(a_node, "target", &l_target, &l_len);
+
+	if ( !(1 & s_cfg_find_serial (a_arg, l_target, l_len, &l_serial)) )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "<target> \"%s\" is not a <device> of <serials>", l_target);
+
+	s_cfg_kwd (l_serial, "flow", s_cfg_flow_kwd, T2R$K_FLOW_NONE, &l_flow);
+
+	if ( (l_mode == T2R$K_MODE_MODBUS) && (l_flow == T2R$K_FLOW_XONXOFF) )
+		return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "target \"%s\" has <flow> XON/XOFF: the binary RTU frames carry the 0x11/0x13 "
+			"octets, a MODBUS listener needs NONE or RTS/CTS", l_target);
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ * A check routine: <listeners> as a whole - the serial line of a RAW listener belongs to it alone: a
+ * raw stream and MODBUS exchanges (or two raw streams) on one line would corrupt each other.
+ */
+static unsigned	s_cfg_chk_listeners (
+		CFG$NODE	*a_node,
+		void		*a_arg,
+		char		*a_msg,
+		uint32_t	a_msgsz,
+		uint32_t	*a_msglen
+			)
+{
+CFG$NODE *l_a, *l_b;
+const char *l_ta, *l_tb, *l_bind;
+uint32_t l_la, l_lb, l_lbind;
+int	l_ma, l_mb;
+unsigned l_sa, l_sb;
+
+	for ( l_sa = cfg$first(a_node, &l_a); 1 & l_sa; l_sa = cfg$next(l_a, &l_a) )
+		{
+		s_cfg_kwd (l_a, "mode", s_cfg_mode_kwd, T2R$K_MODE_MODBUS, &l_ma);
+		cfg$get_string(l_a, "target", &l_ta, &l_la);
+
+		for ( l_sb = cfg$next(l_a, &l_b); 1 & l_sb; l_sb = cfg$next(l_b, &l_b) )
+			{
+			s_cfg_kwd (l_b, "mode", s_cfg_mode_kwd, T2R$K_MODE_MODBUS, &l_mb);
+			cfg$get_string(l_b, "target", &l_tb, &l_lb);
+
+			if ( ((l_ma == T2R$K_MODE_RAW) || (l_mb == T2R$K_MODE_RAW)) && (l_la == l_lb) && !strncasecmp(l_ta, l_tb, l_la) )
+				{
+				cfg$get_string(l_b, "bind", &l_bind, &l_lbind);
+
+				return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "target \"%s\" is used by the listener <%s> too, a RAW listener "
+					"needs the serial line for itself", l_ta, l_bind);
+				}
+			}
+		}
+
+	return	STS$K_SUCCESS;
+}
+
+
+
+/*
+ * A check routine: <serials> as a whole - the key <device> is unique as it is written (DUPKEY), but a
+ * <target> names it regardless of case: two devices told apart by the case only are refused too.
+ */
+static unsigned	s_cfg_chk_serials (
+		CFG$NODE	*a_node,
+		void		*a_arg,
+		char		*a_msg,
+		uint32_t	a_msgsz,
+		uint32_t	*a_msglen
+			)
+{
+CFG$NODE *l_a, *l_b;
+const char *l_da, *l_db;
+uint32_t l_la, l_lb;
+unsigned l_sa, l_sb;
+
+	for ( l_sa = cfg$first(a_node, &l_a); 1 & l_sa; l_sa = cfg$next(l_a, &l_a) )
+		{
+		cfg$get_string(l_a, "device", &l_da, &l_la);
+
+		for ( l_sb = cfg$next(l_a, &l_b); 1 & l_sb; l_sb = cfg$next(l_b, &l_b) )
+			{
+			cfg$get_string(l_b, "device", &l_db, &l_lb);
+
+			if ( (l_la == l_lb) && !strncasecmp(l_da, l_db, l_la) )
+				return	s_cfg_refuse(a_msg, a_msgsz, a_msglen, "<device> \"%s\" and \"%s\" differ by the case only, a <target> "
+					"could not tell them apart", l_da, l_db);
+			}
+		}
+
+	return	STS$K_SUCCESS;
+}
+
+
+
+/*
+ *  DESCRIPTION: Take the <serials> section of a validated settings tree (see s_cfg_settings[]):
+ *	<device>, <chars>; <rs485>, <flow> (NONE - the default), <iotmo> (the answer timeout, msec,
+ *	default T2R$K_ANSTMO_MSEC), <lategd> (the guard window after a failed exchange, msec, default
+ *	<iotmo> / 4), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>. Compute the octet time and
+ *	t3.5, init the device lock, fill the global table of serial devices.
  *
  *  INPUTS:
- *	a_cfg:		A context of LIBCONFIG for settings file
- *
- *  OUTPUTS:
- *	NONE
+ *	a_root:		The root group of the validated tree
  *
  *  IMPLICITE OUTPUTS:
  *	g_serials, g_serials_nr
  *
  *  RETURNS:
- *	STS$K_SUCCESS	- at least one device has been accepted
- *	T2R$__CFGNOSECT	- no <serials> section
- *	T2R$__NOSERIALS	- not a single valid record
- *
+ *	STS$K_SUCCESS, T2R$__DEVSYSERR (pthread_mutex_init())
  */
-static int	s_settings_process_serials (config_t	*a_cfg)
+static int	s_settings_process_serials (CFG$NODE *a_root)
 {
-config_setting_t *l_setting, *l_args;
+CFG$NODE *l_list, *l_elem;
 const char *l_str;
-int	l_count, l_int = -1, l_speed, l_databits, l_stopbits;
-char	l_parity = 0;
+uint32_t l_len;
+int32_t	l_int;
+int	l_speed, l_databits, l_stopbits, l_rc;
+unsigned l_sts;
+char	l_parity = 0, l_chars[64], l_why[160];
 T2R$_SERIAL	*l_serial;
-KWDENT	*l_kwd;
-char	l_chars[64];
 
-	if ( !(l_setting = config_lookup(a_cfg, "serials")) )
-		return	$PUTMSG_FAO(T2R$__CFGNOSECT, "serials", config_error_text(a_cfg));
+	cfg$lookup(a_root, "serials", &l_list);
 
-	l_serial = g_serials;
-
-	l_count = config_setting_length(l_setting);
-
-	if ( l_count > T2R$K_MAX_SERIALS )					/* Never run out of the g_serials[] capacity */
+	for ( int i = 0; (1 & (l_sts = (i ? cfg$next(l_elem, &l_elem) : cfg$first(l_list, &l_elem)))); i++ )
 		{
-		$PUTMSG_FAO(T2R$__CFGTRUNC, T2R$K_MAX_SERIALS, l_count, "serials");
-		l_count = T2R$K_MAX_SERIALS;
-		}
-
-
-	for (int i = 0; i < l_count; i++)
-		{
+		l_serial = &g_serials[g_serials_nr];
 		memset(l_serial, 0, sizeof(T2R$_SERIAL) );
 
-		if ( !(l_args = config_setting_get_elem(l_setting, i)) )
-			{
-			$PUTMSG_FAO(T2R$__SERBADREC, i, "illformed or missing");
-			continue;
-			}
-
-		if ( !config_setting_lookup_string(l_args, "device", &l_str) )
-			{
-			$PUTMSG_FAO(T2R$__SERBADREC, i, "no <device> option");
-			continue;
-			}
-
-		if ( strnlen(l_str, ASC$K_SZ) > ASC$K_SZ - 1 )			/* The ASC keeps it whole and NUL-terminated, */
-			{								/* with any StarLet's __util$str2asc()	*/
-			$PUTMSG_FAO(T2R$__SERBADREC, i, "<device> name is too long");
-			continue;
-			}
-
+		cfg$get_string(l_elem, "device", &l_str, &l_len);
 		__util$str2asc(l_str, &l_serial->devname);			/* NUL-terminated: open() takes its sts */
 
-		/*
-		 * config_setting_lookup_int() reports a PRESENCE of the key, so the value must be
-		 * checked separately - otherwise "rs485 = 0;" would enable the RS485 support.
-		 */
-		if ( config_setting_lookup_int(l_args, "rs485", &l_int) && l_int )
+		if ( (1 & cfg$get_int(l_elem, "rs485", &l_int)) && l_int )
 			{
 #ifdef HAVE_TIOCRS485
 			l_serial->flags |=  T2R$M_SERIAL_RS485;
@@ -503,116 +991,26 @@ char	l_chars[64];
 #endif
 			}
 
-		if ( !config_setting_lookup_string(l_args, "chars", &l_str) )
-			{
-			$PUTMSG_FAO(T2R$__SERBADOPT, i, &l_serial->devname, "no <chars> option");
-			continue;
-			}
+		s_cfg_collapsed (l_elem, "chars", l_chars, sizeof(l_chars));	/* Validated by s_cfg_chk_chars() */
+		s_chars_parse (l_chars, &l_speed, &l_databits, &l_parity, &l_stopbits, l_why, sizeof(l_why));
 
-		/*
-		 * The string is collapsed in a local copy: libconfig owns the original one and we
-		 * must not modify it in place.
-		 */
-		if ( sizeof(l_chars) <= (size_t) snprintf(l_chars, sizeof(l_chars), "%s", l_str) )
-			{
-			$PUTMSG_FAO(T2R$__SERBADOPT, i, &l_serial->devname, "<chars> value is too long");
-			continue;
-			}
+		s_cfg_kwd (l_elem, "flow", s_cfg_flow_kwd, T2R$K_FLOW_NONE, &l_serial->flow);
 
-		__util$collapse(l_chars, strlen(l_chars));			/* "115200, 8, N, 1" -> "115200,8,N,1" */
-
-		if ( 4 != sscanf(l_chars, "%d,%d,%c,%d", &l_speed, &l_databits, &l_parity, &l_stopbits) )
-			{
-			$PUTMSG_FAO(T2R$__SERBADCHR, i, &l_serial->devname, l_chars);
-			continue;
-			}
-
-		/*
-		 * Validate the line parameters BEFORE any arithmetic: <l_speed> is a divisor below.
-		 */
-		if ( !$ISINRANGE(l_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX) )
-			{
-			$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "speed (baud)", l_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX);
-			continue;
-			}
-
-		if ( !$ISINRANGE(l_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX) )
-			{
-			$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "data bits", l_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX);
-			continue;
-			}
-
-		if ( !$ISINRANGE(l_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX) )
-			{
-			$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "stop bits", l_stopbits, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX);
-			continue;
-			}
-
-		switch (l_parity = toupper (l_parity))
-			{
-			case	'N':
-			case	'E':
-			case	'O':
-				break;
-
-			default:
-				$PUTMSG_FAO(T2R$__SERBADPAR, i, &l_serial->devname, 1, &l_parity);
-				continue;
-			}
-
-		/*
-		 * <flow> is optional, .flow is T2R$K_FLOW_NONE after the memset() above. DSR/DTR was listed in the
-		 * sample settings file, but Linux termios has no such flow control: it is refused as unknown.
-		 */
-		if ( config_setting_get_member(l_args, "flow") )
-			{
-			if ( !config_setting_lookup_string(l_args, "flow", &l_str) )	/* flow = 1; - not a string */
-				l_str = "(not a string)";
-			else if ( 1 & __util$lookup_key(l_str, (int) strlen(l_str), s_flow_tbl, $ARRSZ(s_flow_tbl), &l_kwd, UTIL$K_LOOKUP_NCASE) )
-				l_str = NULL;
-
-			if ( l_str )
-				{
-				$PUTMSG_FAO(T2R$__SERBADFLOW, i, &l_serial->devname, l_str);
-				continue;
-				}
-
-			l_serial->flow = l_kwd->val;
-			}
-
-		/* Without HAVE_TIOCRS485 the flag is never set (SERNORS485): RTS/CTS is accepted then */
-		if ( (l_serial->flow == T2R$K_FLOW_RTSCTS) && (l_serial->flags & T2R$M_SERIAL_RS485) )
-			{
-			$PUTMSG_FAO(T2R$__SERBADOPT, i, &l_serial->devname, "<flow> RTS/CTS is not allowed with <rs485> = 1: the RS-485 mode drives RTS itself");
-			continue;
-			}
-
-		/*
-		 * Form context for serial device
-		 */
 		l_serial->fd = -1;
 		l_serial->baud = l_speed;
 		l_serial->parity = l_parity;
 		l_serial->stopbits = l_stopbits;
 		l_serial->databits = l_databits;
 
-		l_serial->anstmo_msec = T2R$K_ANSTMO_MSEC;			/* A default which can be overriden below */
+		l_serial->anstmo_msec = T2R$K_ANSTMO_MSEC;
 
-		if ( config_setting_lookup_int(l_args, "iotmo", &l_int) && (0 < l_int) )
+		if ( 1 & cfg$get_int(l_elem, "iotmo", &l_int) )
 			l_serial->anstmo_msec = l_int;
 
 		l_serial->lategd_msec = l_serial->anstmo_msec / 4;		/* The guard window after a failed exchange */
 
-		if ( config_setting_lookup_int(l_args, "lategd", &l_int) )
-			{
-			if ( (l_int < 0) || (l_int > T2R$K_LATEGD_MAX) )
-				{
-				$PUTMSG_FAO(T2R$__SERRANGE, i, &l_serial->devname, "lategd (msec)", l_int, 0, T2R$K_LATEGD_MAX);
-				continue;
-				}
-
+		if ( 1 & cfg$get_int(l_elem, "lategd", &l_int) )
 			l_serial->lategd_msec = l_int;
-			}
 
 		/* A time to shift out a single octet: start + data + parity + stop bits */
 		l_serial->onebyte_time_usec = (1000000 * (1 + l_serial->databits
@@ -630,29 +1028,17 @@ char	l_chars[64];
 		l_serial->inter_pdu_ts.tv_sec = l_serial->inter_pdu_usec / 1000000;
 		l_serial->inter_pdu_ts.tv_nsec = (long) (l_serial->inter_pdu_usec % 1000000) * 1000L;
 
-
-		if ( config_setting_lookup_int(l_args, "ts_enabled", &l_int) && l_int )
+		if ( (1 & cfg$get_int(l_elem, "ts_enabled", &l_int)) && l_int )
 			{
 			l_serial->flags |=  T2R$M_SERIAL_ADDTS;
 
-			if ( config_setting_lookup_int(l_args, "ts_fncode", &l_int) )
-				l_serial->ts_fncode =  l_int;
-			else	l_serial->ts_fncode = T2R$K_TS_FNCODE;
-
-			if ( config_setting_lookup_int(l_args, "ts_base_reg0", &l_int) )
-				l_serial->ts_base_reg0 =  l_int;
-			else	l_serial->ts_base_reg0 = T2R$K_TS_BASE_REG0;
-
-			if ( config_setting_lookup_int(l_args, "ts_unit", &l_int) )
-				l_serial->ts_unit_nr =  l_int;
-			else	l_serial->ts_unit_nr = T2R$K_TS_UNIT;
+			l_serial->ts_fncode = (1 & cfg$get_int(l_elem, "ts_fncode", &l_int)) ? (uint8_t) l_int : T2R$K_TS_FNCODE;
+			l_serial->ts_base_reg0 = (1 & cfg$get_int(l_elem, "ts_base_reg0", &l_int)) ? (uint16_t) l_int : T2R$K_TS_BASE_REG0;
+			l_serial->ts_unit_nr = (1 & cfg$get_int(l_elem, "ts_unit", &l_int)) ? (uint8_t) l_int : T2R$K_TS_UNIT;
 			}
 
-		if ( (l_int = pthread_mutex_init(&l_serial->lock, NULL)) )
-			{
-			$PUTMSG_FAO(T2R$__DEVSYSERR, &l_serial->devname, "pthread_mutex_init()", l_int, errno);
-			continue;
-			}
+		if ( (l_rc = pthread_mutex_init(&l_serial->lock, NULL)) )
+			return	$PUTMSG_FAO(T2R$__DEVSYSERR, &l_serial->devname, "pthread_mutex_init()", l_rc, errno);
 
 		$PUTMSG_FAO(T2R$__DEVADDED, i, &l_serial->devname, l_serial->baud, l_serial->databits, 1, &l_parity,
 			l_serial->stopbits, &s_flow_tbl[l_serial->flow].kwd, l_serial->anstmo_msec, l_serial->inter_pdu_usec);
@@ -661,36 +1047,23 @@ char	l_chars[64];
 			$PUTMSG_FAO(T2R$__TSENABLED, &l_serial->devname, l_serial->ts_unit_nr, l_serial->ts_fncode, l_serial->ts_base_reg0);
 		else	$PUTMSG_FAO(T2R$__TSDISABLED, &l_serial->devname);
 
-
-		l_serial++;
 		g_serials_nr++;
 		}
 
-	return	g_serials_nr ? STS$K_SUCCESS : $PUTMSG_FAO(T2R$__NOSERIALS);
+	return	STS$K_SUCCESS;
 }
 
 
 
-
 /*
- *  DESCRIPTION: Process the <listeners> section: mandatory <bind> ("TCP:a.b.c.d:port"; UDP is
- *	rejected, the port and the address are validated) and <target> (a defined serial device);
- *	optional <connlm> (the simultaneous sessions limit, T2R$K_CONNLM_MIN..MAX, default
- *	T2R$K_CONNLM_DEF), <idletmo> (the idle session timeout, seconds, T2R$K_IDLETMO_MIN..MAX,
- *	default T2R$K_IDLETMO_DEF) and <iotmo> (is stored, not used yet); <mode> ("MODBUS" - the
- *	default, "RAW" - a transparent octet stream) and, for RAW only, <takeover> (0/1, default 1 -
- *	a new client kicks the current one). A RAW listener: <connlm> is 1 (no other value is
- *	accepted), <idletmo> defaults to T2R$K_IDLETMO_MAX, its target serial line must not be used
- *	by any other listener (LSNRAWSHR, whatever the order of the records); a MODBUS listener is
- *	refused on a serial with <flow> XON/XOFF (LSNXONRTU). Fill the global table of
- *	listeners (at most T2R$K_MAX_LISTENERS records). An ill-formed or out of range record is
- *	rejected with a diagnostic, processing is continued from the next one.
+ *  DESCRIPTION: Take the <listeners> section of a validated settings tree (see s_cfg_settings[]):
+ *	<bind>, <target>; <connlm> (default T2R$K_CONNLM_DEF), <idletmo> (default T2R$K_IDLETMO_DEF),
+ *	<iotmo> (is stored, not used yet), <mode> (MODBUS - the default, RAW) and, for RAW, <takeover>
+ *	(default 1). A RAW listener has <connlm> 1 and <idletmo> T2R$K_IDLETMO_MAX by default. Fill
+ *	the global table of listeners.
  *
  *  INPUTS:
- *	a_cfg:		A context of LIBCONFIG for settings file
- *
- *  OUTPUTS:
- *	NONE
+ *	a_root:		The root group of the validated tree
  *
  *  IMPLICITE INPUTS:
  *	g_serials, g_serials_nr (see s_settings_find_n_get_serial())
@@ -699,113 +1072,34 @@ char	l_chars[64];
  *	g_listeners, g_listeners_nr
  *
  *  RETURNS:
- *	STS$K_SUCCESS	- at least one listener has been accepted
- *	T2R$__CFGNOSECT	- no <listeners> section
- *	T2R$__NOLSNRS	- not a single valid record
- *
+ *	STS$K_SUCCESS, T2R$__TGTNDEF, T2R$__SYSERR (pthread_mutex_init())
  */
-static int	s_settings_process_listeners (config_t	*a_cfg)
+static int	s_settings_process_listeners (CFG$NODE *a_root)
 {
-config_setting_t *l_setting, *l_args;
+CFG$NODE *l_list, *l_elem;
 const char *l_str;
-int	l_count, l_int = -1, l_port_nr;
+uint32_t l_len;
+int32_t	l_int;
+int	l_rc;
+unsigned l_sts;
+char	l_bind[128], l_why[160];
 T2R$_LISTENER	*l_listener;
-KWDENT	*l_kwd;
-char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 
-	if ( !(l_setting = config_lookup(a_cfg, "listeners")) )
-		return	$PUTMSG_FAO(T2R$__CFGNOSECT, "listeners", config_error_text(a_cfg));
+	cfg$lookup(a_root, "listeners", &l_list);
 
-	l_listener = g_listeners;
-
-	l_count = config_setting_length(l_setting);
-
-	if ( l_count > T2R$K_MAX_LISTENERS )					/* Never run out of the g_listeners[] capacity */
+	for ( int i = 0; (1 & (l_sts = (i ? cfg$next(l_elem, &l_elem) : cfg$first(l_list, &l_elem)))); i++ )
 		{
-		$PUTMSG_FAO(T2R$__CFGTRUNC, T2R$K_MAX_LISTENERS, l_count, "listeners");
-		l_count = T2R$K_MAX_LISTENERS;
-		}
+		l_listener = &g_listeners[g_listeners_nr];
+		memset(l_listener, 0, sizeof(T2R$_LISTENER));
 
+		s_cfg_collapsed (l_elem, "bind", l_bind, sizeof(l_bind));	/* Validated by s_cfg_chk_bind() */
+		s_bind_parse (l_bind, &l_listener->sk, l_why, sizeof(l_why));
+		l_listener->proto = IPPROTO_TCP;
 
-	for (int i = 0; i < l_count; i++)
-		{
-		memset(l_listener, 0, sizeof(T2R$_LISTENER));			/* Never reuse a leftover of a rejected record */
-
-		if ( !(l_args = config_setting_get_elem(l_setting, i)) )
-			{
-			$PUTMSG_FAO(T2R$__LSNBADREC, i, "illformed or missing");
-			continue;
-			}
-
-		if ( !config_setting_lookup_string(l_args, "bind", &l_str) )
-			{
-			$PUTMSG_FAO(T2R$__LSNBADREC, i, "no <bind> option");
-			continue;
-			}
-
-		/*
-		 * The string is collapsed in a local copy: libconfig owns the original one and we
-		 * must not modify it in place.
-		 */
-		if ( sizeof(l_bind) <= (size_t) snprintf(l_bind, sizeof(l_bind), "%s", l_str) )
-			{
-			$PUTMSG_FAO(T2R$__LSNBADREC, i, "<bind> value is too long");
-			continue;
-			}
-
-		__util$collapse(l_bind, strlen(l_bind));			/* "TCP: 0.0.0.0: 502" -> "TCP:0.0.0.0:502" */
-
-		if ( 3 != sscanf(l_bind, "%15[TCPUDPtcpudp]:%31[0-9.]:%7[0-9]", l_proto, l_laddr, l_port) )
-			{
-			$PUTMSG_FAO(T2R$__LSNBADBIND, i, l_bind);
-			continue;
-			}
-
-		switch ( toupper (*l_proto) )
-			{
-			case	'T':
-				l_listener->proto = IPPROTO_TCP;
-				break;
-
-			case	'U':						/* listen()/accept() on SOCK_DGRAM does not work */
-				$PUTMSG_FAO(T2R$__LSNBADREC, i, "UDP transport is not implemented yet");
-				continue;
-
-			default:
-				$PUTMSG_FAO(T2R$__LSNBADBIND, i, l_bind);
-				continue;
-			}
-
-		if ( !$ISINRANGE((l_port_nr = atoi(l_port)), T2R$K_PORT_MIN, T2R$K_PORT_MAX) )
-			{
-			$PUTMSG_FAO(T2R$__LSNRANGE, i, l_port_nr, T2R$K_PORT_MIN, T2R$K_PORT_MAX);
-			continue;
-			}
-
-		l_listener->sk.sin_family = AF_INET;
-		l_listener->sk.sin_port = htons ((uint16_t) l_port_nr);
-
-		if ( 1 != (l_int = inet_pton(AF_INET, l_laddr, &l_listener->sk.sin_addr)) )
-			{
-			$PUTMSG_FAO(T2R$__LSNBADADDR, i, l_laddr, l_int, errno);
-			continue;
-			}
-
-		if ( config_setting_lookup_int(l_args, "iotmo", &l_int) )
+		if ( 1 & cfg$get_int(l_elem, "iotmo", &l_int) )
 			l_listener->iotmo = l_int;
 
-		l_listener->mode = T2R$K_MODE_MODBUS;					/* <mode> is optional */
-
-		if ( config_setting_lookup_string(l_args, "mode", &l_str) )
-			{
-			if ( !(1 & __util$lookup_key(l_str, (int) strlen(l_str), s_mode_tbl, $ARRSZ(s_mode_tbl), &l_kwd, UTIL$K_LOOKUP_NCASE)) )
-				{
-				$PUTMSG_FAO(T2R$__LSNBADMODE, i, l_str);
-				continue;
-				}
-
-			l_listener->mode = l_kwd->val;
-			}
+		s_cfg_kwd (l_elem, "mode", s_cfg_mode_kwd, T2R$K_MODE_MODBUS, &l_listener->mode);
 
 		/*
 		 * A RAW listener relays a stream of a single client: one session at a time, and the client
@@ -816,143 +1110,54 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 			{
 			l_listener->connlm = 1;
 			l_listener->idletmo = T2R$K_IDLETMO_MAX;
-			l_listener->takeover = 1;
+			l_listener->takeover = (1 & cfg$get_int(l_elem, "takeover", &l_int)) ? l_int : 1;
 			}
 		else	{
 			l_listener->connlm = T2R$K_CONNLM_DEF;
 			l_listener->idletmo = T2R$K_IDLETMO_DEF;
 			}
 
-		if ( config_setting_lookup_int(l_args, "takeover", &l_int) )
-			{
-			if ( l_listener->mode != T2R$K_MODE_RAW )
-				{
-				$PUTMSG_FAO(T2R$__LSNRAWOPT, i, "takeover", "MODBUS");
-				continue;
-				}
-
-			if ( !$ISINRANGE(l_int, 0, 1) )
-				{
-				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "takeover", l_int, 0, 1);
-				continue;
-				}
-
-			l_listener->takeover = l_int;
-			}
-
-		if ( config_setting_lookup_int(l_args, "connlm", &l_int) )
-			{
-			if ( (l_listener->mode == T2R$K_MODE_RAW) && (l_int != 1) )
-				{
-				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "connlm", l_int, 1, 1);
-				continue;
-				}
-
-			if ( !$ISINRANGE(l_int, T2R$K_CONNLM_MIN, T2R$K_CONNLM_MAX) )
-				{
-				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "connlm", l_int, T2R$K_CONNLM_MIN, T2R$K_CONNLM_MAX);
-				continue;
-				}
-
+		if ( 1 & cfg$get_int(l_elem, "connlm", &l_int) )
 			l_listener->connlm = l_int;
-			}
 
-		if ( config_setting_lookup_int(l_args, "idletmo", &l_int) )
-			{
-			if ( !$ISINRANGE(l_int, T2R$K_IDLETMO_MIN, T2R$K_IDLETMO_MAX) )
-				{
-				$PUTMSG_FAO(T2R$__LSNOPTRNG, i, "idletmo", l_int, T2R$K_IDLETMO_MIN, T2R$K_IDLETMO_MAX);
-				continue;
-				}
-
+		if ( 1 & cfg$get_int(l_elem, "idletmo", &l_int) )
 			l_listener->idletmo = l_int;
-			}
 
-		if ( !config_setting_lookup_string(l_args, "target", &l_str) )
-			{
-			$PUTMSG_FAO(T2R$__LSNBADREC, i, "no <target> device");
-			continue;
-			}
+		cfg$get_string(l_elem, "target", &l_str, &l_len);
 
-		if ( strnlen(l_str, ASC$K_SZ) > ASC$K_SZ - 1 )			/* As <device> of a serial: a longer one */
-			{								/* could only match a cut name		*/
-			$PUTMSG_FAO(T2R$__LSNBADREC, i, "<target> name is too long");
-			continue;
-			}
-
-		if ( !(1 & s_settings_find_n_get_serial (l_str, &l_listener->serial)) )
-			{
-			$PUTMSG_FAO(T2R$__LSNNOTGT, i, l_str);
-			continue;
-			}
-
-		/*
-		 * A raw stream and the MODBUS request/answer exchanges (or two raw streams) on the same line
-		 * would corrupt each other: a serial line of a RAW listener belongs to it alone. Both orders of
-		 * the records are caught here, MODBUS listeners are still free to share a line.
-		 */
-		l_int = -1;
-
-		for (int j = 0; j < g_listeners_nr; j++)
-			{
-			if ( (g_listeners[j].serial == l_listener->serial)
-				&& ((g_listeners[j].mode == T2R$K_MODE_RAW) || (l_listener->mode == T2R$K_MODE_RAW)) )
-				{
-				l_int = j;
-				break;
-				}
-			}
-
-		if ( 0 <= l_int )
-			{
-			$PUTMSG_FAO(T2R$__LSNRAWSHR, i, l_str, ntohs(g_listeners[l_int].sk.sin_port));
-			continue;
-			}
-
-		/* IXON makes the kernel eat 0x11/0x13 of the answers: an XON/XOFF line is for the RAW mode only */
-		if ( (l_listener->mode == T2R$K_MODE_MODBUS) && (l_listener->serial->flow == T2R$K_FLOW_XONXOFF) )
-			{
-			$PUTMSG_FAO(T2R$__LSNXONRTU, i, l_str);
-			continue;
-			}
+		if ( !(1 & (l_rc = s_settings_find_n_get_serial (l_str, &l_listener->serial))) )
+			return	l_rc;						/* Validated by s_cfg_chk_listener() */
 
 		__util$str2asc(l_str, &l_listener->target);
 
-		if ( (l_int = pthread_mutex_init(&l_listener->rawlock, NULL)) )
-			{
-			$PUTMSG_FAO(T2R$__SYSERR, "pthread_mutex_init(rawlock)", l_int, errno);
-			continue;
-			}
+		if ( (l_rc = pthread_mutex_init(&l_listener->rawlock, NULL)) )
+			return	$PUTMSG_FAO(T2R$__SYSERR, "pthread_mutex_init(rawlock)", l_rc, errno);
 
-		$PUTMSG_FAO(T2R$__LSNADDED, i, &l_listener->serial->devname, (l_listener->proto == IPPROTO_UDP) ? "UDP": "TCP",
+		$PUTMSG_FAO(T2R$__LSNADDED, i, &l_listener->serial->devname, "TCP",
 			&l_listener->sk.sin_addr, ntohs(l_listener->sk.sin_port), l_listener->connlm, l_listener->idletmo,
 			(l_listener->mode == T2R$K_MODE_RAW) ? (l_listener->takeover ? "RAW (takeover)" : "RAW") : "MODBUS");
 
-
-		l_listener++;
 		g_listeners_nr++;
 		}
 
-
-	return	g_listeners_nr ? STS$K_SUCCESS : $PUTMSG_FAO(T2R$__NOLSNRS);
+	return	STS$K_SUCCESS;
 }
 
 
 
 
 /*
- *   DESCRIPTION: Load the settings file by the LIBCONFIG API and process its sections: the
- *	<serials> table first (the listeners refer to the serial devices), then the <listeners>
- *	table. A failure of any stage aborts the whole processing.
+ *   DESCRIPTION: Load the settings file by yaLIBCFG (names regardless of case), validate the whole
+ *	tree by s_cfg_settings[] - every problem is put out with its file, line and column (CFG-E-...),
+ *	a single one refuses the file (CFGREJECT) - and take its sections: <serials> first (the
+ *	listeners refer to the serial devices), then <listeners>. The tree is freed at the end: the
+ *	values are copied into g_serials[] and g_listeners[].
  *
  *   INPUTS:
  *	a_settings_conf: A file specification of the settings file
  *
- *   OUTPUTS:
- *	NONE
- *
  *   IMPLICITE OUTPUTS:
- *	g_cfg, g_serials, g_serials_nr, g_listeners, g_listeners_nr
+ *	g_serials, g_serials_nr, g_listeners, g_listeners_nr
  *
  *   RETURNS:
  *	condition code
@@ -961,25 +1166,42 @@ static int	s_settings_load_n_parse (
 		const char	*a_settings_conf
 		)
 {
-int	l_rc;
+CFG$TREE *l_tree = NULL;
+CFG$NODE *l_root;
+uint32_t l_nerr = 0;
+unsigned l_rc;
 
-	config_init(&g_cfg);
-#ifdef	CONFIG_OPTION_IGNORECASE
-	config_set_options (&g_cfg, CONFIG_OPTION_IGNORECASE);
-#endif
+	cfg$inimsg();								/* The texts of CFG-x-... ; a repeated call is harmless */
 
-	/* Read the file; on an error report it (CFGPARSE), release the context and return */
-	if( !config_read_file(&g_cfg, a_settings_conf))
+	if ( !(1 & (l_rc = cfg$parse_file(a_settings_conf, CFG$M_NOCASE, &l_tree))) )
 		{
-		$PUTMSG_FAO(T2R$__CFGPARSE, config_error_file(&g_cfg), config_error_line(&g_cfg), config_error_text(&g_cfg), errno);
-		config_destroy(&g_cfg);
-		return	STS$K_ERROR;
+		cfg$puterrs(l_tree);
+		cfg$free(l_tree);
+
+		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf);
 		}
 
-	if ( !(1 & (l_rc = s_settings_process_serials (&g_cfg))) )
-		return	l_rc;
+	cfg$root(l_tree, &l_root);							/* The check routines look up the serials from it */
 
-	return	s_settings_process_listeners (&g_cfg);
+	if ( !(1 & (l_rc = cfg$validate(l_tree, s_cfg_settings, l_root, &l_nerr))) )
+		{
+		cfg$puterrs(l_tree);
+		cfg$free(l_tree);
+
+		if ( !l_nerr )							/* Not the file: the schema, no memory ... */
+			$PUTMSG_FAO(T2R$__SYSERR, "cfg$validate()", (int) l_rc, 0);
+
+		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf);
+		}
+
+	cfg$puterrs(l_tree);							/* The warnings, if any */
+
+	if ( 1 & (l_rc = s_settings_process_serials (l_root)) )
+		l_rc = s_settings_process_listeners (l_root);
+
+	cfg$free(l_tree);
+
+	return	l_rc;
 }
 
 
@@ -999,7 +1221,7 @@ int	l_rc;
  *	g_settings
  *
  *   IMPLICITE OUTPUTS:
- *	g_cfg, g_serials, g_serials_nr, g_listeners, g_listeners_nr
+ *	g_serials, g_serials_nr, g_listeners, g_listeners_nr
  *
  *   RETURNS:
  *	the condition code of s_settings_load_n_parse()

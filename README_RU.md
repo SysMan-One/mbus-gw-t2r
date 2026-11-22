@@ -79,7 +79,7 @@ MODBUS over Serial Line, а ответ сверяется с запросом п
 поиск неисправности был чтением, а не гаданием — см. руководство пользователя, глава 7.
 
 **Малый след.** Один процесс; зависимостей времени выполнения помимо libc нет. Бинарник
-около 100 КБ; набор StarLet и libconfig линкуются статически. Нигде нет циклов
+около 100 КБ; набор StarLet и yaLIBCFG линкуются статически. Нигде нет циклов
 активного ожидания: всё ожидание построено на `poll()`, поэтому простаивающий шлюз почти не
 потребляет процессор. Поток существует только на *активную* TCP-сессию и освобождается сразу
 после отключения клиента (утечек потоков и памяти нет — подтверждено прилагаемым стендом и
@@ -110,17 +110,18 @@ Digital Equipment Corporation: шапки модулей с парой IDENT/REV
 
 ###	Установка
 
-Шлюз зависит от двух пакетов: **libconfig** (разбор файла настроек, берётся из дистрибутива;
-линкуется статически, `-DT2R_STATIC_LIBCONFIG=OFF` — с разделяемой) и
-**StarLet** (набор UTILITY$ROUTINES, ставится из исходников как пакет CMake). Полная
+Шлюз зависит от двух пакетов: **StarLet** (набор UTILITY$ROUTINES) и **yaLIBCFG** (разбор и
+проверка файла настроек: синтаксис libconfig, Apache-2.0, семейство StarLet; нужен StarLet 1.7 или
+новее). Оба собираются из исходников и ставятся как пакеты CMake (`find_package`); из
+дистрибутива не берётся ничего, оба линкуются статически. Полная
 последовательность от чистой системы до работающего шлюза:
 
 ####	Шаг 1. Установить средства сборки
 
 ```
-$ sudo apt install build-essential cmake pkg-config libconfig-dev
+$ sudo apt install build-essential cmake git
 ```
-(в дистрибутивах на основе RPM: `sudo dnf install gcc make cmake pkgconf libconfig-devel`)
+(в дистрибутивах на основе RPM: `sudo dnf install gcc make cmake git`)
 
 ####	Шаг 2. Установить пакет StarLet
 
@@ -136,9 +137,23 @@ $ sudo cmake --install .
 Пакет ставится в `/usr/local`: библиотека `libstarlet`, публичные заголовки и конфигурация
 пакета CMake (после этого становится доступен `find_package(StarLet)`). Чтобы установить в
 другой префикс, используйте `sudo cmake --install . --prefix /opt/starlet`, а на шаге 3
-передайте шлюзу `-DCMAKE_PREFIX_PATH=/opt/starlet`.
+передайте `-DCMAKE_PREFIX_PATH=/opt/starlet` cmake для yaLIBCFG и на шаге 4 --- cmake шлюза.
+Нужен StarLet 1.7 или новее.
 
-####	Шаг 3. Собрать шлюз
+####	Шаг 3. Установить пакет yaLIBCFG
+
+```
+$ git clone --depth 1 --branch X.01-01 https://github.com/SysMan-One/yaLIBCFG.git
+$ cmake -S yaLIBCFG -B yaLIBCFG/build -DCMAKE_BUILD_TYPE=Release \
+	-DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
+$ cmake --build yaLIBCFG/build
+$ sudo cmake --install yaLIBCFG/build
+```
+
+Это yaLIBCFG, релиз X.01-01 (https://github.com/SysMan-One/yaLIBCFG). Если StarLet стоит не в
+префиксе по умолчанию, добавьте к первому cmake `-DCMAKE_PREFIX_PATH=<префикс StarLet>`.
+
+####	Шаг 4. Собрать шлюз
 
 ```
 $ git clone <URL репозитория>
@@ -147,6 +162,9 @@ $ mkdir build && cd build
 $ cmake ../ -DCMAKE_BUILD_TYPE=Release
 $ make -s
 ```
+
+Если StarLet и yaLIBCFG стоят не в префиксе по умолчанию, укажите их:
+`cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="<starlet>;<yalibcfg>"`.
 
 Типы сборки: `Release` (эксплуатация), `Debug` (символы, трассировка), `Asan` (санитайзеры
 адресов и неопределённого поведения, для разработки).
@@ -162,9 +180,8 @@ $ cmake ../ -DCMAKE_TOOLCHAIN_FILE=../cmake/musl.cmake -DCMAKE_BUILD_TYPE=Releas
 $ make -s
 ```
 
-Зависимости (StarLet и libconfig) тоже должны быть собраны под musl и установлены в этот
-префикс; укажите `PKG_CONFIG_LIBDIR` на его `lib/pkgconfig`, чтобы подхватился musl-вариант
-libconfig, а не системный.
+Зависимости (StarLet и yaLIBCFG) тоже должны быть собраны под musl и установлены в этот
+префикс.
 
 Одна особенность musl, которую берёт на себя toolchain-файл: musl поставляет собственные
 заголовки, но не заголовки ядра (`linux/serial.h`, `asm/ioctls.h`), поэтому каталоги заголовков
@@ -191,7 +208,7 @@ $ sudo make install
 `Keeping the existing ...`.
 
 Префикс по умолчанию — `/opt/mbusgw-t2r`: самодостаточное дерево, которое удаляется целиком.
-Чтобы поставить в другое место, задайте префикс на шаге 3:
+Чтобы поставить в другое место, задайте префикс на шаге 4:
 `cmake ../ -DCMAKE_INSTALL_PREFIX=/usr/local ...` — тогда бинарник попадёт в `/usr/local/sbin/`,
 файлы конфигурации — в `/usr/local/etc/mbusgw-t2r/`, документация — в
 `/usr/local/share/doc/mbusgw-t2r/`. Юнит systemd (копия в документации и установленный при
@@ -229,12 +246,12 @@ $ sudo make uninstall
 
 К каждому релизному тегу на GitHub (`v0.13.5` и новее) прикладываются пакеты `.deb` для amd64 и
 arm64: https://github.com/napilab/mbus-gw-t2r/releases. Они собраны на Debian 12 и требуют только
-glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ubuntu 24.04); libconfig и StarLet
+glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ubuntu 24.04); StarLet и yaLIBCFG
 слинкованы статически. Пакет ставит шлюз в `/opt/mbusgw-t2r/` и службу systemd
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.2.1-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.3.0-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -255,7 +272,7 @@ glibc 2.34 или новее. Перед релизом он лишь запус
 выключенной:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.2.1-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.3.0-1.x86_64.rpm
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -270,12 +287,12 @@ $ sudo systemctl enable --now mbusgw-t2r
 big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`,
 `arm_cortex-a7`, `arm_cortex-a7_neon-vfpv4` (ipq40xx, sunxi) и `x86_64`: `.ipk` для OpenWrt 24.10
 и `.apk` для OpenWrt 25.12. Архитектура пакетов вашей платы — строка `DISTRIB_ARCH` в
-`/etc/openwrt_release`. libconfig и StarLet слинкованы статически: у пакета нет зависимостей,
+`/etc/openwrt_release`. StarLet и yaLIBCFG слинкованы статически: у пакета нет зависимостей,
 сеть роутеру для установки не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 Пакет ставит шлюз в `/usr/sbin/mbusgw-t2r`, настройки — в `/etc/mbusgw-t2r/`, службу procd —
@@ -290,7 +307,7 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 ```
 
 Пакеты собирает официальный OpenWrt SDK из фида `openwrt/` этого репозитория (`mbusgw-t2r` и
-вспомогательные `starlet` и `libconfig-static`, только для сборки); пакеты `x86_64` и `mips_24kc` перед релизом
+вспомогательные `starlet` (StarLet 1.8.0) и `yalibcfg`, только для сборки); пакеты `x86_64` и `mips_24kc` перед релизом
 ставятся и запускаются в образах OpenWrt. Собрать своим SDK:
 `echo "src-link mbusgw <это дерево>/openwrt" >> feeds.conf`,
 `./scripts/feeds update mbusgw && ./scripts/feeds install mbusgw-t2r`,
@@ -316,7 +333,7 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 ####	Автоматические тесты (GitHub Actions)
 
 Workflow `.github/workflows/ci.yml` (значок в начале файла) при каждом push и pull request собирает
-StarLet и шлюз на amd64 и arm64 и прогоняет тесты, которым не нужно железо:
+StarLet, yaLIBCFG и шлюз на amd64 и arm64 и прогоняет тесты, которым не нужно железо:
 `tests/issues_test.py all` и `tests/ctl_test.py` (пара pty и имитатор ведомого RTU).
 
 ####	Автоматическая сборка (GitLab CI)
@@ -324,10 +341,11 @@ StarLet и шлюз на amd64 и arm64 и прогоняет тесты, кот
 Файл `.gitlab-ci.yml` собирает шлюз при каждом push в репозиторий на GitLab. Он делает те же шаги,
 что описаны выше, в Docker-образе `gcc`:
 
-1. ставит `cmake`, `pkg-config` и `libconfig-dev`;
+1. ставит `cmake`;
 2. клонирует StarLet из `https://gitlab.com/SysMan-One/utility_routines.git`, собирает его и ставит
    в `/usr/local` (адрес задан переменной `STARLET_REPO` — замените его, чтобы брать StarLet из зеркала);
-3. собирает шлюз в каталоге `build/` (Debug).
+3. клонирует yaLIBCFG из его релизного тега (`YALIBCFG_TAG`, `X.01-01`), собирает его и ставит;
+4. собирает шлюз в каталоге `build/` (Debug).
 
 Задание только проверяет, что код компилируется: шлюз оно не устанавливает и бинарник не сохраняет.
 Если задание упало на шаге StarLet, проверьте, что репозиторий StarLet доступен с раннера.
@@ -383,11 +401,20 @@ PDF собираются скриптом `docs/make_userguide_pdf.py` (набо
 | `target` | да | Последовательное устройство (из раздела `serials`), куда передаются запросы | `"/dev/ttyUSB0"` |
 | `connlm` | нет | Сколько TCP-клиентов может быть подключено к этому порту **одновременно**; лишний сразу отключается (`%T2R-W-CONNLIMIT`) | 1..512, по умолчанию 32 |
 | `idletmo` | нет | Клиент, который ничего не присылает столько **секунд**, отключается (`%T2R-W-IDLETMO`); клиент, опрашивающий редко, просто переподключится | 1..86400, по умолчанию 60 |
-| `mode` | нет | `"MODBUS"` --- шлюз MODBUS TCP в RTU; `"RAW"` --- прозрачный поток октетов (см. *Режим RAW (прозрачный)* ниже). Регистр не важен; любое другое значение отбрасывает запись (`%T2R-E-LSNBADMODE`) | `"MODBUS"` (по умолчанию), `"RAW"` |
-| `takeover` | нет | **Только RAW.** `1`: новый клиент вытесняет текущего (`%T2R-W-RAWKICK`); `0`: пока клиент подключён, новый отклоняется (`%T2R-W-RAWBUSY`). В режиме MODBUS ключ --- ошибка (`%T2R-E-LSNRAWOPT`) | 0..1, по умолчанию 1 |
+| `mode` | нет | `"MODBUS"` --- шлюз MODBUS TCP в RTU; `"RAW"` --- прозрачный поток октетов (см. *Режим RAW (прозрачный)* ниже). Регистр не важен; любое другое значение --- ошибка | `"MODBUS"` (по умолчанию), `"RAW"` |
+| `takeover` | нет | **Только RAW.** `1`: новый клиент вытесняет текущего (`%T2R-W-RAWKICK`); `0`: пока клиент подключён, новый отклоняется (`%T2R-W-RAWBUSY`). В режиме MODBUS ключ --- ошибка | 0..1, по умолчанию 1 |
 | `iotmo` | нет | Зарезервирован, пока не используется | |
 
-Значение `connlm`/`idletmo` вне диапазона отбрасывает всю запись слушателя (`%T2R-E-LSNOPTRNG`).
+Значение `connlm`/`idletmo` вне диапазона --- ошибка (`%CFG-E-RANGE`). Начиная с V.01-03 весь файл
+настроек проверяется схемой **до того, как что-либо применено**: проблемы печатаются сразу, каждая
+с путём настройки, файлом, строкой и столбцом, затем `%T2R-E-CFGREJECT`, и шлюз не запускается
+(`/check` завершается неудачей; `RESTART GATEWAY` в `mbus-ctl` отклоняется, а шлюз продолжает работать
+как работал). До V.01-03 неправильная запись пропускалась с сообщением, и шлюз работал дальше с
+остальными: **это изменилось**. Настройка, которую шлюз не знает, --- ошибка, две записи `serials` с
+одним `device` --- ошибка, допускается не более 128 `serials` и 128 `listeners`, а `target`, которого нет
+среди `device` в `serials`, отклоняет файл. Поэтому в поставляемом образце `modbus-t2r_settings.conf`
+два слушателя для `/dev/ttyS1` и `/dev/ttyS0` закомментированы. Сообщения разобраны в руководстве
+пользователя, 7.2; полный список сообщений `CFG` --- в руководстве yaLIBCFG (Приложение A).
 В режиме RAW `connlm` может быть только 1, а `idletmo` по умолчанию равен 86400 (не 60).
 Каждый одновременный клиент занимает один поток: при большом числе клиентов учитывайте лимит
 `TasksMax` юнита systemd (см. в руководстве пользователя *Траблшутинг*, `SESSFAIL`).
@@ -419,7 +446,7 @@ serials = (
  - Один клиент за раз (`connlm` может быть только 1). По умолчанию новый клиент **вытесняет**
    старого: старое соединение закрывается (`RAWKICK`). При `takeover = 0` новый клиент отклоняется (`RAWBUSY`).
  - Последовательную линию RAW-слушателя нельзя использовать в другом слушателе, ни в MODBUS, ни
-   в RAW (`%T2R-E-LSNRAWSHR`). MODBUS-слушатели по-прежнему могут делить линию между собой.
+   в RAW (ошибка). MODBUS-слушатели по-прежнему могут делить линию между собой.
  - Скорость, чётность и стоп-биты берутся из записи `serials` шлюза. То, что удалённая программа
    задаёт у своего виртуального COM-порта, **не** передаётся.
  - `idletmo` по умолчанию --- 86400 секунд. Клиент, который умер молча (сбой, обрыв кабеля),

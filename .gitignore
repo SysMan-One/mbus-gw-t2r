@@ -16,3 +16,4 @@ Makefile
 *.autosave
 !openwrt/*/Makefile
 .codegraph/
+__pycache__/

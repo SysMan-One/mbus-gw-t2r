@@ -12,7 +12,7 @@
 #	USAGE:
 #		$ cmake ../ -DCMAKE_TOOLCHAIN_FILE=../cmake/musl.cmake -DCMAKE_BUILD_TYPE=Release
 #
-#		The dependencies (StarLet, libconfig) must be built for musl too and pointed at
+#		The dependencies (StarLet, yaLIBCFG) must be built for musl too and pointed at
 #		by -DCMAKE_PREFIX_PATH=<musl prefix>.
 #
 #	AUTHOR: StarLet Squad and Ruslan R. Laishev (AKA: BadAss sysman)

@@ -14,6 +14,8 @@
 #       MODIFICATION HISTORY:
 #
 #       10-NOV-2026     CLD     Initial revision.
+#       22-NOV-2026     CLD     V.01-03: yaLIBCFG (the settings file) instead of libconfig - built from its
+#                               release tag like StarLet, into the runner's temporary directory.
 #--
 
 name: ci
@@ -28,6 +30,8 @@ permissions:
 
 env:
   STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
+  YALIBCFG_REPO: "https://github.com/SysMan-One/yaLIBCFG.git"
+  YALIBCFG_TAG: "X.01-01"
 
 jobs:
   build-test:
@@ -44,8 +48,8 @@ jobs:
       - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends build-essential cmake pkg-config \
-            libconfig-dev git ca-certificates python3
+          sudo apt-get install --yes --no-install-recommends build-essential cmake \
+            git ca-certificates python3
 
       - uses: actions/checkout@v5
 
@@ -58,9 +62,19 @@ jobs:
           cmake --build "$RUNNER_TEMP/starlet-build" -j "$(nproc)"
           cmake --install "$RUNNER_TEMP/starlet-build"
 
+      - name: Build yaLIBCFG
+        run: |
+          git clone --depth 1 --branch "$YALIBCFG_TAG" "$YALIBCFG_REPO" "$RUNNER_TEMP/yalibcfg-src"
+          git -C "$RUNNER_TEMP/yalibcfg-src" log -1 --format='yaLIBCFG: %H %cd'
+          cmake -S "$RUNNER_TEMP/yalibcfg-src" -B "$RUNNER_TEMP/yalibcfg-build" -DCMAKE_BUILD_TYPE=Release \
+            -DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/starlet" -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/yalibcfg"
+          cmake --build "$RUNNER_TEMP/yalibcfg-build" -j "$(nproc)"
+          cmake --install "$RUNNER_TEMP/yalibcfg-build"
+
       - name: Build the gateway
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/starlet"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/starlet;$RUNNER_TEMP/yalibcfg"
           cmake --build build -j "$(nproc)"
           file build/mbusgw-t2r build/mbus-ctl
           out=$(build/mbusgw-t2r 2>&1 || true)

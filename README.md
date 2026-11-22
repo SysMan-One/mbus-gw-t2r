@@ -79,7 +79,7 @@ is designed to be grepped by the code and to make the troubleshooting a reading 
 not a guessing one --- see the User Guide, Chapter 7.
 
 **Small footprint.** A single process; no runtime dependencies beyond libc. The binary is
-about 100 KB; the StarLet set and libconfig are linked statically. There are no busy loops
+about 100 KB; the StarLet set and yaLIBCFG are linked statically. There are no busy loops
 anywhere: all the waiting is `poll()`-driven, so an idle gateway consumes practically zero
 CPU. One thread exists per *active* TCP session only and is released as soon as the client
 disconnects (no thread or memory leaks --- verified by the bundled test bench and by the
@@ -114,16 +114,18 @@ this code was written for you.
 
 ### 	Installation
 
-The gateway depends on two packages: **libconfig** (a settings file parser, is taken from the
-distro; linked statically, `-DT2R_STATIC_LIBCONFIG=OFF` links the shared one) and **StarLet** (the UTILITY$ROUTINES set, is installed from sources as a CMake package).
+The gateway depends on two packages: **StarLet** (the UTILITY$ROUTINES set) and **yaLIBCFG** (the
+parser and the checker of the settings file: libconfig syntax, Apache-2.0, the StarLet family; it
+needs StarLet 1.7 or newer). Both are built from sources and installed as CMake packages
+(`find_package`); nothing is taken from the distro, and both are linked statically.
 The whole sequence from a bare system to a running gateway is:
 
 ####	Step 1. Install the build prerequisites
 
 ```
-$ sudo apt install build-essential cmake pkg-config libconfig-dev
+$ sudo apt install build-essential cmake git
 ```
-(on RPM-based distros: `sudo dnf install gcc make cmake pkgconf libconfig-devel`)
+(on RPM-based distros: `sudo dnf install gcc make cmake git`)
 
 ####	Step 2. Install the StarLet package
 
@@ -139,9 +141,23 @@ $ sudo cmake --install .
 The package is put under `/usr/local`: the `libstarlet` library, the public headers and the
 CMake package configuration (`find_package(StarLet)` becomes available). To install to another
 prefix use `sudo cmake --install . --prefix /opt/starlet` and then pass
-`-DCMAKE_PREFIX_PATH=/opt/starlet` to the gateway's cmake at the Step 3.
+`-DCMAKE_PREFIX_PATH=/opt/starlet` to the cmake of yaLIBCFG at the Step 3 and to the gateway's cmake
+at the Step 4. StarLet 1.7 or newer is needed.
 
-####	Step 3. Build the gateway
+####	Step 3. Install the yaLIBCFG package
+
+```
+$ git clone --depth 1 --branch X.01-01 https://github.com/SysMan-One/yaLIBCFG.git
+$ cmake -S yaLIBCFG -B yaLIBCFG/build -DCMAKE_BUILD_TYPE=Release \
+	-DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
+$ cmake --build yaLIBCFG/build
+$ sudo cmake --install yaLIBCFG/build
+```
+
+This is yaLIBCFG, release X.01-01 (https://github.com/SysMan-One/yaLIBCFG). If StarLet is not in
+the default prefix, add `-DCMAKE_PREFIX_PATH=<StarLet prefix>` to the first cmake.
+
+####	Step 4. Build the gateway
 
 ```
 $ git clone <URL of repo>
@@ -150,6 +166,9 @@ $ mkdir build && cd build
 $ cmake ../ -DCMAKE_BUILD_TYPE=Release
 $ make -s
 ```
+
+If StarLet and yaLIBCFG are not in the default prefix, name them:
+`cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="<starlet>;<yalibcfg>"`.
 
 Build types: `Release` (production), `Debug` (symbols, tracing), `Asan` (address/UB sanitizers
 for the development).
@@ -165,9 +184,8 @@ $ cmake ../ -DCMAKE_TOOLCHAIN_FILE=../cmake/musl.cmake -DCMAKE_BUILD_TYPE=Releas
 $ make -s
 ```
 
-The dependencies (StarLet and libconfig) have to be built for musl too and installed into that
-prefix; point `PKG_CONFIG_LIBDIR` at its `lib/pkgconfig` so that the musl libconfig is picked up
-instead of the host one.
+The dependencies (StarLet and yaLIBCFG) have to be built for musl too and installed into that
+prefix.
 
 One musl specific detail, handled by the toolchain file: musl ships its own headers but not the
 kernel ones (`linux/serial.h`, `asm/ioctls.h`), so the kernel header directories are appended
@@ -193,7 +211,7 @@ The configuration files are installed **only when they are absent**: a repeated 
 as `Keeping the existing ...`.
 
 The default prefix is `/opt/mbusgw-t2r` --- a self-contained tree, removed as a whole. To install
-elsewhere give the prefix at the Step 3: `cmake ../ -DCMAKE_INSTALL_PREFIX=/usr/local ...` ---
+elsewhere give the prefix at the Step 4: `cmake ../ -DCMAKE_INSTALL_PREFIX=/usr/local ...` ---
 the binary then goes to `/usr/local/sbin/`, the configuration files to
 `/usr/local/etc/mbusgw-t2r/`, the docs to `/usr/local/share/doc/mbusgw-t2r/`. The systemd unit
 (the copy in the docs, and the installed one with `-DT2R_SYSTEMD_UNIT=ON`) carries the paths of
@@ -231,12 +249,12 @@ A release is tagged with the `__IDENT__` of the head module itself, with no "v" 
 
 Every release tag on GitHub (`v0.13.5` and later) gets `.deb` packages for amd64 and arm64 at
 https://github.com/napilab/mbus-gw-t2r/releases. They are built on Debian 12 and need glibc 2.34
-or newer only (tested on Debian 12, Debian 13 and Ubuntu 24.04); libconfig and StarLet are linked
+or newer only (tested on Debian 12, Debian 13 and Ubuntu 24.04); StarLet and yaLIBCFG are linked
 statically. The package puts the gateway to `/opt/mbusgw-t2r/` and the systemd unit
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.2.1-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.3.0-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -257,7 +275,7 @@ attached to the releases made after this text was written: `x86_64`, `aarch64`, 
 `%config(noreplace)`, the unit is installed disabled:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.2.1-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.3.0-1.x86_64.rpm
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -272,12 +290,12 @@ From `v0.13.6` on, a release also has OpenWrt packages for `mips_24kc` (ath79 an
 big-endian MIPS boards), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`,
 `arm_cortex-a7`, `arm_cortex-a7_neon-vfpv4` (ipq40xx, sunxi) and `x86_64`: an `.ipk` for
 OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture is the
-`DISTRIB_ARCH` line of `/etc/openwrt_release`. libconfig and StarLet are linked statically: the
+`DISTRIB_ARCH` line of `/etc/openwrt_release`. StarLet and yaLIBCFG are linked statically: the
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_1.2.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.2.1-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.3.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.3.0-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`
@@ -292,7 +310,7 @@ settings and switch it on; its messages go to the system log:
 ```
 
 The packages are built by the official OpenWrt SDK from the feed `openwrt/` of this repository
-(`mbusgw-t2r` and the build-only `starlet` and `libconfig-static`); the packages of `x86_64` and `mips_24kc` are installed
+(`mbusgw-t2r` and the build-only `starlet` (StarLet 1.8.0) and `yalibcfg`); the packages of `x86_64` and `mips_24kc` are installed
 and started in the OpenWrt images before the release. To build them by your own SDK:
 `echo "src-link mbusgw <this tree>/openwrt" >> feeds.conf`,
 `./scripts/feeds update mbusgw && ./scripts/feeds install mbusgw-t2r`,
@@ -318,7 +336,7 @@ Anything else - the file is not the one released: do not install it. The earlier
 
 ####	Automatic tests (GitHub Actions)
 
-The workflow `.github/workflows/ci.yml` (the badge at the top) builds StarLet and the gateway on
+The workflow `.github/workflows/ci.yml` (the badge at the top) builds StarLet, yaLIBCFG and the gateway on
 amd64 and arm64 on every push and pull request and runs the tests that need no hardware:
 `tests/issues_test.py all` and `tests/ctl_test.py` (a pty pair and a fake RTU slave).
 
@@ -327,10 +345,11 @@ amd64 and arm64 on every push and pull request and runs the tests that need no h
 The file `.gitlab-ci.yml` builds the gateway on every push to the GitLab repository. It does the
 same steps as above, in the `gcc` Docker image:
 
-1. installs `cmake`, `pkg-config` and `libconfig-dev`;
+1. installs `cmake`;
 2. clones StarLet from `https://gitlab.com/SysMan-One/utility_routines.git`, builds it and installs it
    into `/usr/local` (the variable `STARLET_REPO` holds the address - change it to use a mirror);
-3. builds the gateway in the `build/` directory (Debug).
+3. clones yaLIBCFG from its release tag (`YALIBCFG_TAG`, `X.01-01`), builds it and installs it;
+4. builds the gateway in the `build/` directory (Debug).
 
 The job only checks that the code compiles: it does not install the gateway and does not keep the
 binary. If the job fails at the StarLet step, check that the StarLet repository can be reached from
@@ -387,11 +406,20 @@ The `listeners` section --- one record per TCP port:
 | `target` | yes | The serial device (from the `serials` section) to forward the requests to | `"/dev/ttyUSB0"` |
 | `connlm` | no | How many TCP clients may be connected to this port **at the same time**; one more is disconnected at once (`%T2R-W-CONNLIMIT`) | 1..512, default 32 |
 | `idletmo` | no | A client which sends nothing for this many **seconds** is disconnected (`%T2R-W-IDLETMO`); a client which polls rarely just reconnects | 1..86400, default 60 |
-| `mode` | no | `"MODBUS"` --- the MODBUS TCP to RTU gateway; `"RAW"` --- a transparent octet stream (see *RAW (transparent) mode* below). Not case-sensitive; any other value rejects the record (`%T2R-E-LSNBADMODE`) | `"MODBUS"` (default), `"RAW"` |
-| `takeover` | no | **RAW only.** `1`: a new client kicks the current one out (`%T2R-W-RAWKICK`); `0`: a new client is rejected while one is connected (`%T2R-W-RAWBUSY`). In the MODBUS mode the key is an error (`%T2R-E-LSNRAWOPT`) | 0..1, default 1 |
+| `mode` | no | `"MODBUS"` --- the MODBUS TCP to RTU gateway; `"RAW"` --- a transparent octet stream (see *RAW (transparent) mode* below). Not case-sensitive; any other value is an error | `"MODBUS"` (default), `"RAW"` |
+| `takeover` | no | **RAW only.** `1`: a new client kicks the current one out (`%T2R-W-RAWKICK`); `0`: a new client is rejected while one is connected (`%T2R-W-RAWBUSY`). In the MODBUS mode the key is an error | 0..1, default 1 |
 | `iotmo` | no | Reserved, not used yet | |
 
-An out of range `connlm`/`idletmo` rejects the whole listener record (`%T2R-E-LSNOPTRNG`).
+An out of range `connlm`/`idletmo` is an error (`%CFG-E-RANGE`). Since V.01-03 the whole settings file is
+checked by a schema **before anything is applied**: the problems are printed at once, each with the
+setting path, the file, the line and the column, then `%T2R-E-CFGREJECT` and the gateway does not
+start (`/check` exits with a failure; `RESTART GATEWAY` of `mbus-ctl` is refused and the gateway goes on
+as it is). Before V.01-03 a wrong record was skipped with a message and the gateway went on with
+the rest: **this has changed**. A setting the gateway does not know is an error, two `serials` with the
+same `device` are an error, at most 128 `serials` and 128 `listeners` are allowed, and a `target` which
+is not a `device` of `serials` refuses the file. The shipped sample `modbus-t2r_settings.conf` has its two
+listeners of `/dev/ttyS1` and `/dev/ttyS0` commented out for this reason. The messages are
+explained in the User Guide, 7.2; the full list of the `CFG` messages is in the yaLIBCFG manual (Appendix A).
 In the RAW mode `connlm` may only be 1 and the default `idletmo` is 86400 (not 60).
 Every simultaneous client takes one thread: with many clients mind the `TasksMax` limit of the
 systemd unit (see *Troubleshooting*, `SESSFAIL`, in the User Guide).
@@ -422,7 +450,7 @@ Limits and rules:
  - One client at a time (`connlm` may only be 1). By default a new client **takes over**: the old
    connection is shut down (`RAWKICK`). With `takeover = 0` the new client is rejected (`RAWBUSY`).
  - The serial line of a RAW listener cannot be used by any other listener, MODBUS or RAW
-   (`%T2R-E-LSNRAWSHR`). MODBUS listeners may still share a line among themselves.
+   (an error). MODBUS listeners may still share a line among themselves.
  - The speed, the parity and the stop bits come from the `serials` record of the gateway. Whatever
    the remote program sets on its virtual COM port is **not** transported.
  - The default `idletmo` is 86400 seconds. A client which has died silently (a crash, a cut

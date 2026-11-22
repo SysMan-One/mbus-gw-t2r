@@ -74,6 +74,12 @@
 **
 **	22-NOV-2026	CLD	V.01-01ECO04 / REV: 01.01.04 - The <flow> key of a serial: SERBADFLOW, LSNXONRTU,
 **				FLOWNOTSET, RAWSTALL are appended; DEVADDED shows the flow control.
+**
+**	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - CFGREJECT is appended: the settings are checked by the schema of
+**				yaLIBCFG (CFG-E-... with the file, line and column). Not signalled any more, kept for the
+**				numbers: CFGPARSE, CFGNOSECT, CFGTRUNC, SERBADREC, SERBADOPT, SERBADCHR, SERRANGE,
+**				SERBADPAR, SERBADFLOW, NOSERIALS, LSNBADREC, LSNBADBIND, LSNRANGE, LSNBADADDR, LSNNOTGT,
+**				NOLSNRS, LSNOPTRNG, LSNBADMODE, LSNRAWSHR, LSNRAWOPT, LSNXONRTU.
 **--
 */
 
@@ -216,6 +222,7 @@ $DEF_MSG(T2R, ERROR,	SERBADFLOW,		"[serial #!2ZL:<!AC>] --- <flow> value <!AZ> i
 $DEF_MSG(T2R, ERROR,	LSNXONRTU,		"[listener #!2ZL] --- target <!AZ> has <flow> XON/XOFF: the binary RTU frames carry the 0x11/0x13 octets, a MODBUS listener needs NONE or RTS/CTS") \
 $DEF_MSG(T2R, WARN,	RAWSTALL,		"[#!SL] <!AC> has sent nothing of the last data for !UL sec after the client has gone (CTS off? an XOFF?) --- !UL octets are dropped") \
 $DEF_MSG(T2R, WARN,	FLOWNOTSET,		"<!AC> the driver has not taken <flow> !AZ --- the line works without this flow control") \
+$DEF_MSG(T2R, ERROR,	CFGREJECT,		"Settings <!AZ> are refused, see the CFG messages above --- nothing is applied") \
 
 
 

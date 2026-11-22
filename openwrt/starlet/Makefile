@@ -8,17 +8,21 @@
 #	AUTHOR: StarLet Squad and Ruslan R. Laishev (AKA: BadAss SysMan)
 #
 #	CREATION DATE: 28-OCT-2026
+#
+#	MODIFICATION HISTORY:
+#
+#	22-NOV-2026	CLD	V.01-03: StarLet 1.8.0 (the tag v1.8.0): yaLIBCFG needs 1.7 at least.
 #--
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=starlet
-PKG_VERSION:=1.6.10
+PKG_VERSION:=1.8.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://gitlab.com/SysMan-One/utility_routines.git
-PKG_SOURCE_VERSION:=e3c218ddc058fddf1cb8d5105914279a574b34fd
+PKG_SOURCE_VERSION:=a5c15288113f320ec5e1cbc5033265b7fbc25ca3
 PKG_MIRROR_HASH:=skip
 
 PKG_LICENSE:=Apache-2.0

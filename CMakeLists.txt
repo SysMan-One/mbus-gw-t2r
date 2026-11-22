@@ -105,6 +105,10 @@
 #		$ make -s && cpack -G RPM
 #
 #	The OpenWrt packages (.ipk, .apk): the feed openwrt/, see README.md.
+#
+#	22-NOV-2026	CLD	V.01-03: yaLIBCFG (find_package(yaLIBCFG), static, the StarLet family) reads the
+#				settings file instead of libconfig: pkg-config, T2R_STATIC_LIBCONFIG and the library
+#				directories of libconfig are gone; the .rpm license is Apache-2.0 only (NOTICE).
 #--
 
 cmake_minimum_required (VERSION 3.10)
@@ -147,37 +151,12 @@ include(GNUInstallDirs)							# Must follow project(): needs the compiler info
 set ( CMAKE_VERBOSE_MAKEFILE ON )
 set ( CMAKE_COLOR_MAKEFILE   ON )
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBCONFIG REQUIRED libconfig)
-
 #
-#   LIBCONFIG_LIBRARIES holds the bare "-lconfig" name, so the library directory reported by
-#   pkg-config must be given to the linker explicitly - otherwise a libconfig installed to a
-#   non-standard prefix (a musl sysroot, /opt/...) is not found at the link time.
+#   yaLIBCFG - the settings file (the libconfig syntax, a schema, the positional diagnostics): a
+#   static library of the StarLet family, found as StarLet is (CMAKE_PREFIX_PATH); see README.md.
 #
-link_directories(${LIBCONFIG_LIBRARY_DIRS})
-
-#
-#   libconfig is linked statically by default: the soname differs from distro to distro (libconfig9,
-#   libconfig11, ...), so a binary linked with the shared one runs only where it was built. The
-#   library has no dependencies beyond libc; LGPL-2.1 is satisfied by the open sources (see NOTICE).
-#
-option(T2R_STATIC_LIBCONFIG "Link libconfig statically" ON)
-
-if (T2R_STATIC_LIBCONFIG)
-	find_library(LIBCONFIG_STATIC_LIB NAMES libconfig.a HINTS ${LIBCONFIG_LIBRARY_DIRS} NO_CMAKE_SYSTEM_PATH)
-	if (NOT LIBCONFIG_STATIC_LIB)
-		find_library(LIBCONFIG_STATIC_LIB NAMES libconfig.a)
-	endif ()
-	if (NOT LIBCONFIG_STATIC_LIB)
-		message (FATAL_ERROR "libconfig.a is not found (install libconfig-dev) - or give -DT2R_STATIC_LIBCONFIG=OFF")
-	endif ()
-	set (T2R_LIBCONFIG_LINK ${LIBCONFIG_STATIC_LIB})
-else ()
-	set (T2R_LIBCONFIG_LINK ${LIBCONFIG_LIBRARIES})
-endif ()
-message (STATUS "libconfig: ${T2R_LIBCONFIG_LINK}")
-
+find_package(yaLIBCFG 1.0 REQUIRED CONFIG)
+message (STATUS "yaLIBCFG: ${yaLIBCFG_VERSION} from ${yaLIBCFG_DIR}")
 
 find_package(StarLet REQUIRED)						# The installed UTILITY$ROUTINES package,
 									# see README.md how to install it
@@ -224,7 +203,6 @@ endif()
 
 include_directories (
 	src/
-	${LIBCONFIG_INCLUDE_DIRS}
 )
 
 set ( T2R_SOURCES                                               # TOOTOO Router
@@ -241,7 +219,7 @@ set ( T2R_SOURCES                                               # TOOTOO Router
 
 
 add_executable ( ${T2R_TARGET} ${T2R_SOURCES})
-target_link_libraries( ${T2R_TARGET} StarLet::starlet pthread rt ${T2R_LIBCONFIG_LINK})
+target_link_libraries( ${T2R_TARGET} yaLIBCFG::yalibcfg StarLet::starlet pthread rt)
 
 #
 #   mbus-ctl - the monitoring and control utility: talks to the gateway over its local control socket
@@ -390,11 +368,11 @@ endif ()
 #
 #	The dependency scan of rpmbuild is off: the host of a cross build cannot scan a foreign ELF, so
 #	the only run-time requirement - the glibc of the build (2.34, Debian 12) - is given explicitly.
-#	libconfig and StarLet are linked statically (T2R_STATIC_LIBCONFIG) - nothing else is needed.
+#	yaLIBCFG and StarLet are linked statically - nothing else is needed.
 #
 set (CPACK_RPM_FILE_NAME		RPM-DEFAULT)		# <name>-<version>-<release>.<arch>.rpm
 set (CPACK_RPM_PACKAGE_RELEASE		1)
-set (CPACK_RPM_PACKAGE_LICENSE		"Apache-2.0 and LGPL-2.1")	# see NOTICE: libconfig
+set (CPACK_RPM_PACKAGE_LICENSE		"Apache-2.0")		# see NOTICE
 set (CPACK_RPM_PACKAGE_GROUP		"Applications/Communications")
 set (CPACK_RPM_PACKAGE_URL		"https://github.com/napilab/mbus-gw-t2r")
 set (CPACK_RPM_PACKAGE_AUTOREQPROV	OFF)

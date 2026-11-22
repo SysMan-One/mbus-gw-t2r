@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-02ECO01"
-#define	__REV__		"01.02.01"
+#define	__IDENT__	"V.01-03"
+#define	__REV__		"01.03.00"
 
 /*
 **++
@@ -152,6 +152,9 @@
 **				off, XOFF) was held up to <idletmo> (found on an FTDI FT232R with the peer off).
 **				A half-closed RAW client loses the answers of the line from its FIN on (RAW has no
 **				half-close: recv() == 0 has always ended the session).
+**
+**	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - RRL: the product version V.01-03 (package 1.3.0), no code
+**				change in this module.
 **--
 */
 #ifndef	_GNU_SOURCE								/* POLLRDHUP; the musl build gives -D_GNU_SOURCE */

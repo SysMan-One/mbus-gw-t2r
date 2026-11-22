@@ -64,6 +64,9 @@
 **	22-NOV-2026	CLD	V.01-01ECO04 / REV: 01.01.04 - T2R$K_FLOW_*: the values of T2R$_SERIAL.flow (the
 **				<flow> key of a serials record, was parsed nowhere); T2R$K_RAW_STALL_SEC, T2R$K_RAW_STALL_STEP (RAWSTALL).
 **
+**	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - T2R$K_ANSTMO_MAX (the range of <iotmo> in the schema of the
+**				settings, yaLIBCFG).
+**
 **--
 */
 
@@ -117,6 +120,7 @@ enum {
 #define		T2R$K_LISTEN_BACKLOG	64				/* listen() queue of not yet accepted connections */
 #define		T2R$K_NET_TMO_SEC	300				/* A timeout for reading data from network socket */
 #define		T2R$K_ANSTMO_MSEC	1000				/* A default timeout to wait an answer on the RTU leg */
+#define		T2R$K_ANSTMO_MAX	3600000				/* <iotmo> of a serial, msec: 1..this		*/
 #define		T2R$K_SETTLE_MSEC	50				/* A pause after the serial port set up, then TCIOFLUSH */
 #define		T2R$K_REOPEN_MSEC	1000				/* An absent or lost device is reopened this often	*/
 #define		T2R$K_CHECK_MSEC	1000				/* The idle lines are checked for a hangup this often	*/

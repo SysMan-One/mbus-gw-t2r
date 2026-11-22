@@ -60,13 +60,14 @@
 #		  own compile flags (a configure-only CMake tree in
 #		  ~/.cache/mbus-gw-t2r-precheck-<hash of the checkout>, refreshed
 #		  when CMakeLists.txt or cmake/ changes; StarLet is looked for
-#		  where find_package (StarLet) looks, then in /opt/starlet), at
+#		  where find_package (StarLet) looks, then in /opt/starlet;
+#		  yaLIBCFG in /opt/yalibcfg; $CMAKE_PREFIX_PATH is added), at
 #		  most nproc at a time, each cut off after 900 s.  Needs jq.
 #		  /NOANALYZE turns off this check only.
 #	CPPCHECK  cppcheck on the same files, if installed: the one
 #		  configuration of a gcc build on this host (-D__GNUC__,
 #		  __linux__, __<arch>__), the include directories of src/,
-#		  libconfig and StarLet's.  A file cppcheck cannot parse is an
+#		  yaLIBCFG's and StarLet's.  A file cppcheck cannot parse is an
 #		  informational line, not a warning.  cppcheck 2.10 cannot parse
 #		  the $DEF_MSG token pasting of src/t2r_msgs.h, which every .c
 #		  includes - so in practice cppcheck checks nothing here and the
@@ -351,8 +352,11 @@ if (( ANALYZE && ${#CFILES[@]} )) && ! command -v jq >/dev/null; then
 elif (( ANALYZE && ${#CFILES[@]} )); then
 	CB=${XDG_CACHE_HOME:-$HOME/.cache}/mbus-gw-t2r-precheck-$(pwd -P | md5sum | cut -c1-8)	# one tree per checkout
 	DB=$CB/compile_commands.json
-	RECONF=0 PFX=()
-	for d in /usr/local /opt/starlet; do [[ -f $d/include/starlet.h ]] && { PFX=(-DCMAKE_PREFIX_PATH="$d"); break; }; done
+	RECONF=0 PFX=() PP=
+	for d in /usr/local /opt/starlet; do [[ -f $d/include/starlet.h ]] && { PP=$d; break; }; done
+	[[ -f /opt/yalibcfg/include/yalibcfg.h ]] && PP=${PP:+$PP;}/opt/yalibcfg		# V.01-03: the settings file
+	PP=${PP}${CMAKE_PREFIX_PATH:+;$CMAKE_PREFIX_PATH}						# and any other the caller gives
+	[[ -n $PP ]] && PFX=(-DCMAKE_PREFIX_PATH="$PP")
 	for c in CMakeLists.txt cmake/*.cmake cmake/*/*; do [[ $c -nt $DB ]] && RECONF=1; done	# true also when there is no $DB
 	if (( RECONF )); then
 		echo "%$FAC-I-CONFIG, configuring $CB"
@@ -396,7 +400,8 @@ if (( ${#CFILES[@]} )); then
 		SL=/usr/local
 		for d in /usr/local /opt/starlet; do [[ -f $d/include/starlet.h ]] && { SL=$d; break; }; done	# where find_package (StarLet) looks first
 		SI=(-Isrc)
-		command -v pkg-config >/dev/null && for d in $(pkg-config --cflags-only-I libconfig 2>/dev/null); do SI+=("$d"); done
+		IFS=';' read -ra YP <<< "${CMAKE_PREFIX_PATH:-}"
+		for d in /opt/yalibcfg /usr/local "${YP[@]}"; do [[ -f $d/include/yalibcfg.h ]] && { SI+=("-I$d/include"); break; }; done	# V.01-03: yaLIBCFG
 		while read -r l; do
 			[[ -n $l ]] || continue
 			if [[ $l == *"[internalAstError]" || $l == *"[syntaxError]" ]]; then
