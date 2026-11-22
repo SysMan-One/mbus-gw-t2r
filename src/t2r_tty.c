@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-01ECO02"
-#define	__REV__		"01.01.02"
+#define	__IDENT__	"V.01-01ECO03"
+#define	__REV__		"01.01.03"
 
 /*
 **++
@@ -132,6 +132,15 @@
 **	17-NOV-2026	CLD	V.01-01ECO02 / REV: 01.01.02 - .devname of a serial is an ASC: the messages take
 **				it by !AC, open() its sts (kept NUL-terminated), the traces print it by "%.*s".
 **				RRL: t2r$tty_raw_relay() indexes its two pollfd by FD$K_NET/FD$K_TTY (was 0/1).
+**
+**	22-NOV-2026	CLD	V.01-01ECO03 / REV: 01.01.03 - s_tty_open() sets the flow control of <flow>: RTS/CTS -
+**				CRTSCTS, XON/XOFF - IXON | IXOFF with VSTART/VSTOP = 0x11/0x13, NONE - both off
+**				(were always off); a driver which drops CRTSCTS is reported (FLOWNOTSET).
+**				t2r$tty_raw_relay(): tcflow(TCOOFF), tcflow(TCOON) at the start of a session on an XON/XOFF line (an
+**				XOFF left from the previous session kept the output stopped); the last portion of a
+**				gone client waits for a line which does not move (TIOCOUTQ; CTS off, XOFF) only for
+**				<iotmo> + T2R$K_RAW_STALL_SEC + the air time of 2048 octets (RAWSTALL), was: up to <idletmo> with the line taken - the
+**				takeover and every next client waited for it.
 **--
 */
 #include	<time.h>
@@ -1038,8 +1047,8 @@ int	l_rc;
 
 /*
  *   DESCRIPTION: Open (O_RDWR|O_NOCTTY|O_NDELAY|O_EXCL|O_CLOEXEC) and set up a serial port for
- *	the RTU communications: the configured rate/data bits (5..8)/parity/stop bits, raw
- *	non-canonical I/O without a software flow control, VMIN = VTIME = 0. If HAVE_TIOCRS485
+ *	the RTU communications: the configured rate/data bits (5..8)/parity/stop bits, the flow
+ *	control of .flow (NONE, XON/XOFF, RTS/CTS), raw non-canonical I/O, VMIN = VTIME = 0. If HAVE_TIOCRS485
  *	is defined and T2R$M_SERIAL_RS485 is set, the RS-485 mode is switched on by TIOCGRS485 +
  *	TIOCSRS485; a failure there is not fatal (RS485OFF, the flag is cleared). The input is
  *	binary-clean (no CR/NL translation, no stripping/marking). At the end the line settles for
@@ -1048,7 +1057,7 @@ int	l_rc;
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line; .devname and the line parameters (.baud,
- *			.databits, .parity, .stopbits, .flags) must be filled by the caller
+ *			.databits, .parity, .stopbits, .flow, .flags) must be filled by the caller
  *	a_quiet:	1 - the failures are not signalled (the periodic reopen of an absent device)
  *
  *   OUTPUTS:
@@ -1069,6 +1078,7 @@ static int s_tty_open (
 {
 speed_t l_speed = -1;
 int	l_flags = 0, l_rc;
+struct termios l_tios;
 struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 	l_flags = O_RDWR | O_NOCTTY | O_NDELAY | O_EXCL;
@@ -1159,11 +1169,24 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 	/* Binary-clean input: no CR/NL translation, no 8th bit stripping, no BREAK/parity marking */
 	a_serial->tios.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
 
-	/* Hardware flow control is disabled: with an inherited CRTSCTS and CTS low nothing goes out */
+	/*
+	 * The flow control of <flow>. Both kinds are cleared first: an inherited CRTSCTS with CTS low lets
+	 * nothing out. RTS/CTS: the kernel holds the output while CTS is low (s_tty_tx_drain() limits that
+	 * wait, a RAW write() gets EAGAIN once the driver buffer is full - the relay stalls) and drops RTS when its input buffer fills up. XON/XOFF: IXON
+	 * - the output stops on XOFF and goes on with XON only (no IXANY), IXOFF - the kernel sends XOFF/XON
+	 * for its input buffer; the two characters are set explicitly, an inherited VSTART/VSTOP may differ.
+	 */
 	a_serial->tios.c_cflag &= ~CRTSCTS;
-
-	/* Software flow control is disabled */
 	a_serial->tios.c_iflag &= ~(IXON | IXOFF | IXANY);
+
+	if ( a_serial->flow == T2R$K_FLOW_RTSCTS )
+		a_serial->tios.c_cflag |= CRTSCTS;
+	else if ( a_serial->flow == T2R$K_FLOW_XONXOFF )
+		{
+		a_serial->tios.c_iflag |= (IXON | IXOFF);
+		a_serial->tios.c_cc[VSTART] = 0x11;						/* DC1, XON	*/
+		a_serial->tios.c_cc[VSTOP] = 0x13;						/* DC3, XOFF	*/
+		}
 
 	/* Raw output */
 	a_serial->tios.c_oflag &=~ OPOST;
@@ -1175,6 +1198,14 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 	if ( tcsetattr(a_serial->fd, TCSANOW, &a_serial->tios) < 0 )
 		return	close(a_serial->fd), a_serial->fd = -1,
 			$SIGQ(a_quiet, T2R$__DEVSYSERR, &a_serial->devname, "tcsetattr()", -1, errno);
+
+	/*
+	 * tcsetattr() succeeds when ANY of the changes is taken, so CRTSCTS is read back: a driver may refuse
+	 * the hardware handshake (IXON/IXOFF are kept by the line discipline whatever the driver does). Not
+	 * fatal, the line works without the flow control.
+	 */
+	if ( (a_serial->flow == T2R$K_FLOW_RTSCTS) && !tcgetattr(a_serial->fd, &l_tios) && !(l_tios.c_cflag & CRTSCTS) )
+		$PUTMSG_FAO(T2R$__FLOWNOTSET, &a_serial->devname, "RTS/CTS");
 
 
 #ifdef HAVE_TIOCRS485
@@ -1790,7 +1821,10 @@ MODBUS_REQ_T	*l_req_pdu;
  *	down, the line driver - the device (as far as the line has a flow control at all).
  *	The relay is finished by: the peer close (or a shutdown() of the socket by the dispatcher -
  *	the takeover), an error of the socket or of the line, <a_idletmo> seconds of the silence in
- *	both directions, <g_exit_flag> (checked every T2R$K_RAW_POLL_MSEC). An absent or lost device
+ *	both directions, a line which does not move (TIOCOUTQ) the last portion of a gone client for
+ *	<iotmo> + T2R$K_RAW_STALL_SEC + the air time of T2R$K_RAW_STALL_STEP octets (RAWSTALL, the output
+ *	is flushed), <g_exit_flag> (checked every
+ *	T2R$K_RAW_POLL_MSEC). An absent or lost device
  *	is reopened at the start (s_tty_reopen()); if it is still not there the session ends at once.
  *	A hangup or EIO/ENODEV/ENXIO of the line closes the device (s_tty_lost()) and ends the session.
  *
@@ -1825,7 +1859,8 @@ int	t2r$tty_raw_relay (
 			)
 {
 enum {FD$K_NET = 0, FD$K_TTY = 1, FD$K_MAX};
-int	l_waited, l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0, l_errno;
+int	l_waited, l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_len = 0, l_t2n_off = 0, l_hup = 0, l_errno,
+	l_stall_sec, l_outq = 0, l_outq_last = -1;
 ssize_t	l_cnt;
 struct pollfd	l_pfd[FD$K_MAX];
 struct timespec	l_now, l_lastio;
@@ -1867,7 +1902,35 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcflush()", l_rc, l_errno);
 		}
 
+	/*
+	 * An XOFF of the device during the previous session (or a stray 0x13) has stopped the output, tcflush()
+	 * does not resume it and the port stays open between the sessions: every next client would be queued
+	 * for ever. TCOON alone resumes only a TCOOFF of our own (tco_stopped), so TCOOFF goes first: then
+	 * TCOON clears the stop by an XOFF too. That is the stop of the kernel: an adapter which does XON/XOFF
+	 * in its chip (FTDI, CP210x) keeps its own until the device sends XON.
+	 */
+	if ( a_serial->flow == T2R$K_FLOW_XONXOFF )
+		{
+		if ( 0 > (l_rc = tcflow(a_serial->fd, TCOOFF)) )				/* Not stopped by us: go on as it is */
+			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcflow(TCOOFF)", l_rc, errno);
+		else if ( 0 > (l_rc = tcflow(a_serial->fd, TCOON)) )				/* Stopped by our TCOOFF: no session */
+			{
+			l_sts = $PUTMSG_FAO(T2R$__TTYSYSERR, a_serial->fd, &a_serial->devname, "tcflow(TCOON)", l_rc, errno);
+			s_tty_unlock (a_serial);
+
+			return	l_sts;
+			}
+		}
+
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &l_lastio);
+
+	/*
+	 * A gone client's last portion: the line may not move this long. TIOCOUTQ of an USB adapter falls by
+	 * whole transfers (256 octets of usb-serial, 1280 of cdc-acm) - the air time of T2R$K_RAW_STALL_STEP
+	 * octets is added: 186 sec at 110 baud, 2 sec at 9600; +1 - whole seconds are compared below.
+	 */
+	l_stall_sec = (a_serial->anstmo_msec + 999) / 1000 + T2R$K_RAW_STALL_SEC + 1
+		+ (int) (((int64_t) a_serial->onebyte_time_usec * T2R$K_RAW_STALL_STEP + 999999) / 1000000);
 
 	l_pfd[FD$K_NET].fd = a_sd;
 	l_pfd[FD$K_TTY].fd = a_serial->fd;
@@ -1898,6 +1961,34 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 		if ( !l_rc )
 			{
+			/*
+			 * The client has gone and its last portion waits for the line. POLLOUT comes only when the
+			 * driver queue (a page: 4 or 64 KiB) is almost empty - a slow line is quiet for long, so the
+			 * kernel output queue (TIOCOUTQ) is watched: while it gets shorter the line moves. When it does not
+			 * move for <l_stall_sec> (CTS is off, an XOFF has stopped the output) waiting on would keep the line
+			 * from every next client up to <idletmo>: the data is dropped.
+			 */
+			if ( l_hup && l_n2t_len )
+				{
+				if ( !ioctl(a_serial->fd, TIOCOUTQ, &l_outq) )
+					{
+					if ( (0 <= l_outq_last) && (l_outq < l_outq_last) )
+						l_lastio = l_now;
+
+					l_outq_last = l_outq;
+					}
+
+				if ( (l_lastio.tv_sec + l_stall_sec) < l_now.tv_sec )
+					{
+					tcflush(a_serial->fd, TCOFLUSH);
+					l_sts = $PUTMSG_FAO(T2R$__RAWSTALL, a_sd, &a_serial->devname, l_stall_sec,
+						l_n2t_len - l_n2t_off + ((0 < l_outq_last) ? l_outq_last : 0));
+					break;
+					}
+
+				continue;
+				}
+
 			if ( (l_lastio.tv_sec + a_idletmo) < l_now.tv_sec )
 				{
 				$PUTMSG_FAO(T2R$__IDLETMO, a_sd, a_idletmo);

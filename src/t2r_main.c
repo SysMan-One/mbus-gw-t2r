@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-01ECO03"
-#define	__REV__		"01.01.03"
+#define	__IDENT__	"V.01-01ECO04"
+#define	__REV__		"01.01.04"
 
 /*
 **++
@@ -228,6 +228,13 @@
 **	21-NOV-2026	CLD	V.01-01ECO03 / REV: 01.01.03 (package version 1.1.3) - The delivery change (no C
 **				source change): the systemd unit follows the installation prefix (CMakeLists.txt,
 **				contrib/mbusgw-t2r.service.in), no self-link /usr/sbin/mbus-ctl with the prefix /usr.
+**
+**	22-NOV-2026	CLD	V.01-01ECO04 / REV: 01.01.04 (package version 1.1.4) - The <flow> key of a serials
+**				record is parsed (it was documented, but read by nobody): NONE (the default), XON/XOFF,
+**				RTS/CTS, case-insensitive; another value or type rejects the record (SERBADFLOW), so does
+**				RTS/CTS with <rs485> = 1; a MODBUS listener on an XON/XOFF line is rejected
+**				(LSNXONRTU): the kernel would eat the 0x11/0x13 octets of the binary RTU frames.
+**				DEVADDED shows the flow control.
 **--
 */
 
@@ -326,6 +333,13 @@ static KWDENT	s_mode_tbl[] =						/* <mode> of a listener, case-insensitive */
 	{ {$ASCINI("RAW")},	{.val = T2R$K_MODE_RAW} }
 };
 
+static KWDENT	s_flow_tbl[] =						/* <flow> of a serial, case-insensitive; indexed by T2R$K_FLOW_* */
+{
+	{ {$ASCINI("NONE")},		{.val = T2R$K_FLOW_NONE} },
+	{ {$ASCINI("XON/XOFF")},	{.val = T2R$K_FLOW_XONXOFF} },
+	{ {$ASCINI("RTS/CTS")},	{.val = T2R$K_FLOW_RTSCTS} }
+};
+
 
 
 static const OPTS g_optstbl [] =					/* General CLI options		*/
@@ -397,7 +411,8 @@ static int s_settings_find_n_get_serial (
 
 /*
  *  DESCRIPTION: Process the <serials> section: mandatory <device>, <chars> ("baud, databits,
- *	parity, stopbits", range checked); optional <rs485>, <iotmo> (the answer timeout, msec,
+ *	parity, stopbits", range checked); optional <rs485>, <flow> (NONE - the default, XON/XOFF,
+ *	RTS/CTS; RTS/CTS is refused together with <rs485> = 1), <iotmo> (the answer timeout, msec,
  *	a non-positive value is ignored), <lategd> (the guard window after a failed exchange, msec,
  *	0..T2R$K_LATEGD_MAX, default <iotmo> / 4), <ts_enabled>, <ts_fncode>, <ts_base_reg0>, <ts_unit>.
  *	Compute the octet time and t3.5, init the device lock, fill the global table of serial
@@ -426,6 +441,7 @@ const char *l_str;
 int	l_count, l_int = -1, l_speed, l_databits, l_stopbits;
 char	l_parity = 0;
 T2R$_SERIAL	*l_serial;
+KWDENT	*l_kwd;
 char	l_chars[64];
 
 	if ( !(l_setting = config_lookup(a_cfg, "serials")) )
@@ -537,6 +553,33 @@ char	l_chars[64];
 			}
 
 		/*
+		 * <flow> is optional, .flow is T2R$K_FLOW_NONE after the memset() above. DSR/DTR was listed in the
+		 * sample settings file, but Linux termios has no such flow control: it is refused as unknown.
+		 */
+		if ( config_setting_get_member(l_args, "flow") )
+			{
+			if ( !config_setting_lookup_string(l_args, "flow", &l_str) )	/* flow = 1; - not a string */
+				l_str = "(not a string)";
+			else if ( 1 & __util$lookup_key(l_str, (int) strlen(l_str), s_flow_tbl, $ARRSZ(s_flow_tbl), &l_kwd, UTIL$K_LOOKUP_NCASE) )
+				l_str = NULL;
+
+			if ( l_str )
+				{
+				$PUTMSG_FAO(T2R$__SERBADFLOW, i, &l_serial->devname, l_str);
+				continue;
+				}
+
+			l_serial->flow = l_kwd->val;
+			}
+
+		/* Without HAVE_TIOCRS485 the flag is never set (SERNORS485): RTS/CTS is accepted then */
+		if ( (l_serial->flow == T2R$K_FLOW_RTSCTS) && (l_serial->flags & T2R$M_SERIAL_RS485) )
+			{
+			$PUTMSG_FAO(T2R$__SERBADOPT, i, &l_serial->devname, "<flow> RTS/CTS is not allowed with <rs485> = 1: the RS-485 mode drives RTS itself");
+			continue;
+			}
+
+		/*
 		 * Form context for serial device
 		 */
 		l_serial->fd = -1;
@@ -604,7 +647,7 @@ char	l_chars[64];
 			}
 
 		$PUTMSG_FAO(T2R$__DEVADDED, i, &l_serial->devname, l_serial->baud, l_serial->databits, 1, &l_parity,
-			l_serial->stopbits, l_serial->anstmo_msec, l_serial->inter_pdu_usec);
+			l_serial->stopbits, &s_flow_tbl[l_serial->flow].kwd, l_serial->anstmo_msec, l_serial->inter_pdu_usec);
 
 		if ( l_serial->flags &  T2R$M_SERIAL_ADDTS )
 			$PUTMSG_FAO(T2R$__TSENABLED, &l_serial->devname, l_serial->ts_unit_nr, l_serial->ts_fncode, l_serial->ts_base_reg0);
@@ -630,7 +673,8 @@ char	l_chars[64];
  *	default, "RAW" - a transparent octet stream) and, for RAW only, <takeover> (0/1, default 1 -
  *	a new client kicks the current one). A RAW listener: <connlm> is 1 (no other value is
  *	accepted), <idletmo> defaults to T2R$K_IDLETMO_MAX, its target serial line must not be used
- *	by any other listener (LSNRAWSHR, whatever the order of the records). Fill the global table of
+ *	by any other listener (LSNRAWSHR, whatever the order of the records); a MODBUS listener is
+ *	refused on a serial with <flow> XON/XOFF (LSNXONRTU). Fill the global table of
  *	listeners (at most T2R$K_MAX_LISTENERS records). An ill-formed or out of range record is
  *	rejected with a diagnostic, processing is continued from the next one.
  *
@@ -854,6 +898,13 @@ char	l_bind[128], l_proto[16], l_laddr[32], l_port[8];
 		if ( 0 <= l_int )
 			{
 			$PUTMSG_FAO(T2R$__LSNRAWSHR, i, l_str, ntohs(g_listeners[l_int].sk.sin_port));
+			continue;
+			}
+
+		/* IXON makes the kernel eat 0x11/0x13 of the answers: an XON/XOFF line is for the RAW mode only */
+		if ( (l_listener->mode == T2R$K_MODE_MODBUS) && (l_listener->serial->flow == T2R$K_FLOW_XONXOFF) )
+			{
+			$PUTMSG_FAO(T2R$__LSNXONRTU, i, l_str);
 			continue;
 			}
 

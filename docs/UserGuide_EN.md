@@ -78,6 +78,7 @@ listen for TCP clients on every network interface, port 502, and forward them to
 | `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | any positive number |
 | `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 4; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
 | `rs485` | no | `1` --- ask the kernel to drive the RS-485 direction control (only for ports that support it) | `0` or `1` |
+| `flow` | no | The flow control of the line. `"NONE"` --- no flow control. `"RTS/CTS"` --- the hardware handshake: the gateway sends only while the device holds CTS on; it needs the RTS and CTS wires in the cable; not together with `rs485 = 1`. `"XON/XOFF"` --- the device stops and starts the gateway with the XOFF (0x13) and XON (0x11) characters; **only for a RAW listener**: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is refused (`LSNXONRTU`). Not case-sensitive; another value or a number (also `"DSR/DTR"`: Linux has no such flow control) rejects the record (`SERBADFLOW`). Default: `"NONE"` | `"NONE"`, `"RTS/CTS"`, `"XON/XOFF"` |
 | `ts_enabled` | no | `1` --- enable the built-in Time Stamp pseudo device (see section 6) | `0` or `1` |
 | `ts_unit` | no | The slave address the pseudo device answers on | 1..247, default 135 |
 | `ts_fncode` | no | The function code it answers to | default 4 |
@@ -245,8 +246,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.1.3-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.1.3-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.1.4-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.1.4-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -390,6 +391,7 @@ dislikes.**
 | `%T2R-E-LSNRAWSHR, [listener #NN] --- target <...> is used by the listener on port N too, ...` | A RAW listener wants a serial port which another listener uses | give the RAW listener its own serial port, or make the other listener use another one; or make the RAW listener a MODBUS one |
 | `%T2R-W-RAWBUSY, [...] --- the raw listener is busy and <takeover> is off --- the connection is rejected` | A client is already connected to the RAW port and `takeover = 0` | normal. Disconnect the first client, or set `takeover = 1` |
 | `%T2R-E-TXDRAINTMO, [...] --- the request has not been transmitted in N msec` | The USB adapter took the request but did not send it out; the request gets exception 4 | the adapter or its USB link hangs: `dmesg \| tail`; replug the adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it: the next request tries again |
+| `TXDRAINTMO` on a port with `flow = "RTS/CTS"` | The device (or the cable) holds CTS off, so the gateway may not send | check that the cable has the RTS and CTS wires and that the device uses the RTS/CTS handshake; if it does not, set `flow = "NONE"`. On a RAW listener the data from the client just does not go out; if the client goes, its last data may be dropped by `RAWSTALL` |
 | `%T2R-E-DEVLOCKERR` / `DEVBUSY` on every request of one port, the other ports are fine | Another request holds the line and does not end | update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial driver). Before the restart, save what the stuck thread does: `for t in /proc/$(pidof mbusgw-t2r)/task/*; do echo $t $(cat $t/wchan); done` |
 | `%T2R-E-SESSFAIL, [...] --- cannot start a session thread, pthread_create()->11` | Too many TCP clients at once: every client takes a thread, and systemd limits the service (`TasksMax`, 578 on a small board) | find who keeps so many connections open (`ss -tn`); if they are all real, raise the limit: `TasksMax=2048` in the `[Service]` section of the unit, then `systemctl daemon-reload` |
 | `%T2R-E-LSNRERR, Listener 0.0.0.0:502 --- bind() error, errno: 98` | errno 98 = the TCP port is already taken | another gateway instance is running, or another program owns the port: `sudo ss -tlnp \| grep 502` |
@@ -448,6 +450,7 @@ dislikes.**
 | `SERBADCHR` | E | The chars value cannot be read; write it like "9600, 8, N, 1" |
 | `SERRANGE` | E | The speed, data bits or stop bits are out of range; the allowed range is in the message |
 | `SERBADPAR` | E | The parity letter is unknown; use N, E or O |
+| `SERBADFLOW` | E | The `flow` value is unknown; use NONE, RTS/CTS or XON/XOFF (DSR/DTR is not supported by Linux) |
 | `DEVADDED` | I | A serials record is accepted; the line parameters are shown |
 | `TSENABLED` | I | The Time Stamp pseudo device is on for this port |
 | `TSDISABLED` | I | The Time Stamp pseudo device is off for this port (the default) |
@@ -474,6 +477,8 @@ dislikes.**
 | `NOTTTY` | W | The device is not a serial port |
 | `RS485OFF` | W | The RS485 mode cannot be switched on for this port; the port works without it |
 | `RS485ON` | S | The RS485 mode is on for this port |
+| `RAWSTALL` | W | A RAW client has gone, and the serial port has sent nothing of its last data for `iotmo` + 10 seconds + the time to send 2 KB at its speed (CTS is off, or the device has sent XOFF); the data is dropped, the port is free for the next client |
+| `FLOWNOTSET` | W | The serial driver did not take the `flow` setting (some USB adapters have no RTS/CTS); the port works without the flow control |
 | `DEVINIERR` | E | The serial port cannot be set up; the previous line says why |
 | `DEVINIT` | I | The serial port is set up |
 | `DEVCLSERR` | E | The serial port cannot be closed |
@@ -493,6 +498,7 @@ dislikes.**
 | `LSNBADMODE` | E | The `mode` value is unknown; the record is skipped. Write `"MODBUS"` or `"RAW"` |
 | `LSNRAWSHR` | E | The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own |
 | `LSNRAWOPT` | E | A listeners option is not allowed in this mode (`takeover` in the MODBUS mode); the record is skipped. Remove the option or set `mode = "RAW"` |
+| `LSNXONRTU` | E | A MODBUS listener wants a serial port with `flow = "XON/XOFF"`; the record is skipped. Use `"NONE"` or `"RTS/CTS"` for this port, or make the listener a RAW one |
 | `CTLREADY` | S | The control channel for `mbus-ctl` is open; the socket file is shown |
 | `CTLOFF` | I | The control channel is switched off by `/control=NONE`; `mbus-ctl` cannot reach this gateway |
 | `CTLBUSY` | W | Another running gateway already uses this socket file; this one works without the control channel. Give each gateway its own `/control=<file>` |

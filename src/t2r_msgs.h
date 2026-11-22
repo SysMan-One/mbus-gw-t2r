@@ -71,6 +71,9 @@
 **				CTLNOGW (the /SOCKET path of mbus-ctl) and the device name of a serial in all the
 **				44 messages which show it (DEVxxx, TTYxxx, SERxxx, RS485xx, LSNADDED, LSNRRDY,
 **				TGTOPNERR, RAWSTART/STOP, NOANSWER, CRC16ERR ...). No code changed or moved.
+**
+**	22-NOV-2026	CLD	V.01-01ECO04 / REV: 01.01.04 - The <flow> key of a serial: SERBADFLOW, LSNXONRTU,
+**				FLOWNOTSET, RAWSTALL are appended; DEVADDED shows the flow control.
 **--
 */
 
@@ -143,7 +146,7 @@ $DEF_MSG(T2R, WARN,	SERNORS485,		"[serial #!2ZL:<!AC>] --- RS485 option is not s
 $DEF_MSG(T2R, ERROR,	SERBADCHR,		"[serial #!2ZL:<!AC>] --- <chars> value <!AZ> is ill-formed") \
 $DEF_MSG(T2R, ERROR,	SERRANGE,		"[serial #!2ZL:<!AC>] --- !AZ !SL is out of range [!SL..!SL]") \
 $DEF_MSG(T2R, ERROR,	SERBADPAR,		"[serial #!2ZL:<!AC>] --- parity '!AD' is unknown, allowed: [N, E, O]") \
-$DEF_MSG(T2R, INFO,	DEVADDED,		"Added device #!2ZL [<!AC>, Chars: <!UL, !UL, !AD, !UL>, Answer tmo: !UL msec, Inter RTU PDU: !UL usec] --- added") \
+$DEF_MSG(T2R, INFO,	DEVADDED,		"Added device #!2ZL [<!AC>, Chars: <!UL, !UL, !AD, !UL>, Flow: !AC, Answer tmo: !UL msec, Inter RTU PDU: !UL usec] --- added") \
 $DEF_MSG(T2R, INFO,	TSENABLED,		"Time Stamp responder for <!AC> [Unit: !UL, Function: !UL, Base register: !UL] --- enabled") \
 $DEF_MSG(T2R, INFO,	TSDISABLED,		"Time Stamp responder for <!AC> --- disabled") \
 $DEF_MSG(T2R, ERROR,	NOSERIALS,		"No serials have been defined!!") \
@@ -209,6 +212,10 @@ $DEF_MSG(T2R, WARN,	CTLNOBACK,		"The gateway has not come back in !UL seconds --
 $DEF_MSG(T2R, SUCCESS,	CTLRESETN,		"!UL connection(s) reset") \
 $DEF_MSG(T2R, ERROR,	CTLBADSEL,		"Bad connection <!AZ> --- give an id, a.b.c.d, a.b.c.d:port or /ALL (see SHOW CONNECTIONS)") \
 $DEF_MSG(T2R, WARN,	CTLCUT,			"The answer of the gateway is cut at !UL octets --- not all the records are shown") \
+$DEF_MSG(T2R, ERROR,	SERBADFLOW,		"[serial #!2ZL:<!AC>] --- <flow> value <!AZ> is unknown, allowed: NONE, XON/XOFF, RTS/CTS (Linux has no DSR/DTR flow control)") \
+$DEF_MSG(T2R, ERROR,	LSNXONRTU,		"[listener #!2ZL] --- target <!AZ> has <flow> XON/XOFF: the binary RTU frames carry the 0x11/0x13 octets, a MODBUS listener needs NONE or RTS/CTS") \
+$DEF_MSG(T2R, WARN,	RAWSTALL,		"[#!SL] <!AC> has sent nothing of the last data for !UL sec after the client has gone (CTS off? an XOFF?) --- !UL octets are dropped") \
+$DEF_MSG(T2R, WARN,	FLOWNOTSET,		"<!AC> the driver has not taken <flow> !AZ --- the line works without this flow control") \
 
 
 

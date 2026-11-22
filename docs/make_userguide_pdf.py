@@ -56,6 +56,9 @@
 #				closed while it waited for a busy line; a half-closed client.
 #
 #	21-NOV-2026	CLD	V.01-01ECO03: the package names in the OpenWrt examples are 1.1.3.
+#
+#	22-NOV-2026	CLD	V.01-01ECO04: the serials key flow (NONE, RTS/CTS, XON/XOFF), the codes SERBADFLOW,
+#				FLOWNOTSET, LSNXONRTU, RAWSTALL; TXDRAINTMO on an RTS/CTS port; the package names in the examples are 1.1.4.
 #--
 import sys
 
@@ -546,6 +549,11 @@ def s_pack_en ():
 				'0..60000, default iotmo / 4; 0 --- only the 3.5 character pause, as before X.00-13ECO08.'),
 			('rs485', 'no', '1 --- ask the kernel to drive the RS-485 direction control '
 				'(only for the ports which support it). Default 0.'),
+			('flow', 'no', 'The flow control of the line. NONE --- none (the default). RTS/CTS --- the hardware '
+				'handshake: the gateway sends only while the device holds CTS on; needs the RTS and CTS wires; not '
+				'with rs485 = 1. XON/XOFF --- the device stops and starts the gateway by XOFF (0x13) and XON (0x11); '
+				'only for a RAW listener: MODBUS RTU frames carry these octets (LSNXONRTU). Not case-sensitive; '
+				'another value or a number (DSR/DTR too: Linux has no such flow control) rejects the record (SERBADFLOW).'),
 			('ts_enabled', 'no', '1 --- enable the Time Stamp pseudo device (Chapter 5). Default 0.'),
 			('ts_unit', 'no', 'The slave address the pseudo device answers on. Default 135.'),
 			('ts_fncode', 'no', 'The function code it answers to. Default 4.'),
@@ -672,8 +680,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.1.3-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.1.3-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.1.4-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.1.4-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -810,6 +818,8 @@ def s_pack_en ():
 			('%T2R-E-TXDRAINTMO, ...', 'The USB adapter took the request but did not send it out; the '
 				'request gets exception 4. The adapter or its USB link hangs: dmesg | tail; replug the '
 				'adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it.'),
+			('TXDRAINTMO on a port with flow = "RTS/CTS"', 'The device (or the cable) holds CTS off, so the gateway '
+				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS; if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data.'),
 			('DEVLOCKERR / DEVBUSY on every request of one port', 'Another request holds the line and does '
 				'not end. Update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial '
 				'driver). Before the restart save what the threads do: for t in /proc/$(pidof mbusgw-t2r)/task/*; '
@@ -884,6 +894,7 @@ def s_pack_en ():
 			('SERBADCHR', 'E', 'The chars value cannot be read; write it like "9600, 8, N, 1".'),
 			('SERRANGE', 'E', 'The speed, data bits or stop bits are out of range; the allowed range is in the message.'),
 			('SERBADPAR', 'E', 'The parity letter is unknown; use N, E or O.'),
+			('SERBADFLOW', 'E', 'The flow value is unknown; use NONE, RTS/CTS or XON/XOFF (DSR/DTR is not supported by Linux).'),
 			('DEVADDED', 'I', 'A serials record is accepted; the line parameters are shown.'),
 			('TSENABLED', 'I', 'The Time Stamp pseudo device is on for this port.'),
 			('TSDISABLED', 'I', 'The Time Stamp pseudo device is off for this port (the default).'),
@@ -910,6 +921,8 @@ def s_pack_en ():
 			('NOTTTY', 'W', 'The device is not a serial port.'),
 			('RS485OFF', 'W', 'The RS485 mode cannot be switched on for this port; the port works without it.'),
 			('RS485ON', 'S', 'The RS485 mode is on for this port.'),
+			('RAWSTALL', 'W', 'A RAW client has gone, and the serial port has sent nothing of its last data for iotmo + 10 seconds + the time to send 2 KB at its speed (CTS is off, or the device has sent XOFF); the data is dropped, the port is free for the next client.'),
+			('FLOWNOTSET', 'W', 'The serial driver did not take the flow setting (some USB adapters have no RTS/CTS); the port works without it.'),
 			('DEVINIERR', 'E', 'The serial port cannot be set up; the previous line says why.'),
 			('DEVINIT', 'I', 'The serial port is set up.'),
 			('DEVCLSERR', 'E', 'The serial port cannot be closed.'),
@@ -924,6 +937,7 @@ def s_pack_en ():
 			('LSNBADMODE', 'E', 'The mode value is unknown; the record is skipped. Write "MODBUS" or "RAW".'),
 			('LSNRAWSHR', 'E', 'The serial port of a RAW listener is used by another listener; the record is skipped. Give the RAW listener a port of its own.'),
 			('LSNRAWOPT', 'E', 'A listeners option is not allowed in this mode (takeover in the MODBUS mode); the record is skipped. Remove the option or set mode = "RAW".'),
+			('LSNXONRTU', 'E', 'A MODBUS listener wants a serial port with flow = "XON/XOFF"; the record is skipped. Use NONE or RTS/CTS for the port, or make the listener a RAW one.'),
 			('TXDRAINTMO', 'E', 'The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4.'),
 			('ECHOMISM', 'W', 'The answer to a write request is not its echo (another address or value); the request gets exception 4.'),
 			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
@@ -1099,6 +1113,11 @@ def s_pack_ru ():
 				'0..60000, по умолчанию iotmo / 4; 0 — только пауза в 3,5 символа, как до X.00-13ECO08.'),
 			('rs485', 'нет', '1 — просить ядро управлять направлением RS-485 (только для портов, '
 				'которые это умеют). По умолчанию 0.'),
+			('flow', 'нет', 'Управление потоком на линии. NONE — без него (по умолчанию). RTS/CTS — аппаратное: '
+				'шлюз передаёт, только пока устройство держит CTS; нужны провода RTS и CTS; нельзя вместе с rs485 = 1. '
+				'XON/XOFF — устройство останавливает и запускает передачу символами XOFF (0x13) и XON (0x11); только '
+				'для RAW-слушателя: в кадрах MODBUS RTU эти октеты встречаются (LSNXONRTU). Регистр не важен; другое '
+				'значение или число (и DSR/DTR: в Linux такого нет) отклоняет запись (SERBADFLOW).'),
 			('ts_enabled', 'нет', '1 — включить псевдоустройство меток времени (глава 5). По умолчанию 0.'),
 			('ts_unit', 'нет', 'Адрес ведомого, на который отвечает псевдоустройство. По умолчанию 135.'),
 			('ts_fncode', 'нет', 'Код функции, на который оно отвечает. По умолчанию 4.'),
@@ -1224,8 +1243,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.1.3-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.1.3-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.1.4-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.1.4-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1358,6 +1377,8 @@ def s_pack_ru ():
 			('%T2R-E-TXDRAINTMO, ...', 'USB-адаптер принял запрос, но не передал его в линию; запрос получает '
 				'исключение 4. Адаптер или его USB-связь зависли: dmesg | tail; переподключите адаптер или '
 				'перезагрузите плату. С X.00-13ECO01 линия из-за этого не блокируется.'),
+			('TXDRAINTMO на порту с flow = "RTS/CTS"', 'Устройство (или кабель) не даёт CTS, и шлюзу нельзя передавать. '
+				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS; если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные.'),
 			('DEVLOCKERR / DEVBUSY на каждом запросе одного порта', 'Линию держит другой запрос, который не '
 				'заканчивается. Обновитесь до X.00-13ECO01 или новее (старый шлюз мог навсегда зависнуть в '
 				'драйвере порта). Перед перезапуском сохраните, что делают потоки: for t in /proc/$(pidof '
@@ -1427,6 +1448,7 @@ def s_pack_ru ():
 			('SERBADCHR', 'E', 'Значение chars не разобрано; пишите так: "9600, 8, N, 1".'),
 			('SERRANGE', 'E', 'Скорость, биты данных или стоп-биты вне диапазона; допустимый диапазон — в сообщении.'),
 			('SERBADPAR', 'E', 'Неизвестная буква чётности; используйте N, E или O.'),
+			('SERBADFLOW', 'E', 'Неизвестное значение flow; используйте NONE, RTS/CTS или XON/XOFF (DSR/DTR в Linux не поддерживается).'),
 			('DEVADDED', 'I', 'Запись serials принята; показаны параметры линии.'),
 			('TSENABLED', 'I', 'Псевдоустройство меток времени включено для этого порта.'),
 			('TSDISABLED', 'I', 'Псевдоустройство меток времени выключено для этого порта (по умолчанию).'),
@@ -1453,6 +1475,8 @@ def s_pack_ru ():
 			('NOTTTY', 'W', 'Устройство — не последовательный порт.'),
 			('RS485OFF', 'W', 'Режим RS485 для этого порта не включился; порт работает без него.'),
 			('RS485ON', 'S', 'Режим RS485 для этого порта включён.'),
+			('RAWSTALL', 'W', 'RAW-клиент ушёл, а порт за iotmo + 10 секунд + время передачи 2 КБ на его скорости не передал ничего из его последних данных (CTS снят или устройство прислало XOFF); данные выброшены, порт свободен для следующего клиента.'),
+			('FLOWNOTSET', 'W', 'Драйвер порта не принял настройку flow (у некоторых USB-адаптеров нет RTS/CTS); порт работает без управления потоком.'),
 			('DEVINIERR', 'E', 'Последовательный порт не настроился; причина — в строке выше.'),
 			('DEVINIT', 'I', 'Последовательный порт настроен.'),
 			('DEVCLSERR', 'E', 'Последовательный порт не закрылся.'),
@@ -1467,6 +1491,7 @@ def s_pack_ru ():
 			('LSNBADMODE', 'E', 'Значение mode неизвестно; запись пропускается. Пишите "MODBUS" или "RAW".'),
 			('LSNRAWSHR', 'E', 'Последовательный порт RAW-слушателя занят другим слушателем; запись пропускается. Дайте RAW-слушателю свой порт.'),
 			('LSNRAWOPT', 'E', 'Параметр listeners не разрешён в этом режиме (takeover в режиме MODBUS); запись пропускается. Уберите параметр или поставьте mode = "RAW".'),
+			('LSNXONRTU', 'E', 'MODBUS-слушатель хочет порт с flow = "XON/XOFF"; запись пропускается. Поставьте порту NONE или RTS/CTS или сделайте слушатель RAW.'),
 			('TXDRAINTMO', 'E', 'Адаптер не передал запрос в линию вовремя; запрос сброшен и получает исключение 4.'),
 			('ECHOMISM', 'W', 'Ответ на запрос записи — не его эхо (другой адрес или значение); запрос получает исключение 4.'),
 			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),

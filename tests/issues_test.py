@@ -2,7 +2,7 @@
 #
 # Self-contained reproducers of the field reports and fixed bugs (pty pair + fake RTU slave + gateway + MBAP clients):
 #
-#   tests/issues_test.py [--gw ./build/mbusgw-t2r] icrnl|late|replug|rawreplug|gone|all
+#   tests/issues_test.py [--gw ./build/mbusgw-t2r] icrnl|late|replug|rawreplug|gone|flow|all
 #
 #   icrnl	- the gateway's tty is left with ICRNL (a fresh port), the answers carry 0x0D octets: no CRC16ERR expected
 #   late	- the slave answers a bit later than <iotmo>, two clients write and read back their own registers:
@@ -12,6 +12,9 @@
 #		  of it) is dropped - no line I/O, its <connlm> slot is free for the next client; a half-closed
 #		  client (shutdown(SHUT_WR)) gets its answer on a free line, not after such a wait; <idletmo>
 #		  still ends an idle session after an answer
+#   flow	- V.01-01ECO04: <flow> NONE, RTS/CTS, XON/XOFF (RAW) - the termios of the gateway's tty (a pty has no CTS
+#		  line: the handshake itself is not tested); a RAW client gone while an XOFF stops the pty frees
+#		  it (RAWSTALL; a real UART takes a page into its driver first) and the next session goes out; DSR/DTR, an unknown value, a number, RTS/CTS + rs485 and XON/XOFF under MODBUS are refused
 #   replug	- the device behind a symlink disappears (the pty master is closed) and comes back (a new pty): the busy
 #		  and the idle cases, and the device absent at the start; exception 0x0A while it is away, normal answers after
 #
@@ -21,6 +24,7 @@
 #	02-NOV-2026	CLD	X.00-13ECO07: Initial revision.
 #	02-NOV-2026	CLD	X.00-14ECO02: rawreplug - a RAW listener with an absent / unplugged / returned device.
 #	17-NOV-2026	CLD	V.01-01ECO01: gone - a client gone while waiting for a busy line, half-close, idletmo.
+#	22-NOV-2026	CLD	V.01-01ECO04: flow - the <flow> key of a serial.
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -29,7 +33,7 @@ ap.add_argument('--gw', default='./build/mbusgw-t2r')
 ap.add_argument('--port', type=int, default=5602)
 ap.add_argument('--secs', type=int, default=30)
 ap.add_argument('--lategd', type=int, default=None, help='late: <lategd> of the serial, the gateway default if omitted')
-ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'gone', 'all'])
+ap.add_argument('test', choices=['icrnl', 'late', 'replug', 'rawreplug', 'gone', 'flow', 'all'])
 a = ap.parse_args()
 GW = os.path.abspath(a.gw)
 TMP = tempfile.mkdtemp(prefix='t2r_issues_')
@@ -467,7 +471,77 @@ def t_gone():
     return res
 
 
-tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug, 'gone': t_gone}
+def t_flow():
+    """<flow>: the termios of the gateway's tty (read through the slave fd the test holds), the refused settings (/CHECK)."""
+    res = True
+    for flow, mode, want_c, want_i in (('NONE', 'MODBUS', 0, 0), ('rts/cts', 'MODBUS', termios.CRTSCTS, 0),
+                                       ('XON/XOFF', 'RAW', 0, termios.IXON | termios.IXOFF)):
+        line = Line()
+        at = termios.tcgetattr(line.s)			# An inherited flow control of the other kind must be cleared
+        at[2] |= termios.CRTSCTS
+        at[0] |= termios.IXON | termios.IXOFF | termios.IXANY
+        termios.tcsetattr(line.s, termios.TCSANOW, at)
+        if mode == 'MODBUS':
+            Slave(line, regs={0: 0x1113})		# XON/XOFF octets in the answer: fine without IXON
+        lx = 'mode = "RAW"; connlm = 1;' if mode == 'RAW' else ''
+        gw = Gateway(line.name, a.port, extra=f'flow = "{flow}";', lextra=lx)
+        try:
+            time.sleep(0.5)
+            at = termios.tcgetattr(line.s)
+            c_ok = (at[2] & termios.CRTSCTS) == want_c
+            i_ok = (at[0] & (termios.IXON | termios.IXOFF | termios.IXANY)) == want_i
+            x_ok = flow != 'XON/XOFF' or (at[6][termios.VSTART] == b'\x11' and at[6][termios.VSTOP] == b'\x13')
+            d_ok = gw.count('Flow: ' + flow.upper()) == 1
+            io = True
+            if mode == 'RAW':				# The device sends XOFF, the client goes, the next one must get through
+                c = socket.create_connection(('127.0.0.1', a.port), timeout=5)
+                time.sleep(0.3)
+                os.write(line.m, b'\x13')
+                time.sleep(0.3)
+                c.sendall(b'stuck')
+                time.sleep(0.3)
+                c.close()
+                time.sleep(0.5)
+                c = socket.create_connection(('127.0.0.1', a.port), timeout=5)
+                time.sleep(0.3)
+                c.sendall(b'probe')
+                got, t = b'', time.monotonic() + 18			# The first session ends by RAWSTALL: iotmo + 10 s + 1 + 2048 octets at 115200 (1 s)
+                while b'probe' not in got and time.monotonic() < t:
+                    if select.select([line.m], [], [], 0.2)[0]:
+                        got += os.read(line.m, 256)
+                c.close()
+                io = b'probe' in got and gw.count('RAWSTALL') == 1
+            if mode == 'MODBUS':
+                c = Client(a.port)
+                ok, pdu = c.read(0)
+                c.close()
+                io = ok and pdu[3:5] == b'\x11\x13'
+            res &= report(f'flow/{flow}', c_ok and i_ok and x_ok and d_ok and io and gw.count('FLOWNOTSET') == 0,
+                          f'CRTSCTS {c_ok}, IXON/IXOFF/IXANY {i_ok}, VSTART/VSTOP {x_ok}, DEVADDED {d_ok}, I/O {io}')
+        except (OSError, ConnectionError, AssertionError) as x:
+            res &= report(f'flow/{flow}', False, f'aborted: {x!r}')
+        finally:
+            gw.stop(); line.close()
+
+    for name, ser, lsn, code in (('dsr', 'flow = "DSR/DTR";', '', 'SERBADFLOW'),
+                                 ('bogus', 'flow = "HW";', '', 'SERBADFLOW'),
+                                 ('number', 'flow = 1;', '', 'SERBADFLOW'),
+                                 ('rs485', 'flow = "RTS/CTS"; rs485 = 1;', '', 'SERBADOPT'),
+                                 ('xonmodbus', 'flow = "XON/XOFF";', '', 'LSNXONRTU')):
+        conf = os.path.join(TMP, f'flow_{name}.conf')
+        open(conf, 'w').write(f'''listeners = ( {{ bind = "TCP:127.0.0.1:{a.port}"; {lsn} target = "/dev/null"; }} );
+serials = ( {{ device = "/dev/null"; chars = "9600, 8, N, 1"; {ser} }} );
+''')
+        p = subprocess.run([GW, '/settings=' + conf, '/check', '/control=NONE'], capture_output=True, text=True, timeout=10)
+        out = p.stdout + p.stderr
+        if name == 'rs485' and 'SERNORS485' in out:	# A build without HAVE_TIOCRS485: rs485 is ignored, RTS/CTS is fine
+            res &= report('flow/refused-rs485', p.returncode == 0, f'no RS485 support in this build, exit {p.returncode}')
+            continue
+        res &= report(f'flow/refused-{name}', p.returncode != 0 and code in out, f'exit {p.returncode}, {code} {code in out}')
+    return res
+
+
+tests = {'icrnl': t_icrnl, 'late': t_late, 'replug': t_replug, 'rawreplug': t_rawreplug, 'gone': t_gone, 'flow': t_flow}
 rc = all([tests[t]() for t in (tests if a.test == 'all' else [a.test])])
 print(f'logs in {TMP}')
 sys.exit(0 if rc else 1)

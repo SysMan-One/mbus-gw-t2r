@@ -61,6 +61,9 @@
 **				(were char [T2R$K_TTY_DEVNAME + 1]; T2R$K_TTY_DEVNAME is gone). RRL: the unused
 **				IPv4_BYTES/IPv4_BYTES_FMT macros are gone.
 **
+**	22-NOV-2026	CLD	V.01-01ECO04 / REV: 01.01.04 - T2R$K_FLOW_*: the values of T2R$_SERIAL.flow (the
+**				<flow> key of a serials record, was parsed nowhere); T2R$K_RAW_STALL_SEC, T2R$K_RAW_STALL_STEP (RAWSTALL).
+**
 **--
 */
 
@@ -141,8 +144,20 @@ enum	{
 	T2R$K_MODE_RAW							/* A transparent octet stream TCP <-> serial line */
 };
 
+/*
+ * The flow control of a serial line, <flow> of a serials record. The values index s_flow_tbl[] of T2R-MAIN.
+ * Linux termios has no DSR/DTR flow control, so there is no such value.
+ */
+enum	{
+	T2R$K_FLOW_NONE = 0,						/* No flow control, the default */
+	T2R$K_FLOW_XONXOFF,						/* IXON | IXOFF: in-band XON (0x11) / XOFF (0x13) */
+	T2R$K_FLOW_RTSCTS						/* CRTSCTS: the RTS/CTS hardware handshake */
+};
+
 #define		T2R$K_RAW_BUFSZ		4096				/* A relay buffer per direction, octets		*/
 #define		T2R$K_RAW_POLL_MSEC	1000				/* <g_exit_flag> and <idletmo> check interval	*/
+#define		T2R$K_RAW_STALL_SEC	10				/* A gone client's data: the line may not move this + <iotmo> */
+#define		T2R$K_RAW_STALL_STEP	2048				/* ... + the air time of this: TIOCOUTQ of an USB adapter falls by URBs */
 #define		T2R$K_RAW_KAIDLE	30				/* TCP keepalive: idle seconds before probing	*/
 #define		T2R$K_RAW_KAINTVL	10				/* TCP keepalive: seconds between probes	*/
 #define		T2R$K_RAW_KACNT		3				/* TCP keepalive: unanswered probes = dead peer	*/
@@ -200,7 +215,7 @@ typedef struct	t2r$_serial {
 			stopbits,
 			databits,
 			parity,
-			flow;
+			flow;						/* T2R$K_FLOW_* */
 
 		int	anstmo_msec,					/* A time to wait an answer for has been sent request */
 			inter_pdu_usec,					/* A delay before and after PDU on RTU */
