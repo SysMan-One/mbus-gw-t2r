@@ -72,6 +72,13 @@
 #	21-NOV-2026	CLD	The branch of the .rpm merged: the .rpm are in SHA256SUMS (signed) and in the
 #				Release; the rpm install test checks mbus-ctl and the link /usr/sbin/mbus-ctl,
 #				and runs on x86_64 too (arch is a key of its matrix, not only of include).
+#
+#	22-NOV-2026	CLD	V.01-02 failed in two checks of the .rpm: the binary of the .rpm is compared with
+#				the one of the .deb (both are made by cmake --install), not with build/: a libconfig
+#				of a non-standard prefix (mips: /opt/cross/lib) gives the build tree binary a RUNPATH
+#				which the install removes; "not stripped" is checked by file. rpm -Uvh checks the
+#				digests only (_pkgverify_level digest): the rpm of fedora:latest (45) refused the
+#				unsigned package ("does not verify: no signature").
 #--
 
 name: release
@@ -212,7 +219,7 @@ jobs:
           test -f /usr/lib/systemd/system/mbusgw-t2r.service
           test -f /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
           echo '# tuned by hand' >> /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
-          rpm -Uvh --replacepkgs ./*.rpm                    # %config(noreplace): the tuned file stays
+          rpm -Uvh --replacepkgs --define '_pkgverify_level digest' ./*.rpm   # %config(noreplace): the tuned file stays
           grep -q '^# tuned by hand' /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
           if ldd /opt/mbusgw-t2r/sbin/mbusgw-t2r | grep 'not found'; then exit 1; fi
           out=$(/opt/mbusgw-t2r/sbin/mbusgw-t2r 2>&1 || true)
@@ -313,8 +320,11 @@ jobs:
           grep -q 'modbus-t2r_settings.conf cn$' rpm.files      # %config(noreplace)
           grep -q 'modbus-t2r.conf cn$' rpm.files
           grep -q '^/usr/lib/systemd/system/mbusgw-t2r.service' rpm.files
-          # The binary in the .rpm is the built one (a cross build is not stripped)
-          rpm2cpio "$rpm" | cpio -i --quiet --to-stdout ./opt/mbusgw-t2r/sbin/mbusgw-t2r | cmp - build/mbusgw-t2r
+          # The binary in the .rpm is the one of the .deb: rpmbuild has not stripped it by the strip of the
+          # host (build/ itself may differ: the install removes a RUNPATH of a libconfig in /opt/cross/lib)
+          rpm2cpio "$rpm" | cpio -i --quiet --to-stdout ./opt/mbusgw-t2r/sbin/mbusgw-t2r > rpm.bin
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./opt/mbusgw-t2r/sbin/mbusgw-t2r | cmp - rpm.bin
+          file rpm.bin | grep -q 'not stripped'
           file build/mbusgw-t2r
           readelf -d build/mbusgw-t2r | grep NEEDED
           if readelf -d build/mbusgw-t2r | grep -q 'libconfig'; then
