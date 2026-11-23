@@ -1,3 +1,10 @@
+mbusgw-t2r (1.4.3-1) unstable; urgency=medium
+
+  * V.01-04ECO03: the copy of the command line for RESTART GATEWAY is
+    made in one block; no change of behaviour.
+
+ -- StarLet Squad <zator@yandex.ru>  Mon, 23 Nov 2026 14:00:00 +0000
+
 mbusgw-t2r (1.4.2-1) unstable; urgency=medium
 
   * V.01-04ECO02: the maintainer scripts handle the service as

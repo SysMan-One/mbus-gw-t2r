@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04ECO02"
-#define	__REV__		"01.04.02"
+#define	__IDENT__	"V.01-04ECO03"
+#define	__REV__		"01.04.03"
 
 /*
 **++
@@ -285,6 +285,11 @@
 **				maintainer scripts as dh_installsystemd (Debian Policy 6, 9.3): apt remove keeps the unit
 **				enabled, a purge removes its links; abort-remove starts it again; a failure of systemd
 **				never breaks the installation or the removal.
+**
+**	23-NOV-2026	CLD	V.01-04ECO03 / REV: 01.04.03 (package version 1.4.3) - s_save_argv(): the copy of the
+**				command line is one block (the pointers, then the strings) instead of a strdup() of each
+**				argument - nothing to unwind on a failure; gcc -fanalyzer (GCC 12) lost the strdup() copies
+**				stored by an index in the loop and told a false leak [CWE-401].
 **--
 */
 
@@ -1488,7 +1493,8 @@ const int siglist [] = {SIGTERM, SIGINT, SIGUSR1, SIGQUIT, 0 };
 
 /*
  *   DESCRIPTION: Keep a copy of the command line for the RESTART: the strings of argv[] may be
- *	touched by the options parser.
+ *	touched by the options parser. The copy is one block: the pointers, the NULL, then the
+ *	strings - it lives as long as the process does, nothing is to be freed.
  *
  *   INPUTS:
  *	argc, argv:	The command line
@@ -1497,31 +1503,34 @@ const int siglist [] = {SIGTERM, SIGINT, SIGUSR1, SIGQUIT, 0 };
  *	s_argv
  *
  *   RETURNS:
- *	NONE (no copy - no RESTART, s_argv stays NULL)
+ *	NONE (no memory - no RESTART, s_argv stays NULL)
  */
 static void	s_save_argv (
 		int	argc,
 		char	**argv
 		)
 {
-char	**l_argv;
+size_t	l_sz = ((size_t) argc + 1) * sizeof(char *);
+size_t	l_len;
+char	**l_argv, *l_str;
 
-	if ( !(l_argv = calloc((size_t) argc + 1, sizeof(char *))) )
+	for (int i = 0; i < argc; i++)
+		l_sz += strlen(argv[i]) + 1;
+
+	if ( !(l_argv = malloc(l_sz)) )
 		return;
+
+	l_str = (char *) (l_argv + argc + 1);			/* The strings follow the pointers	*/
 
 	for (int i = 0; i < argc; i++)
 		{
-		if ( !(l_argv[i] = strdup(argv[i])) )
-			{
-			while ( i-- )
-				free(l_argv[i]);		/* The copies made so far */
-
-			free(l_argv);
-			return;
-			}
+		l_len = strlen(argv[i]) + 1;
+		l_argv[i] = memcpy(l_str, argv[i], l_len);
+		l_str += l_len;
 		}
 
-	s_argv = l_argv;					/* A whole copy or none */
+	l_argv[argc] = NULL;
+	s_argv = l_argv;
 }
 
 

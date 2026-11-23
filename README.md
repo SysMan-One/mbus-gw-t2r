@@ -253,7 +253,7 @@ documentation in `/usr/share/doc/mbusgw-t2r/`, and installs the systemd unit
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.4.2-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.4.3-1_arm64.deb
 $ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -283,7 +283,7 @@ attached to the releases made after this text was written: `x86_64`, `aarch64`, 
 `%config(noreplace)`, the unit is installed disabled:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.4.2-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.4.3-1.x86_64.rpm
 $ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -302,8 +302,8 @@ OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_1.4.2-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.4.2-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.4.3-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.3-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`
