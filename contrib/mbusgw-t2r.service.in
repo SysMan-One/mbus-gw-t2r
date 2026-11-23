@@ -1,7 +1,7 @@
 #++
 #	FACILITY: A yet another gateway for MODBUS (TCP to RTU)
 #
-#	DESCRIPTION: The systemd unit of the gateway (the .deb package installs it disabled):
+#	DESCRIPTION: The systemd unit of the gateway (packages install it disabled):
 #		$ sudo systemctl enable --now mbusgw-t2r
 #	The local changes (the settings file, TasksMax, ...) go to a drop-in, not here:
 #		$ sudo systemctl edit mbusgw-t2r
@@ -10,7 +10,7 @@
 #		$ sudo mbus-ctl SHOW CONNECTIONS
 #
 #	A template: CMake puts the paths of the installation prefix in place of the @...@ names
-#	(the default prefix gives /opt/mbusgw-t2r/sbin/mbusgw-t2r and so on).
+#	(the package uses /usr/sbin and /etc/mbusgw-t2r).
 #
 #	CREATION DATE: 28-OCT-2026
 #

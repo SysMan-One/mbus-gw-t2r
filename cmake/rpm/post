@@ -1,10 +1,11 @@
 #!/bin/sh
 #	mbusgw-t2r: the unit is installed disabled - the settings file has to be tuned first;
 #	an already running service is restarted with the new binary ($1 >= 1: an install or an upgrade).
+set -e
 if [ -d /run/systemd/system ]; then
-	systemctl daemon-reload || true
+	systemctl daemon-reload
 	if [ "$1" -ge 1 ] && systemctl is-active --quiet mbusgw-t2r.service; then
-		systemctl restart mbusgw-t2r.service || true
+		systemctl restart mbusgw-t2r.service
 	fi
 fi
 exit 0

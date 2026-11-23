@@ -1,0 +1,6 @@
+mbusgw-t2r (1.4.0-2) unstable; urgency=medium
+
+  * Install the gateway, configuration, service and documentation in
+    standard system directories.
+
+ -- StarLet Squad <zator@yandex.ru>  Mon, 23 Nov 2026 10:00:00 +0000

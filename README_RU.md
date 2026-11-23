@@ -119,9 +119,9 @@ Digital Equipment Corporation: шапки модулей с парой IDENT/REV
 ####	Шаг 1. Установить средства сборки
 
 ```
-$ sudo apt install build-essential cmake git
+$ sudo apt install build-essential cmake git gzip
 ```
-(в дистрибутивах на основе RPM: `sudo dnf install gcc make cmake git`)
+(в дистрибутивах на основе RPM: `sudo dnf install gcc make cmake git gzip`)
 
 ####	Шаг 2. Установить пакет StarLet
 
@@ -199,31 +199,28 @@ $ sudo make install
 
 | Что | Куда |
 |-----|------|
-| Бинарник `mbusgw-t2r` и утилита `mbus-ctl` | `/opt/mbusgw-t2r/sbin/` (.deb и .rpm добавляют симлинк `/usr/sbin/mbus-ctl`) |
-| Файлы конфигурации | `/opt/mbusgw-t2r/etc/` |
-| Документация и эталонные копии конфигов | `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/` |
+| Бинарник `mbusgw-t2r` и утилита `mbus-ctl` | `/usr/local/sbin/` |
+| Файлы конфигурации | `/usr/local/etc/mbusgw-t2r/` |
+| Документация и эталонные копии конфигов | `/usr/local/share/doc/mbusgw-t2r/` |
 
 Файлы конфигурации ставятся **только если их нет**: повторный `make install` (обновление)
 никогда не затирает настроенную рабочую конфигурацию — такие файлы отмечаются в выводе как
 `Keeping the existing ...`.
 
-Префикс по умолчанию — `/opt/mbusgw-t2r`: самодостаточное дерево, которое удаляется целиком.
-Чтобы поставить в другое место, задайте префикс на шаге 4:
-`cmake ../ -DCMAKE_INSTALL_PREFIX=/usr/local ...` — тогда бинарник попадёт в `/usr/local/sbin/`,
-файлы конфигурации — в `/usr/local/etc/mbusgw-t2r/`, документация — в
-`/usr/local/share/doc/mbusgw-t2r/`. Юнит systemd (копия в документации и установленный при
+Префикс по умолчанию — `/usr/local`. Чтобы поставить в другое место, задайте при настройке сборки
+`-DCMAKE_INSTALL_PREFIX=<префикс>`. Юнит systemd (копия в документации и установленный при
 `-DT2R_SYSTEMD_UNIT=ON`) содержит пути заданного префикса.
 
 **USB-адаптеры FTDI** (FT232/FT2232/FT4232): поставьте правило udev, которое выставляет им
 `latency_timer` в 1 мс --- ответы приходят быстрее и никогда не обрезаются:
-`sudo cp /opt/mbusgw-t2r/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/` (подробности
+`sudo cp /usr/local/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/` (подробности
 в самом файле правила и в руководстве пользователя, раздел *Траблшутинг*).
 
 ####	Шаг 5. Настроить и запустить
 
 ```
-$ sudo vi /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
-$ /opt/mbusgw-t2r/sbin/mbusgw-t2r /settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo vi /usr/local/etc/mbusgw-t2r/modbus-t2r_settings.conf
+$ /usr/local/sbin/mbusgw-t2r /settings=/usr/local/etc/mbusgw-t2r/modbus-t2r_settings.conf
 ```
 
 Формат файла настроек — в разделе *Правила запуска и настройки* ниже.
@@ -235,7 +232,7 @@ $ cd mbus-gw-t2r/build
 $ sudo make uninstall
 ```
 
-Удаляется всё, что поставил `make install`, кроме файлов конфигурации в `/opt/mbusgw-t2r/etc/` —
+Удаляется всё, что поставил `make install`, кроме файлов конфигурации в `/usr/local/etc/mbusgw-t2r/` —
 настроенная рабочая конфигурация переживает деинсталляцию всегда.
 
 ####	Готовые пакеты (GitHub Releases)
@@ -247,18 +244,26 @@ $ sudo make uninstall
 К каждому релизному тегу на GitHub (`v0.13.5` и новее) прикладываются пакеты `.deb` для amd64 и
 arm64: https://github.com/napilab/mbus-gw-t2r/releases. Они собраны на Debian 12 и требуют только
 glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ubuntu 24.04); StarLet и yaLIBCFG
-слинкованы статически. Пакет ставит шлюз в `/opt/mbusgw-t2r/` и службу systemd
+слинкованы статически. Текущие пакеты ставят бинарники в `/usr/sbin/`, настройки в `/etc/mbusgw-t2r/`,
+документацию в `/usr/share/doc/mbusgw-t2r/` и службу systemd
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.4.0-1_arm64.deb
-$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo apt install ./mbusgw-t2r_1.4.0-2_arm64.deb
+$ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
 
-Файлы настроек — conffiles: при обновлении настроенные сохраняются. Сборку делает
+Файлы настроек — conffiles: при обновлении настроенные сохраняются. Настройки старых пакетов из
+`/opt/mbusgw-t2r/etc/` автоматически не переносятся: скопируйте их в `/etc/mbusgw-t2r/` и
+проверьте перед запуском службы. Перед обновлением старого пакета остановите службу, чтобы она
+не перезапустилась с настройками по умолчанию. Сборку делает
 `.github/workflows/release.yml`; локально тот же пакет собирается так:
-`cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
+`cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
+Если `deb-systemd-invoke` отсутствует, пакет останавливает и перезапускает службу через
+`systemctl` с учётом `policy-rc.d`. При удалении `systemctl disable` убирает и ссылки,
+созданные вручную через `systemctl enable`; если `systemctl` недоступен, для отключения
+автозапуска используется `deb-systemd-helper`.
 
 Пакеты `.deb` для **mipsel** и **mips64el** (`v0.13.6` и новее) — кросс-сборка для Debian 12
 (в Debian 13 портов MIPS нет); ставятся так же. То же относится к `.deb` для **armhf** и **mips**
@@ -272,13 +277,13 @@ glibc 2.34 или новее. Перед релизом он лишь запус
 выключенной:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.4.0-1.x86_64.rpm
-$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo dnf install ./mbusgw-t2r-1.4.0-2.x86_64.rpm
+$ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
 
 `x86_64` и `aarch64` перед релизом устанавливаются и запускаются на Fedora и Rocky Linux 9.
-Локально: `cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G RPM`
+Локально: `cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G RPM`
 (нужен `rpmbuild`; для кросс-сборки добавьте `-DT2R_RPM_ARCH=<архитектура rpm>`).
 
 ####	Пакеты для OpenWrt (GitHub Releases)
@@ -360,7 +365,7 @@ StarLet, yaLIBCFG и шлюз на amd64 и arm64 и прогоняет тест
 
 PDF собираются скриптом `docs/make_userguide_pdf.py` (набор reportlab, шрифты DejaVu).
 
-После `make install` оба лежат также в `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/`.
+После `make install` оба лежат также в `/usr/local/share/doc/mbusgw-t2r/`.
 
 ###	Правила запуска и настройки
 
@@ -489,7 +494,7 @@ TCP-партнёра. Направьте партнёра на RAW-слушат�
 шлюз, пока его нет (перезапуск).
 
 ```
-$ sudo mbus-ctl sho conn			# .deb, .rpm: /usr/sbin/mbus-ctl; 'make install': /opt/mbusgw-t2r/sbin/mbus-ctl
+$ sudo mbus-ctl sho conn			# .deb, .rpm: /usr/sbin/mbus-ctl; 'make install': /usr/local/sbin/mbus-ctl
 Connections of the MODBUS gateway at 07-NOV-2026 00:07:44
 
 Listener #0  127.0.0.1:45459  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s), accepted 2, rejected 0

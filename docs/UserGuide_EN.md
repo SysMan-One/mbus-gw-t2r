@@ -26,10 +26,10 @@ The gateway sits between them and translates:
 
 ## 2. Before you start --- the checklist
 
-1. The gateway is installed (see `README.md`, section *Installation*). After the installation
-   you have:
-   - the program itself: `/opt/mbusgw-t2r/sbin/mbusgw-t2r`
-   - the settings file: `/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf`
+1. The gateway is installed (see `README.md`, section *Installation*). The package installs:
+   - the program itself: `/usr/sbin/mbusgw-t2r`
+   - the settings file: `/etc/mbusgw-t2r/modbus-t2r_settings.conf`
+   A manual CMake installation uses `/usr/local/sbin/` and `/usr/local/etc/mbusgw-t2r/` instead.
 2. You know **which serial port** your device is connected to. On Linux it is a file like
    `/dev/ttyS0`, `/dev/ttyUSB0` or `/dev/ttyXRUSB0`. If unsure, plug the USB adapter out and
    in and run `dmesg | tail` --- the port name will be printed.
@@ -45,7 +45,7 @@ The settings file has two sections: `serials` (the serial lines) and `listeners`
 ports). Open it in any editor:
 
 ```
-$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 ```
 
 A minimal working example:
@@ -252,7 +252,7 @@ CR into LF and does not cut the 8th bit any more. Before, an octet `0x0D` could 
 By hand, in a terminal (the messages go straight to the screen):
 
 ```
-$ /opt/mbusgw-t2r/sbin/mbusgw-t2r /settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ /usr/sbin/mbusgw-t2r /settings=/etc/mbusgw-t2r/modbus-t2r_settings.conf
 ```
 
 Useful options:
@@ -320,8 +320,8 @@ serial adapter needs its kernel module: `kmod-usb-serial-ftdi`, `kmod-usb-serial
 
 ### 4.3. Watching and controlling a running gateway: mbus-ctl
 
-`mbus-ctl` is a small program next to the gateway (`/opt/mbusgw-t2r/sbin/mbus-ctl`; the .deb and OpenWrt
-packages put it into PATH as `/usr/sbin/mbus-ctl`). It asks the running gateway what it is doing, and it can disconnect a
+`mbus-ctl` is a small program next to the gateway (`/usr/sbin/mbus-ctl` in the packages,
+`/usr/local/sbin/mbus-ctl` after a manual install). It asks the running gateway what it is doing, and it can disconnect a
 client or restart the gateway. It talks to the gateway through a socket **file** on the same
 computer, `/var/run/mbusgw-t2r.sock`. Nothing is opened to the network. Only root and the group of
 the gateway may use the file (rights `0660`), so type `sudo` in front of it.
@@ -438,7 +438,7 @@ dislikes.**
 | `CRC16ERR` on a part of the requests after a reboot or a replug of the adapter; it goes away after any other program (`stty raw`, pyserial) has opened the port | A gateway older than X.00-13ECO07 kept the CR-to-NL translation (`icrnl`) of a fresh port: an octet 0x0D in the answer became 0x0A | update to X.00-13ECO07 or newer; for an older gateway: `ExecStartPre=/bin/stty -F /dev/ttyUSB0 raw` (one per port) in the unit |
 | `%T2R-E-BADFRAME, [...] !UL octets, allowed [5..256]` | Something arrived, but it is not a sane MODBUS frame | usually the same causes as CRC16ERR; with 400+ octets of garbage --- a foreign, non-MODBUS device on the line |
 | `%T2R-W-FRAMETMO, [...] Frame is not completed in ...` | The answer started but never finished in time | a very slow or hanging device; raise `iotmo`; check the cable |
-| `CRC16ERR`, `BADFRAME` or `FRAMETMO` now and then, on a USB adapter (FTDI) only; a direct `mbpoll` on the same port is fine | The FTDI adapter gives the answer by pieces, once in 16 msec (its `latency_timer`). Since X.00-10 the gateway waits for the whole answer of the usual functions (01-06, 15, 16, 23), but the other functions are still cut | set `latency_timer` to 1 msec --- it also makes every answer faster: `sudo cp /opt/mbusgw-t2r/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/`, then `sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=usb-serial`; check: `cat /sys/bus/usb-serial/devices/ttyUSB0/latency_timer` must print `1` |
+| `CRC16ERR`, `BADFRAME` or `FRAMETMO` now and then, on a USB adapter (FTDI) only; a direct `mbpoll` on the same port is fine | The FTDI adapter gives the answer by pieces, once in 16 msec (its `latency_timer`). Since X.00-10 the gateway waits for the whole answer of the usual functions (01-06, 15, 16, 23), but the other functions are still cut | set `latency_timer` to 1 msec --- it also makes every answer faster: `sudo cp /usr/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/`, then `sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=usb-serial`; check: `cat /sys/bus/usb-serial/devices/ttyUSB0/latency_timer` must print `1` |
 | `%T2R-W-LATEANS, [...] N octets have arrived after the failed exchange (a late answer?) --- dropped` after `NOANSWER` | The device answered, but later than `iotmo`; the answer has been thrown away | raise `iotmo` of this serial port: take it with a margin over the slowest device on the line |
 | `%T2R-W-ECHOMISM, [...] Echo of the write request: address A, value/quantity V (REQ: ...) --- mismatch` | The answer to a write (functions 5, 6, 15, 16) is not the echo of this request: usually a late answer to an earlier request; the client gets exception 4 | raise `iotmo` (see LATEANS); if it happens with a fast device --- two masters on one line; if it happens on **every** write to one device --- the device does not echo the request as the MODBUS specification wants (e.g. returns the stored, clamped value): the write is done, but reported as failed --- tell us the device model |
 | `%T2R-W-EXCRPT, [...] Report exception 4 (SERVER_DEVICE_FAILURE) ...` | The gateway told the TCP client "the serial side failed" | look at the *previous* log line --- it names the real reason (NOANSWER, CRC16ERR, ...) |

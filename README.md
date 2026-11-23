@@ -123,9 +123,9 @@ The whole sequence from a bare system to a running gateway is:
 ####	Step 1. Install the build prerequisites
 
 ```
-$ sudo apt install build-essential cmake git
+$ sudo apt install build-essential cmake git gzip
 ```
-(on RPM-based distros: `sudo dnf install gcc make cmake git`)
+(on RPM-based distros: `sudo dnf install gcc make cmake git gzip`)
 
 ####	Step 2. Install the StarLet package
 
@@ -202,31 +202,29 @@ What goes where:
 
 | What | Where |
 |------|-------|
-| `mbusgw-t2r` binary and the `mbus-ctl` utility | `/opt/mbusgw-t2r/sbin/` (the .deb and the .rpm add the symlink `/usr/sbin/mbus-ctl`) |
-| Configuration files | `/opt/mbusgw-t2r/etc/` |
-| Docs and reference copies of the configs | `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/` |
+| `mbusgw-t2r` binary and the `mbus-ctl` utility | `/usr/local/sbin/` |
+| Configuration files | `/usr/local/etc/mbusgw-t2r/` |
+| Docs and reference copies of the configs | `/usr/local/share/doc/mbusgw-t2r/` |
 
 The configuration files are installed **only when they are absent**: a repeated `make install`
 (an upgrade) never overwrites the has been tuned working configuration - such files are reported
 as `Keeping the existing ...`.
 
-The default prefix is `/opt/mbusgw-t2r` --- a self-contained tree, removed as a whole. To install
-elsewhere give the prefix at the Step 4: `cmake ../ -DCMAKE_INSTALL_PREFIX=/usr/local ...` ---
-the binary then goes to `/usr/local/sbin/`, the configuration files to
-`/usr/local/etc/mbusgw-t2r/`, the docs to `/usr/local/share/doc/mbusgw-t2r/`. The systemd unit
+The default prefix is `/usr/local`. To install elsewhere, pass
+`-DCMAKE_INSTALL_PREFIX=<prefix>` when configuring the build. The systemd unit
 (the copy in the docs, and the installed one with `-DT2R_SYSTEMD_UNIT=ON`) carries the paths of
 the prefix given.
 
 **USB-to-serial adapters FTDI** (FT232/FT2232/FT4232): install the udev rule which sets their
 `latency_timer` to 1 msec --- the answers get faster and are never cut:
-`sudo cp /opt/mbusgw-t2r/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/` (the details
+`sudo cp /usr/local/share/doc/mbusgw-t2r/99-ftdi-latency.rules /etc/udev/rules.d/` (the details
 are in the rule file and in the User Guide, *Troubleshooting*).
 
 ####	Step 5. Tune the configuration and run
 
 ```
-$ sudo vi /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
-$ /opt/mbusgw-t2r/sbin/mbusgw-t2r /settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo vi /usr/local/etc/mbusgw-t2r/modbus-t2r_settings.conf
+$ /usr/local/sbin/mbusgw-t2r /settings=/usr/local/etc/mbusgw-t2r/modbus-t2r_settings.conf
 ```
 
 See the *Run & Configuration rules* section below for the settings file format.
@@ -239,7 +237,7 @@ $ sudo make uninstall
 ```
 
 Everything which has been put by `make install` is removed, except the configuration files
-under `/opt/mbusgw-t2r/etc/` - the has been tuned working configuration always survives.
+under `/usr/local/etc/mbusgw-t2r/` - the tuned working configuration survives.
 
 ####	Ready-made packages (GitHub Releases)
 
@@ -250,18 +248,26 @@ A release is tagged with the `__IDENT__` of the head module itself, with no "v" 
 Every release tag on GitHub (`v0.13.5` and later) gets `.deb` packages for amd64 and arm64 at
 https://github.com/napilab/mbus-gw-t2r/releases. They are built on Debian 12 and need glibc 2.34
 or newer only (tested on Debian 12, Debian 13 and Ubuntu 24.04); StarLet and yaLIBCFG are linked
-statically. The package puts the gateway to `/opt/mbusgw-t2r/` and the systemd unit
+statically. Current packages put the binaries in `/usr/sbin/`, settings in `/etc/mbusgw-t2r/`,
+documentation in `/usr/share/doc/mbusgw-t2r/`, and installs the systemd unit
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.4.0-1_arm64.deb
-$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo apt install ./mbusgw-t2r_1.4.0-2_arm64.deb
+$ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
 
-The configuration files are conffiles: an upgrade keeps the tuned ones. The workflow is
+The configuration files are conffiles: an upgrade keeps the tuned ones. Configuration from
+older packages under `/opt/mbusgw-t2r/etc/` is not migrated; copy it to `/etc/mbusgw-t2r/`
+and check it before starting the service. Stop the service before upgrading an older package,
+so that it is not restarted with the new default settings. The workflow is
 `.github/workflows/release.yml`; locally the same package is made by
-`cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
+`cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
+On systems without `deb-systemd-invoke`, the package uses `systemctl` for stopping and restarting
+the service, still respecting `policy-rc.d`. On removal, `systemctl disable` also removes links
+created by a manual `systemctl enable`; if `systemctl` is unavailable, the package falls back to
+`deb-systemd-helper` for disabling.
 
 The `.deb` for **mipsel** and **mips64el** (`v0.13.6` and later) is a cross build for Debian 12
 (Debian 13 has no MIPS ports); it is installed the same way. The same holds for the `.deb` for
@@ -275,13 +281,13 @@ attached to the releases made after this text was written: `x86_64`, `aarch64`, 
 `%config(noreplace)`, the unit is installed disabled:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.4.0-1.x86_64.rpm
-$ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+$ sudo dnf install ./mbusgw-t2r-1.4.0-2.x86_64.rpm
+$ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
 
 `x86_64` and `aarch64` are installed and started on Fedora and Rocky Linux 9 before the release.
-Locally: `cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G RPM`
+Locally: `cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G RPM`
 (needs `rpmbuild`; for a cross build give `-DT2R_RPM_ARCH=<rpm architecture>`).
 
 ####	OpenWrt packages (GitHub Releases)
@@ -365,7 +371,7 @@ pseudo device, troubleshooting by the message codes --- is available in two lang
 
 The PDFs are generated by `docs/make_userguide_pdf.py` (the reportlab set, the DejaVu fonts).
 
-After `make install` both are also in `/opt/mbusgw-t2r/share/doc/mbusgw-t2r/`.
+After `make install` both are also in `/usr/local/share/doc/mbusgw-t2r/`.
 
 ### 	Run & Configuration rules
 
@@ -492,7 +498,7 @@ The words may be shortened: `sho conn /cont`, `sho gw`, `sho ser`, `reset conn 7
 waits for the gateway while it is not there (a restart).
 
 ```
-$ sudo mbus-ctl sho conn			# the .deb, the .rpm: /usr/sbin/mbus-ctl; 'make install': /opt/mbusgw-t2r/sbin/mbus-ctl
+$ sudo mbus-ctl sho conn			# the .deb, the .rpm: /usr/sbin/mbus-ctl; 'make install': /usr/local/sbin/mbus-ctl
 Connections of the MODBUS gateway at 07-NOV-2026 00:07:44
 
 Listener #0  127.0.0.1:45459  MODBUS -> /dev/ttyUSB0  UP, 2 of 8 connection(s), accepted 2, rejected 0

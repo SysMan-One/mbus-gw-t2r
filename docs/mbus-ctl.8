@@ -1,0 +1,37 @@
+.TH MBUS-CTL 8
+.SH NAME
+mbus-ctl \- monitor and control the MODBUS gateway
+.SH SYNOPSIS
+.B mbus-ctl SHOW
+.RB { CONNECTIONS | LINES | GATEWAY }
+.RI [ /CONTINUOUS [ =seconds ]]
+.br
+.B mbus-ctl RESET CONNECTIONS
+.RI { id | address | address:port | /ALL }
+.br
+.B mbus-ctl RESTART GATEWAY
+.RI [ /WAIT= seconds " | " /NOWAIT ]
+.br
+.B mbus-ctl HELP
+.SH DESCRIPTION
+Communicate with a running mbusgw-t2r gateway through its local control socket.
+SHOW displays clients, serial lines or gateway status.
+RESET disconnects selected clients.
+RESTART validates the settings and restarts the running gateway.
+.SH OPTIONS
+.TP
+.BI /SOCKET= path
+Connect to
+.I path
+instead of /var/run/mbusgw-t2r.sock.
+.TP
+.RI /CONTINUOUS[ =seconds ]
+Refresh SHOW output until interrupted.
+.TP
+.BI /WAIT= seconds
+Wait for the gateway to restart.
+.TP
+.B /NOWAIT
+Do not wait for the gateway to restart.
+.SH SEE ALSO
+.BR mbusgw-t2r (8)

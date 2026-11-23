@@ -3,9 +3,23 @@
 #	an already running service is restarted with the new binary.
 set -e
 if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
-	systemctl daemon-reload || true
+	systemctl daemon-reload
 	if systemctl is-active --quiet mbusgw-t2r.service; then
-		systemctl restart mbusgw-t2r.service || true
+		if command -v deb-systemd-invoke >/dev/null 2>&1; then
+			deb-systemd-invoke restart mbusgw-t2r.service
+		else
+			echo "mbusgw-t2r: deb-systemd-invoke not found; using systemctl" >&2
+			if [ -x /usr/sbin/policy-rc.d ]; then
+				rc=0
+				/usr/sbin/policy-rc.d mbusgw-t2r.service restart || rc=$?
+				case "$rc" in
+					0|104) ;;
+					101) echo "mbusgw-t2r: restart denied by policy-rc.d" >&2; exit 0 ;;
+					*) echo "mbusgw-t2r: policy-rc.d failed ($rc)" >&2; exit "$rc" ;;
+				esac
+			fi
+			systemctl restart mbusgw-t2r.service
+		fi
 	fi
 fi
 exit 0

@@ -1,0 +1,19 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: mbusgw-t2r
+Source: https://github.com/napilab/mbus-gw-t2r
+Upstream-Contact: StarLet Squad and Ruslan R. Laishev <zator@yandex.ru>
+
+Files: *
+Copyright: 2025-2026 StarLet Squad and Ruslan R. Laishev
+License: Apache-2.0
+Comment: The binary includes statically linked StarLet utility routines and
+ yaLIBCFG, both by the same authors and licensed under Apache-2.0.
+ yaLIBCFG is copyright 2026 StarLet Squad and Ruslan R. Laishev.
+ StarLet is copyright 2025 Ruslan (The BadAss SysMan) Laishev.
+ Sources: https://gitlab.com/SysMan-One/utility_routines
+ and https://github.com/SysMan-One/yaLIBCFG
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0.
+ On Debian systems, the full license text is available at
+ /usr/share/common-licenses/Apache-2.0.

@@ -97,11 +97,11 @@
 #		$ sudo make uninstall
 #
 #	The .deb package (see .github/workflows/release.yml):
-#		$ cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON
+#		$ cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON
 #		$ make -s && cpack -G DEB
 #
 #	The .rpm package (needs rpmbuild; -DT2R_RPM_ARCH=<arch> for a cross build):
-#		$ cmake ../ -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON
+#		$ cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON
 #		$ make -s && cpack -G RPM
 #
 #	The OpenWrt packages (.ipk, .apk): the feed openwrt/, see README.md.
@@ -146,13 +146,8 @@ project(mbusgw-t2r VERSION ${T2R_REV_MAJOR}.${T2R_REV_MINOR}.${T2R_REV_ECO} LANG
 message (STATUS "mbusgw-t2r package version: ${PROJECT_VERSION}")
 
 #
-#   The default installation prefix is /opt/mbusgw-t2r; must precede GNUInstallDirs, which
-#   derives the installation directories from it. An explicit -DCMAKE_INSTALL_PREFIX wins.
+#   GNUInstallDirs uses /usr/local for a manual installation and /etc for a /usr installation.
 #
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-	set (CMAKE_INSTALL_PREFIX "/opt/${PROJECT_NAME}" CACHE PATH "Installation prefix" FORCE)
-endif ()
-
 include(GNUInstallDirs)							# Must follow project(): needs the compiler info
 set ( CMAKE_VERBOSE_MAKEFILE ON )
 set ( CMAKE_COLOR_MAKEFILE   ON )
@@ -240,16 +235,10 @@ target_link_libraries( ${T2R_CTL_TARGET} StarLet::starlet pthread)
 
 #------------------------------------------------------------------------------------------------------
 #	Installation:	sbin/mbusgw-t2r, sbin/mbus-ctl
-#			etc/mbusgw-t2r/*.conf	- the existing configuration files are never overwritten
-#						  (etc/*.conf under /opt/: the tree is self-contained)
-#			share/doc/mbusgw-t2r/	- README, BLOCKNOTE, the reference copies of the configs,
-#						  the FTDI udev rule
+#			etc/mbusgw-t2r/*.conf	- existing configuration files are never overwritten
+#			share/doc/mbusgw-t2r/	- documentation, examples and the FTDI udev rule
 #
-if (CMAKE_INSTALL_PREFIX MATCHES "^/opt/")
-	set (T2R_CONFDIR "${CMAKE_INSTALL_PREFIX}/etc")
-else ()
-	set (T2R_CONFDIR "${CMAKE_INSTALL_FULL_SYSCONFDIR}/mbusgw-t2r")
-endif ()
+set (T2R_CONFDIR "${CMAKE_INSTALL_FULL_SYSCONFDIR}/mbusgw-t2r")
 
 #	The systemd unit with the paths of this prefix (the binaries, the settings file, the docs)
 configure_file (contrib/mbusgw-t2r.service.in ${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service @ONLY)
@@ -268,10 +257,32 @@ install (FILES
 	docs/UserGuide_RU.md
 	docs/UserGuide_EN.pdf
 	docs/UserGuide_RU.pdf
+	LICENSE
+	NOTICE
 	contrib/99-ftdi-latency.rules
 	${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service
 	DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
+
+install (FILES cmake/deb/copyright DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+find_program (T2R_GZIP gzip)
+if (NOT T2R_GZIP)
+	message (FATAL_ERROR "gzip is required to prepare the manual pages and changelog")
+endif ()
+set (T2R_COMPRESSED_DOCS docs/mbusgw-t2r.8 docs/mbus-ctl.8 cmake/deb/changelog.Debian)
+foreach (l_doc IN LISTS T2R_COMPRESSED_DOCS)
+	get_filename_component (l_name "${l_doc}" NAME)
+	set_property (DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${l_doc}")
+	execute_process (COMMAND "${T2R_GZIP}" -n -9 -c "${CMAKE_CURRENT_SOURCE_DIR}/${l_doc}"
+		OUTPUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/${l_name}.gz" RESULT_VARIABLE l_gzip_result)
+	if (NOT l_gzip_result STREQUAL "0")
+		message (FATAL_ERROR "Failed to compress ${l_doc}: ${l_gzip_result}")
+	endif ()
+endforeach ()
+install (FILES "${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.8.gz" "${CMAKE_CURRENT_BINARY_DIR}/mbus-ctl.8.gz"
+	DESTINATION ${CMAKE_INSTALL_MANDIR}/man8)
+install (FILES "${CMAKE_CURRENT_BINARY_DIR}/changelog.Debian.gz" DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 #	The configuration files are put to etc/ only when they are absent: an update must not
 #	destroy the has been tuned working configuration.
@@ -288,29 +299,17 @@ install (CODE "
 	endforeach ()
 ")
 
-#	The systemd unit goes to /usr/lib/systemd/system only for the package: 'make install' to /opt/
-#	does not touch the system directories.
+#	The systemd unit is installed only when explicitly requested.
 option(T2R_SYSTEMD_UNIT "Install the systemd unit (for the .deb and .rpm packages)" OFF)
 
 if (T2R_SYSTEMD_UNIT)
 	install (FILES ${CMAKE_CURRENT_BINARY_DIR}/mbusgw-t2r.service DESTINATION /usr/lib/systemd/system)
 
-	#  The package puts mbus-ctl into PATH: /usr/sbin/mbus-ctl -> <prefix>/sbin/mbus-ctl
-	#  (the gateway itself is started by the unit and stays under the prefix only); with the prefix
-	#  /usr the utility is there already - the link would replace it by a link to itself
-	if (NOT CMAKE_INSTALL_FULL_SBINDIR STREQUAL "/usr/sbin")
-		execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink
-			"${CMAKE_INSTALL_FULL_SBINDIR}/${T2R_CTL_TARGET}"
-			"${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link")	# file (CREATE_LINK) is 3.14+
-		install (FILES "${CMAKE_CURRENT_BINARY_DIR}/${T2R_CTL_TARGET}.link"
-			DESTINATION /usr/sbin RENAME ${T2R_CTL_TARGET})
-	endif ()
 endif ()
 
-#	'make uninstall': removes everything from install_manifest.txt; the configuration files
-#	which were kept (not overwritten) at the install time are not touched.
+#	'make uninstall' leaves the configuration files in place.
 add_custom_target (uninstall
-	COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
+	COMMAND ${CMAKE_COMMAND} -DT2R_CONFDIR=${T2R_CONFDIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
 	COMMENT "Uninstalling by install_manifest.txt"
 )
 
@@ -334,10 +333,14 @@ set (CPACK_GENERATOR			"DEB")
 set (CPACK_PACKAGE_NAME			"${PROJECT_NAME}")
 set (CPACK_PACKAGE_VENDOR		"StarLet Squad")
 set (CPACK_PACKAGE_CONTACT		"Ruslan R. Laishev <zator@yandex.ru>")
-set (CPACK_PACKAGE_DESCRIPTION_SUMMARY	"A yet another gateway for MODBUS (TCP to RTU)")
+set (CPACK_PACKAGE_DESCRIPTION_SUMMARY	"MODBUS TCP to RTU gateway")
+set (CPACK_DEBIAN_PACKAGE_DESCRIPTION	"The gateway forwards requests from MODBUS TCP clients to serial RTU devices.
+It includes a local monitoring and control utility.")
 set (CPACK_PACKAGING_INSTALL_PREFIX	"${CMAKE_INSTALL_PREFIX}")
+configure_file (cmake/package-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/package-config.cmake @ONLY)
+set (CPACK_PROJECT_CONFIG_FILE		"${CMAKE_CURRENT_BINARY_DIR}/package-config.cmake")
 set (CPACK_DEBIAN_FILE_NAME		DEB-DEFAULT)		# <name>_<version>-<release>_<arch>.deb
-set (CPACK_DEBIAN_PACKAGE_RELEASE	1)
+set (CPACK_DEBIAN_PACKAGE_RELEASE	2)
 set (CPACK_DEBIAN_PACKAGE_SECTION	"net")
 set (CPACK_DEBIAN_PACKAGE_HOMEPAGE	"https://github.com/napilab/mbus-gw-t2r")
 
@@ -377,7 +380,7 @@ endif ()
 #	yaLIBCFG and StarLet are linked statically - nothing else is needed.
 #
 set (CPACK_RPM_FILE_NAME		RPM-DEFAULT)		# <name>-<version>-<release>.<arch>.rpm
-set (CPACK_RPM_PACKAGE_RELEASE		1)
+set (CPACK_RPM_PACKAGE_RELEASE		2)
 set (CPACK_RPM_PACKAGE_LICENSE		"Apache-2.0")		# see NOTICE
 set (CPACK_RPM_PACKAGE_GROUP		"Applications/Communications")
 set (CPACK_RPM_PACKAGE_URL		"https://github.com/napilab/mbus-gw-t2r")
@@ -396,15 +399,10 @@ set (CPACK_RPM_USER_FILELIST
 
 #	CPack marks the files installed to an absolute path (the unit) as %config, and owns the
 #	directories of systemd: the unit is an ordinary file, the directories belong to systemd.
-#	The link /usr/sbin/mbus-ctl (see T2R_SYSTEMD_UNIT above) is a plain file of the package too, and
-#	/usr/sbin belongs to filesystem.
 if (T2R_SYSTEMD_UNIT)
 	list (APPEND CPACK_RPM_USER_FILELIST "%attr(0644,root,root) /usr/lib/systemd/system/mbusgw-t2r.service")
-	if (NOT CMAKE_INSTALL_FULL_SBINDIR STREQUAL "/usr/sbin")
-		list (APPEND CPACK_RPM_USER_FILELIST "%attr(-,root,root) /usr/sbin/${T2R_CTL_TARGET}")	# a bare path trips CPackRPM of CMake 3.25
-	endif ()
 endif ()
-set (CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/lib/systemd;/usr/lib/systemd/system;/usr/sbin;/opt")
+set (CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/usr/lib/systemd;/usr/lib/systemd/system;/usr/sbin;/usr/share/man;/usr/share/man/man8")
 
 #	A cross build names the architecture of the package (x86_64, armv7hl, aarch64, mips, mipsel,
 #	mips64el) - CPack takes the one of the build host otherwise. The binary is of a foreign

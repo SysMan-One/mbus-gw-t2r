@@ -125,7 +125,7 @@ jobs:
         run: |
           apt-get update
           apt-get install --yes --no-install-recommends build-essential cmake \
-            dpkg-dev file git ca-certificates rpm
+            dpkg-dev file git ca-certificates rpm lintian
 
       - uses: actions/checkout@v5
         with:
@@ -150,7 +150,7 @@ jobs:
 
       - name: Build the gateway and the package
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON
           cmake --build build -j "$(nproc)"
           cd build && cpack -G DEB && cpack -G RPM
 
@@ -159,6 +159,7 @@ jobs:
           deb=$(ls build/*.deb)
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb"
+          lintian "$deb"
           case "$deb" in *_${{ matrix.arch }}.deb) ;; *) echo "Wrong architecture: $deb"; exit 1;; esac
           rpm=$(ls build/*.rpm)
           case "$rpm" in *.${{ matrix.rpm }}.rpm) ;; *) echo "Wrong architecture: $rpm"; exit 1;; esac
@@ -198,19 +199,75 @@ jobs:
         with:
           name: linux-${{ matrix.arch }}
 
-      - name: Install, upgrade-in-place and start the gateway
+      - name: Install, preserve configuration, remove and purge
         run: |
           apt-get update
           apt-get install --yes ./*.deb
+          test -f /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          echo '# tuned by hand' >> /etc/mbusgw-t2r/modbus-t2r_settings.conf
           apt-get install --yes --reinstall ./*.deb
+          grep -q '^# tuned by hand' /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          version=$(dpkg-deb --field ./*.deb Version)
+          dpkg-deb -R ./*.deb /tmp/mbusgw-upgrade
+          sed -i "s/^Version: .*/Version: ${version}+test1/" /tmp/mbusgw-upgrade/DEBIAN/control
+          dpkg-deb --build /tmp/mbusgw-upgrade /tmp/mbusgw-upgrade.deb
+          dpkg -i /tmp/mbusgw-upgrade.deb
+          grep -q '^# tuned by hand' /etc/mbusgw-t2r/modbus-t2r_settings.conf
           test -f /usr/lib/systemd/system/mbusgw-t2r.service
-          test -f /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
-          if ldd /opt/mbusgw-t2r/sbin/mbusgw-t2r | grep 'not found'; then exit 1; fi
-          out=$(/opt/mbusgw-t2r/sbin/mbusgw-t2r 2>&1 || true)
+          test -f /usr/share/doc/mbusgw-t2r/copyright
+          dpkg-deb --contents ./*.deb | grep -q 'usr/share/man/man8/mbusgw-t2r.8.gz'
+          dpkg-deb --contents ./*.deb | grep -q 'usr/share/man/man8/mbus-ctl.8.gz'
+          test ! -e /opt/mbusgw-t2r
+          if ldd /usr/sbin/mbusgw-t2r | grep 'not found'; then exit 1; fi
+          out=$(/usr/sbin/mbusgw-t2r 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q 'REVISNF'
-          /opt/mbusgw-t2r/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
+          /usr/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
           apt-get remove --yes mbusgw-t2r
+          grep -q '^# tuned by hand' /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          apt-get purge --yes mbusgw-t2r
+          test ! -e /etc/mbusgw-t2r/modbus-t2r_settings.conf
+
+  test-systemd:
+    name: test package with systemd
+    needs: deb
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: linux-amd64
+
+      - name: Install and exercise the service
+        run: |
+          wait_for_control() {
+            for attempt in $(seq 1 30); do
+              if sudo /usr/sbin/mbus-ctl SHOW GATEWAY; then return 0; fi
+              sleep 1
+            done
+            sudo systemctl status mbusgw-t2r.service || true
+            return 1
+          }
+          sudo apt-get install --yes ./*.deb
+          ! systemctl is-enabled --quiet mbusgw-t2r.service
+          sudo tee /etc/mbusgw-t2r/modbus-t2r_settings.conf >/dev/null <<'EOF'
+          listeners = ({ bind = "TCP:127.0.0.1:1502"; target = "/dev/ttyMBUSGW-test"; });
+          serials = ({ device = "/dev/ttyMBUSGW-test"; chars = "9600, 8, N, 1"; });
+          EOF
+          sudo systemctl enable --now mbusgw-t2r.service
+          systemctl is-active --quiet mbusgw-t2r.service
+          wait_for_control
+          sudo systemctl reload mbusgw-t2r.service
+          sudo apt-get install --yes --reinstall ./*.deb
+          systemctl is-enabled --quiet mbusgw-t2r.service
+          systemctl is-active --quiet mbusgw-t2r.service
+          wait_for_control
+          enabled_link=/etc/systemd/system/multi-user.target.wants/mbusgw-t2r.service
+          test -L "$enabled_link"
+          sudo apt-get remove --yes mbusgw-t2r
+          test ! -L "$enabled_link"
+          test -f /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          sudo apt-get purge --yes mbusgw-t2r
+          test ! -e /etc/mbusgw-t2r/modbus-t2r_settings.conf
 
   test-rpm:
     name: test ${{ matrix.rpm }} on ${{ matrix.distro }}
@@ -234,19 +291,19 @@ jobs:
         run: |
           dnf install --assumeyes ./*.rpm
           test -f /usr/lib/systemd/system/mbusgw-t2r.service
-          test -f /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
-          echo '# tuned by hand' >> /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
+          test -f /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          echo '# tuned by hand' >> /etc/mbusgw-t2r/modbus-t2r_settings.conf
           rpm -Uvh --replacepkgs --define '_pkgverify_level digest' ./*.rpm   # %config(noreplace): the tuned file stays
-          grep -q '^# tuned by hand' /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
-          if ldd /opt/mbusgw-t2r/sbin/mbusgw-t2r | grep 'not found'; then exit 1; fi
-          out=$(/opt/mbusgw-t2r/sbin/mbusgw-t2r 2>&1 || true)
+          grep -q '^# tuned by hand' /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          if ldd /usr/sbin/mbusgw-t2r | grep 'not found'; then exit 1; fi
+          out=$(/usr/sbin/mbusgw-t2r 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q 'REVISNF'
-          /opt/mbusgw-t2r/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
+          /usr/sbin/mbus-ctl help | grep -q 'RESTART GATEWAY'
           test -x /usr/sbin/mbus-ctl
           rpm -e mbusgw-t2r
           test ! -e /usr/sbin/mbus-ctl
-          test ! -e /opt/mbusgw-t2r/sbin/mbusgw-t2r
+          test ! -e /usr/sbin/mbusgw-t2r
           test ! -e /usr/lib/systemd/system/mbusgw-t2r.service
 
   cross:
@@ -306,7 +363,7 @@ jobs:
       - name: Build the gateway and the package
         run: |
           shlibdeps=ON; test "${{ matrix.libc }}" = apt || shlibdeps=OFF          # no libc6:mips for dpkg-shlibdeps
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DT2R_SYSTEMD_UNIT=ON \
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON \
             -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$PROC" -DCMAKE_C_COMPILER="$TRIPLET-gcc" \
             -DCMAKE_PREFIX_PATH=/opt/cross -DT2R_DEB_ARCH="$ARCH" -DT2R_DEB_SHLIBDEPS="$shlibdeps" \
             -DT2R_RPM_ARCH=${{ matrix.rpm }}
@@ -329,11 +386,14 @@ jobs:
           grep -q 'modbus-t2r_settings.conf cn$' rpm.files      # %config(noreplace)
           grep -q 'modbus-t2r.conf cn$' rpm.files
           grep -q '^/usr/lib/systemd/system/mbusgw-t2r.service' rpm.files
-          # The binary in the .rpm is the one of the .deb: rpmbuild has not stripped it by the strip of the
-          # host (build/ itself may differ: the install removes a RUNPATH the build tree may carry)
-          rpm2cpio "$rpm" | cpio -i --quiet --to-stdout ./opt/mbusgw-t2r/sbin/mbusgw-t2r > rpm.bin
-          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./opt/mbusgw-t2r/sbin/mbusgw-t2r | cmp - rpm.bin
+          # DEB strips with the target toolchain; RPM retains its cross-built binary.
+          rpm2cpio "$rpm" | cpio -i --quiet --to-stdout ./usr/sbin/mbusgw-t2r > rpm.bin
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/sbin/mbusgw-t2r > deb.bin
+          chmod +x deb.bin
           file rpm.bin | grep -q 'not stripped'
+          file deb.bin | grep -q 'stripped'
+          deb_out=$(${{ matrix.qemu }} -L ${{ matrix.sysroot }} deb.bin 2>&1 || true)
+          echo "$deb_out" | grep -q 'REVISNF'
           file build/mbusgw-t2r
           readelf -d build/mbusgw-t2r | grep NEEDED
           out=$(${{ matrix.qemu }} -L ${{ matrix.sysroot }} build/mbusgw-t2r 2>&1 || true)
@@ -442,6 +502,7 @@ jobs:
           test -x /usr/sbin/mbusgw-t2r
           test -x /etc/init.d/mbusgw-t2r
           test -f /etc/config/mbusgw-t2r
+          test -f /etc/mbusgw-t2r/modbus-t2r.conf
           test -f /etc/mbusgw-t2r/modbus-t2r_settings.conf
           out=$(/usr/sbin/mbusgw-t2r 2>&1 || true)
           echo "$out"
@@ -454,7 +515,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [test, test-rpm, cross, openwrt-test]
+    needs: [test, test-systemd, test-rpm, cross, openwrt-test]
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || startsWith(github.ref, 'refs/tags/X.') || startsWith(inputs.tag, 'v') || startsWith(inputs.tag, 'V') || startsWith(inputs.tag, 'X.')
     runs-on: ubuntu-24.04
     steps:
@@ -500,9 +561,22 @@ jobs:
           for pkg in *.deb *.rpm *.ipk *.apk; do      # The tag must be the package version
             case "$pkg" in mbusgw-t2r_${VER}-*|mbusgw-t2r-${VER}-*) ;; *) echo "$pkg does not match $TAG"; exit 1;; esac
           done
+          for pkg in mbusgw-t2r_${VER}-*_amd64.deb; do
+            test -f "$pkg"
+            DEB_RELEASE=${pkg#mbusgw-t2r_${VER}-}
+            DEB_RELEASE=${DEB_RELEASE%_amd64.deb}
+          done
+          for pkg in mbusgw-t2r-${VER}-*.x86_64.rpm; do
+            test -f "$pkg"
+            RPM_RELEASE=${pkg#mbusgw-t2r-${VER}-}
+            RPM_RELEASE=${RPM_RELEASE%.x86_64.rpm}
+          done
+          test -n "$DEB_RELEASE" && test -n "$RPM_RELEASE"
           sha256sum *.deb *.rpm *.ipk *.apk *.tar.gz > SHA256SUMS
           cat SHA256SUMS
           echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "DEB_RELEASE=$DEB_RELEASE" >> "$GITHUB_ENV"
+          echo "RPM_RELEASE=$RPM_RELEASE" >> "$GITHUB_ENV"
 
       # One minisign signature over SHA256SUMS vouches for every file of the
       # release.  The secret key is the MINISIGN_KEY secret of this repository
@@ -541,11 +615,11 @@ jobs:
             gh release create "$TAG" *.deb *.rpm *.ipk *.apk *.pdf *.tar.gz SHA256SUMS SHA256SUMS.minisig --title "mbusgw-t2r ${VER}" --notes-file - <<EOF
           | File | For | Install |
           |---|---|---|
-          | \`mbusgw-t2r_${VER}-1_<arch>.deb\` | Debian, Ubuntu | \`sudo apt install ./mbusgw-t2r_${VER}-1_<arch>.deb\` |
-          | \`mbusgw-t2r-${VER}-1.<arch>.rpm\` | RHEL, Rocky, Fedora | \`sudo dnf install ./mbusgw-t2r-${VER}-1.<arch>.rpm\` |
+          | \`mbusgw-t2r_${VER}-${DEB_RELEASE}_<arch>.deb\` | Debian, Ubuntu | \`sudo apt install ./mbusgw-t2r_${VER}-${DEB_RELEASE}_<arch>.deb\` |
+          | \`mbusgw-t2r-${VER}-${RPM_RELEASE}.<arch>.rpm\` | RHEL, Rocky, Fedora | \`sudo dnf install ./mbusgw-t2r-${VER}-${RPM_RELEASE}.<arch>.rpm\` |
           | \`mbusgw-t2r_${VER}-*_<arch>.ipk\` / \`.apk\` | OpenWrt 24.10 / 25.12 | see below |
 
-          Arch names: deb \`amd64 arm64 armhf mips mipsel mips64el\`, rpm \`x86_64 aarch64 armv7hl mips mipsel mips64el\`. The .deb and .rpm for amd64/arm64 (x86_64/aarch64) are tested on Debian 12, Debian 13, Ubuntu 24.04, Fedora and Rocky Linux 9 (any system with glibc >= 2.34 should do); those for armhf, mips, mipsel and mips64el are cross builds for glibc >= 2.34 (Debian 12), started under qemu-user only. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`; the configuration files in /opt/mbusgw-t2r/etc are kept on an upgrade.
+          Arch names: deb \`amd64 arm64 armhf mips mipsel mips64el\`, rpm \`x86_64 aarch64 armv7hl mips mipsel mips64el\`. The .deb and .rpm for amd64/arm64 (x86_64/aarch64) are tested on Debian 12, Debian 13, Ubuntu 24.04, Fedora and Rocky Linux 9 (any system with glibc >= 2.34 should do); those for armhf, mips, mipsel and mips64el are cross builds for glibc >= 2.34 (Debian 12), started under qemu-user only. The service is installed disabled: \`sudo systemctl enable --now mbusgw-t2r\`; configure /etc/mbusgw-t2r first. Configuration from older packages under /opt is not migrated automatically.
 
           OpenWrt: the .ipk is for 24.10 (\`opkg install ./mbusgw-t2r_${VER}-*_<arch>.ipk\`), the .apk is for 25.12 (\`apk add --allow-untrusted ./mbusgw-t2r_${VER}-*_<arch>.apk\`); yaLIBCFG and StarLet are linked statically, no network is needed for the install. The service is installed disabled: \`uci set mbusgw-t2r.main.enabled=1 && uci commit mbusgw-t2r && /etc/init.d/mbusgw-t2r start\`.
 
