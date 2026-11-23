@@ -1,8 +1,35 @@
 #!/bin/sh
 #	mbusgw-t2r: the service is stopped on a removal (an upgrade restarts it in postinst).
 set -e
-if [ "$1" = "remove" ] && [ -d /run/systemd/system ]; then
-	systemctl stop mbusgw-t2r.service || true
-	systemctl disable mbusgw-t2r.service || true
+if [ "$1" = "remove" ]; then
+	if [ -d /run/systemd/system ]; then
+		if command -v deb-systemd-invoke >/dev/null 2>&1; then
+			deb-systemd-invoke stop mbusgw-t2r.service
+		else
+			echo "mbusgw-t2r: deb-systemd-invoke not found; using systemctl" >&2
+			rc=0
+			if [ -x /usr/sbin/policy-rc.d ]; then
+				/usr/sbin/policy-rc.d mbusgw-t2r.service stop || rc=$?
+			fi
+			case "$rc" in
+				0|104) systemctl stop mbusgw-t2r.service ;;
+				101) echo "mbusgw-t2r: stop denied by policy-rc.d" >&2 ;;
+				*) echo "mbusgw-t2r: policy-rc.d failed ($rc)" >&2; exit "$rc" ;;
+			esac
+		fi
+	fi
+	# deb-systemd-helper only removes links recorded in its own state.
+	if command -v systemctl >/dev/null 2>&1; then
+		if [ -d /run/systemd/system ]; then
+			systemctl disable mbusgw-t2r.service
+		else
+			systemctl --root=/ disable mbusgw-t2r.service
+		fi
+	elif command -v deb-systemd-helper >/dev/null 2>&1; then
+		deb-systemd-helper disable mbusgw-t2r.service
+	else
+		echo "mbusgw-t2r: neither systemctl nor deb-systemd-helper found" >&2
+		exit 1
+	fi
 fi
 exit 0

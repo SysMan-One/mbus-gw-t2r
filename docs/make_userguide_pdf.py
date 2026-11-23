@@ -522,9 +522,10 @@ def s_pack_en ():
 		# --- Chapter 2 ---
 		[H1('Chapter 2.  Before You Start'),
 		 P('Walk this checklist once --- it saves an hour of guessing later.'),
-		 P('<b>1.</b> The gateway is installed (see <i>README.md</i>). After the installation you have '
-		   'the program <font face="Mono">/opt/mbusgw-t2r/sbin/mbusgw-t2r</font> and the settings file '
-		   '<font face="Mono">/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf</font>.'),
+		 P('<b>1.</b> The gateway is installed (see <i>README.md</i>). The package installs '
+		   'the program <font face="Mono">/usr/sbin/mbusgw-t2r</font> and the settings file '
+		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. A manual CMake install '
+		   'uses <font face="Mono">/usr/local/sbin/</font> and <font face="Mono">/usr/local/etc/mbusgw-t2r/</font>.'),
 		 P('<b>2.</b> You know which serial port the device is connected to. On Linux it is a file like '
 		   '<font face="Mono">/dev/ttyS0</font> or <font face="Mono">/dev/ttyUSB0</font>. If unsure, '
 		   'plug the USB adapter out and in, then run:'),
@@ -731,7 +732,7 @@ def s_pack_en ():
 		# --- Chapter 4 ---
 		[H1('Chapter 4.  Running the Gateway'),
 		 P('By hand, in a terminal (the messages go straight to the screen):'),
-		 C('$ /opt/mbusgw-t2r/sbin/mbusgw-t2r /settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf'),
+		 C('$ /usr/sbin/mbusgw-t2r /settings=/etc/mbusgw-t2r/modbus-t2r_settings.conf'),
 		 tbl(['Option', 'Meaning'], [
 			('/settings=&lt;file&gt;', 'The settings file (Chapter 3).'),
 			('/trace', 'The verbose tracing: every request and answer is dumped in hex. '
@@ -781,7 +782,8 @@ def s_pack_en ():
 		   'by the chip of the adapter.'),
 		 H2('4.3.  Watching and Controlling a Running Gateway: mbus-ctl'),
 		 P('<font face="Mono">mbus-ctl</font> is a small program next to the gateway '
-		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>; the .deb and OpenWrt packages put it into PATH as <font face="Mono">/usr/sbin/mbus-ctl</font>). '
+		   '(<font face="Mono">/usr/sbin/mbus-ctl</font> in packages, '
+		   '<font face="Mono">/usr/local/sbin/mbus-ctl</font> after a manual install). '
 		   'It asks the running gateway what it is doing, and it can disconnect a client or restart the gateway. '
 		   'It talks to the gateway through a socket <b>file</b> on the same computer, '
 		   '<font face="Mono">/var/run/mbusgw-t2r.sock</font>. Nothing is opened to the network. Only root and the '
@@ -879,7 +881,7 @@ def s_pack_en ():
 			('CRC16ERR / BADFRAME now and then, on an FTDI USB adapter only', 'The adapter gives the '
 				'answer by pieces, once in 16 msec (latency_timer). Since X.00-10 the gateway waits '
 				'for the whole answer of the functions 01-06, 15, 16, 23; the others are still cut. '
-				'Set latency_timer to 1 msec (the answers get faster too): copy /opt/mbusgw-t2r/share/doc/mbusgw-t2r/99-ftdi-latency.rules '
+				'Set latency_timer to 1 msec (the answers get faster too): copy /usr/share/doc/mbusgw-t2r/99-ftdi-latency.rules '
 				'to /etc/udev/rules.d/, run sudo udevadm control --reload &amp;&amp; sudo udevadm '
 				'trigger --subsystem-match=usb-serial; cat /sys/bus/usb-serial/devices/ttyUSB0/'
 				'latency_timer must print 1.'),
@@ -1150,9 +1152,10 @@ def s_pack_ru ():
 		   'ведомого</i> внутри самого MODBUS-запроса; шлюзу их адреса знать не нужно вовсе.')],
 		[H1('Глава 2.  Перед началом'),
 		 P('Пройдите этот список один раз — он сэкономит час гаданий потом.'),
-		 P('<b>1.</b> Шлюз установлен (см. <i>README_RU.md</i>, раздел «Установка»). После установки у вас есть программа '
-		   '<font face="Mono">/opt/mbusgw-t2r/sbin/mbusgw-t2r</font> и файл настроек '
-		   '<font face="Mono">/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf</font>.'),
+		 P('<b>1.</b> Шлюз установлен (см. <i>README_RU.md</i>, раздел «Установка»). Пакет устанавливает программу '
+		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font> и файл настроек '
+		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. При ручной установке CMake '
+		   'используются <font face="Mono">/usr/local/sbin/</font> и <font face="Mono">/usr/local/etc/mbusgw-t2r/</font>.'),
 		 P('<b>2.</b> Вы знаете, к какому последовательному порту подключено устройство. В Linux это '
 		   'файл вида <font face="Mono">/dev/ttyS0</font> или <font face="Mono">/dev/ttyUSB0</font>. '
 		   'Если не уверены — выдерните и вставьте USB-адаптер и выполните:'),
@@ -1355,7 +1358,7 @@ def s_pack_ru ():
 		   'порту с настройками по умолчанию.')],
 		[H1('Глава 4.  Запуск шлюза'),
 		 P('Вручную, в терминале (сообщения идут прямо на экран):'),
-		 C('$ /opt/mbusgw-t2r/sbin/mbusgw-t2r /settings=/opt/mbusgw-t2r/etc/modbus-t2r_settings.conf'),
+		 C('$ /usr/sbin/mbusgw-t2r /settings=/etc/mbusgw-t2r/modbus-t2r_settings.conf'),
 		 tbl(['Опция', 'Смысл'], [
 			('/settings=&lt;файл&gt;', 'Файл настроек (глава 3).'),
 			('/trace', 'Подробная трассировка: каждый запрос и ответ печатается в hex. '
@@ -1403,7 +1406,8 @@ def s_pack_ru ():
 		   'по микросхеме адаптера.'),
 		 H2('4.3.  Как смотреть за шлюзом и управлять им: mbus-ctl'),
 		 P('<font face="Mono">mbus-ctl</font> — маленькая программа рядом со шлюзом '
-		   '(<font face="Mono">/opt/mbusgw-t2r/sbin/mbus-ctl</font>; пакеты .deb и OpenWrt кладут её в PATH как <font face="Mono">/usr/sbin/mbus-ctl</font>). '
+		   '(<font face="Mono">/usr/sbin/mbus-ctl</font> в пакетах, '
+		   '<font face="Mono">/usr/local/sbin/mbus-ctl</font> при ручной установке). '
 		   'Она спрашивает работающий шлюз, что он делает, а ещё умеет отключить клиента или перезапустить шлюз. '
 		   'Говорит она со шлюзом через <b>файл</b>-сокет на том же компьютере, '
 		   '<font face="Mono">/var/run/mbusgw-t2r.sock</font>. В сеть ничего не открывается. Пользоваться файлом могут '
@@ -1497,7 +1501,7 @@ def s_pack_ru ():
 			('CRC16ERR / BADFRAME время от времени, только на USB-адаптере FTDI', 'Адаптер отдаёт '
 				'ответ кусками, раз в 16 мс (latency_timer). С X.00-10 шлюз дожидается всего ответа '
 				'для функций 01-06, 15, 16, 23; остальные по-прежнему обрезаются. Поставьте '
-				'latency_timer в 1 мс (ответы заодно станут быстрее): скопируйте /opt/mbusgw-t2r/share/doc/mbusgw-t2r/99-ftdi-latency.rules '
+				'latency_timer в 1 мс (ответы заодно станут быстрее): скопируйте /usr/share/doc/mbusgw-t2r/99-ftdi-latency.rules '
 				'в /etc/udev/rules.d/, выполните sudo udevadm control --reload &amp;&amp; sudo udevadm '
 				'trigger --subsystem-match=usb-serial; cat /sys/bus/usb-serial/devices/ttyUSB0/'
 				'latency_timer должна напечатать 1.'),

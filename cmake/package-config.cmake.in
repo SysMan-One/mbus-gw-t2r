@@ -1,0 +1,11 @@
+if (CPACK_GENERATOR STREQUAL "DEB" OR CPACK_GENERATOR STREQUAL "RPM")
+	if (NOT "@CMAKE_INSTALL_PREFIX@" STREQUAL "/usr" OR
+	    NOT "@T2R_CONFDIR@" STREQUAL "/etc/mbusgw-t2r" OR
+	    NOT "@CMAKE_INSTALL_FULL_SBINDIR@" STREQUAL "/usr/sbin" OR
+	    NOT "@T2R_SYSTEMD_UNIT@" STREQUAL "ON")
+		message (FATAL_ERROR "DEB/RPM require -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON and the standard sbin and sysconf directories")
+	endif ()
+	if (CPACK_GENERATOR STREQUAL "DEB")
+		set (CPACK_STRIP_FILES ON)
+	endif ()
+endif ()

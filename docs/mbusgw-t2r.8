@@ -1,0 +1,47 @@
+.TH MBUSGW-T2R 8
+.SH NAME
+mbusgw-t2r \- MODBUS TCP to RTU gateway
+.SH SYNOPSIS
+.B mbusgw-t2r
+.BI /SETTINGS= file
+.RI [ options ]
+.SH DESCRIPTION
+Serve MODBUS TCP clients using serial RTU devices configured in the settings file.
+The DEB and RPM packages install a disabled systemd service.
+Configure the serial lines and listeners before enabling it.
+.SH OPTIONS
+.TP
+.BI /SETTINGS= file
+Read serial lines and listeners from
+.IR file .
+.TP
+.BI /CONFIG= file
+Read command-line options from
+.IR file .
+.TP
+.B /CHECK
+Validate the settings and exit without starting the gateway.
+.TP
+.BI /CONTROL= path
+Set the control socket path; use NONE to disable the control channel.
+The default is /var/run/mbusgw-t2r.sock.
+.TP
+.B /TRACE
+Enable diagnostic output.
+.TP
+.BI /LOGFILE= file
+Write messages to
+.IR file .
+.TP
+.BI /LOGSIZE= number
+Set the maximum log file size in octets.
+.SH FILES
+.TP
+.I /etc/mbusgw-t2r/modbus-t2r_settings.conf
+Package settings file.
+.TP
+.I /var/run/mbusgw-t2r.sock
+Default local control socket.
+.SH SEE ALSO
+.BR mbus-ctl (8),
+the user guides in /usr/share/doc/mbusgw-t2r.
