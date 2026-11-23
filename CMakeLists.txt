@@ -115,6 +115,10 @@
 #
 #	23-NOV-2026	CLD	V.01-04: yaLIBCFG 1.4 (X.01-04) at least - CFG$M_FALLBACK, cfg$diagcount(); the builds
 #				take X.01-04.
+#
+#	23-NOV-2026	CLD	V.01-04ECO01: the DEB and RPM packages in the system paths (the prefix /usr, the
+#				settings in /etc/mbusgw-t2r), man pages, the Debian changelog and copyright (PR #5);
+#				the package release is 1 again with the new version 1.4.1.
 #--
 
 cmake_minimum_required (VERSION 3.10)
@@ -340,7 +344,7 @@ set (CPACK_PACKAGING_INSTALL_PREFIX	"${CMAKE_INSTALL_PREFIX}")
 configure_file (cmake/package-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/package-config.cmake @ONLY)
 set (CPACK_PROJECT_CONFIG_FILE		"${CMAKE_CURRENT_BINARY_DIR}/package-config.cmake")
 set (CPACK_DEBIAN_FILE_NAME		DEB-DEFAULT)		# <name>_<version>-<release>_<arch>.deb
-set (CPACK_DEBIAN_PACKAGE_RELEASE	2)
+set (CPACK_DEBIAN_PACKAGE_RELEASE	1)
 set (CPACK_DEBIAN_PACKAGE_SECTION	"net")
 set (CPACK_DEBIAN_PACKAGE_HOMEPAGE	"https://github.com/napilab/mbus-gw-t2r")
 
@@ -380,7 +384,7 @@ endif ()
 #	yaLIBCFG and StarLet are linked statically - nothing else is needed.
 #
 set (CPACK_RPM_FILE_NAME		RPM-DEFAULT)		# <name>-<version>-<release>.<arch>.rpm
-set (CPACK_RPM_PACKAGE_RELEASE		2)
+set (CPACK_RPM_PACKAGE_RELEASE		1)
 set (CPACK_RPM_PACKAGE_LICENSE		"Apache-2.0")		# see NOTICE
 set (CPACK_RPM_PACKAGE_GROUP		"Applications/Communications")
 set (CPACK_RPM_PACKAGE_URL		"https://github.com/napilab/mbus-gw-t2r")

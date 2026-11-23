@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04"
-#define	__REV__		"01.04.00"
+#define	__IDENT__	"V.01-04ECO01"
+#define	__REV__		"01.04.01"
 
 /*
 **++
@@ -275,6 +275,11 @@
 **				rate of the build (t2r$tty_speed_ok(); was any number 50..4000000, the tty took 9600 for
 **				another, BADSPEED). CFGREJECT counts the errors only (cfg$diagcount()). RRL: the product
 **				version V.01-04; T2R-NET, T2R-TTY, T2R-CTL and MBUS-CTL carry the same ident.
+**
+**	23-NOV-2026	CLD	V.01-04ECO01 / REV: 01.04.01 (package version 1.4.1) - no code change: the DEB and
+**				RPM packages go to the system paths (/usr/sbin, /etc/mbusgw-t2r, /usr/share/doc; was
+**				/opt/mbusgw-t2r), man pages mbusgw-t2r(8) and mbus-ctl(8) (PR #5, IgorKha); the RPM
+**				scriptlets: a failure of systemctl does not stop the removal.
 **--
 */
 
