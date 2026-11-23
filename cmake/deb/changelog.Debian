@@ -1,3 +1,13 @@
+mbusgw-t2r (1.4.2-1) unstable; urgency=medium
+
+  * V.01-04ECO02: the maintainer scripts handle the service as
+    dh_installsystemd does: remove keeps the unit enabled, purge removes
+    its links, abort-remove starts it again, an upgrade restarts an enabled
+    unit even when it is stopped; a failure of systemd never fails the
+    installation or the removal. No code change.
+
+ -- StarLet Squad <zator@yandex.ru>  Mon, 23 Nov 2026 13:00:00 +0000
+
 mbusgw-t2r (1.4.1-1) unstable; urgency=medium
 
   * V.01-04ECO01: the DEB package in the system paths (/usr/sbin,

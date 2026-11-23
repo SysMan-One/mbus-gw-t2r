@@ -88,6 +88,9 @@
 #	22-NOV-2026	CLD	V.01-03ECO01: yaLIBCFG X.01-03ECO01 (YALIBCFG_TAG).
 #
 #	23-NOV-2026	CLD	V.01-04: yaLIBCFG X.01-04 (YALIBCFG_TAG; CFG$M_FALLBACK, cfg$diagcount()).
+#
+#	23-NOV-2026	CLD	V.01-04ECO02: test-systemd - apt remove keeps the unit enabled, a new install starts
+#				it again, a purge removes the link.
 #--
 
 name: release
@@ -248,7 +251,7 @@ jobs:
             return 1
           }
           sudo apt-get install --yes ./*.deb
-          ! systemctl is-enabled --quiet mbusgw-t2r.service
+          if systemctl is-enabled --quiet mbusgw-t2r.service; then exit 1; fi    # bash -e ignores a "! cmd"
           sudo tee /etc/mbusgw-t2r/modbus-t2r_settings.conf >/dev/null <<'EOF'
           listeners = ({ bind = "TCP:127.0.0.1:1502"; target = "/dev/ttyMBUSGW-test"; });
           serials = ({ device = "/dev/ttyMBUSGW-test"; chars = "9600, 8, N, 1"; });
@@ -264,9 +267,14 @@ jobs:
           enabled_link=/etc/systemd/system/multi-user.target.wants/mbusgw-t2r.service
           test -L "$enabled_link"
           sudo apt-get remove --yes mbusgw-t2r
-          test ! -L "$enabled_link"
+          if systemctl is-active --quiet mbusgw-t2r.service; then exit 1; fi
+          test -L "$enabled_link"                 # the enabled state is configuration: kept until a purge
           test -f /etc/mbusgw-t2r/modbus-t2r_settings.conf
+          sudo apt-get install --yes ./*.deb      # back from the removed state: enabled and started again
+          systemctl is-active --quiet mbusgw-t2r.service
+          wait_for_control
           sudo apt-get purge --yes mbusgw-t2r
+          test ! -L "$enabled_link"
           test ! -e /etc/mbusgw-t2r/modbus-t2r_settings.conf
 
   test-rpm:

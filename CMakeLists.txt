@@ -119,6 +119,8 @@
 #	23-NOV-2026	CLD	V.01-04ECO01: the DEB and RPM packages in the system paths (the prefix /usr, the
 #				settings in /etc/mbusgw-t2r), man pages, the Debian changelog and copyright (PR #5);
 #				the package release is 1 again with the new version 1.4.1.
+#
+#	23-NOV-2026	CLD	V.01-04ECO02: the .deb maintainer scripts as dh_installsystemd (cmake/deb/).
 #--
 
 cmake_minimum_required (VERSION 3.10)

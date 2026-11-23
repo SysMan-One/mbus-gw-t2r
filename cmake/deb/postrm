@@ -1,6 +1,11 @@
 #!/bin/sh
+#	mbusgw-t2r: systemd forgets the removed unit; a purge removes the links of the unit
+#	recorded by deb-systemd-helper in postinst (the enabled state goes with the configuration).
 set -e
-if [ -d /run/systemd/system ]; then
-	systemctl daemon-reload
+if [ "$1" = "remove" ] && [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
+	systemctl --system daemon-reload >/dev/null || true
+fi
+if [ "$1" = "purge" ] && command -v deb-systemd-helper >/dev/null 2>&1; then
+	deb-systemd-helper purge mbusgw-t2r.service >/dev/null || true
 fi
 exit 0

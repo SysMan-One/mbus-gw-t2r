@@ -253,21 +253,23 @@ documentation in `/usr/share/doc/mbusgw-t2r/`, and installs the systemd unit
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.4.1-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.4.2-1_arm64.deb
 $ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
 
 The configuration files are conffiles: an upgrade keeps the tuned ones. Configuration from
 older packages under `/opt/mbusgw-t2r/etc/` is not migrated; copy it to `/etc/mbusgw-t2r/`
-and check it before starting the service. Stop the service before upgrading an older package,
-so that it is not restarted with the new default settings. The workflow is
+and check it before starting the service. Before upgrading an older package run
+`sudo systemctl disable --now mbusgw-t2r`, so that it is not started with the new default settings
+(an upgrade starts an enabled service even when it is stopped). The workflow is
 `.github/workflows/release.yml`; locally the same package is made by
 `cmake ../ -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DT2R_SYSTEMD_UNIT=ON && make -s && cpack -G DEB`.
-On systems without `deb-systemd-invoke`, the package uses `systemctl` for stopping and restarting
-the service, still respecting `policy-rc.d`. On removal, `systemctl disable` also removes links
-created by a manual `systemctl enable`; if `systemctl` is unavailable, the package falls back to
-`deb-systemd-helper` for disabling.
+The service is handled as `dh_installsystemd` does it: an upgrade restarts the service when it is
+enabled or running (`deb-systemd-invoke`, `policy-rc.d` is respected), `apt remove` stops it but
+keeps it enabled together with the settings (a later install starts it again), `apt purge` removes
+the settings and the links of `systemctl enable`. A failure to start or stop the service is told,
+it never breaks the installation or the removal: see `systemctl status mbusgw-t2r`.
 
 The `.deb` for **mipsel** and **mips64el** (`v0.13.6` and later) is a cross build for Debian 12
 (Debian 13 has no MIPS ports); it is installed the same way. The same holds for the `.deb` for
@@ -281,7 +283,7 @@ attached to the releases made after this text was written: `x86_64`, `aarch64`, 
 `%config(noreplace)`, the unit is installed disabled:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.4.1-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.4.2-1.x86_64.rpm
 $ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -300,8 +302,8 @@ OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_1.4.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.4.1-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.4.2-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.2-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`

@@ -18,6 +18,7 @@
 #                               release tag like StarLet, into the runner's temporary directory.
 #       22-NOV-2026     CLD     V.01-03ECO01: yaLIBCFG X.01-03ECO01 (a number with a leading zero is octal).
 #       23-NOV-2026     CLD     V.01-04: yaLIBCFG X.01-04 (CFG$M_FALLBACK: a bad value of a setting with a default is a warning).
+#       23-NOV-2026     CLD     V.01-04ECO02: the .deb maintainer scripts are checked by tests/package_scripts_test.sh only.
 #--
 
 name: ci
@@ -90,28 +91,10 @@ jobs:
       - name: Test the control channel (tests/ctl_test.py)
         run: python3 tests/ctl_test.py --gw build/mbusgw-t2r --ctl build/mbus-ctl
 
-      - name: Test package service scripts
+      - name: Test package service scripts (tests/package_scripts_test.sh)
         run: |
           docker run --rm -v "$PWD:/src:ro" alpine:3.21 \
-            sh -ec 'mkdir -p /run/systemd/system; sh /src/tests/package_scripts_test.sh'
-          docker run --rm -v "$PWD:/src:ro" alpine:3.21 sh -ec '
-            mkdir -p /run/systemd/system /tmp/mock /usr/sbin
-            printf "#!/bin/sh\nexit 101\n" > /usr/sbin/policy-rc.d
-            chmod +x /usr/sbin/policy-rc.d
-            printf "#!/bin/sh\necho \"\$*\" >> /tmp/actions\n" > /tmp/mock/systemctl
-            chmod +x /tmp/mock/systemctl
-            PATH=/tmp/mock /bin/sh /src/cmake/deb/postinst configure
-            PATH=/tmp/mock /bin/sh /src/cmake/deb/prerm remove
-            grep -qx "disable mbusgw-t2r.service" /tmp/actions
-            if grep -Eq "^(restart|stop) " /tmp/actions; then exit 1; fi
-            printf "#!/bin/sh\nexit 42\n" > /usr/sbin/policy-rc.d
-            if PATH=/tmp/mock /bin/sh /src/cmake/deb/postinst configure; then exit 1; fi'
-          docker run --rm -v "$PWD:/src:ro" alpine:3.21 sh -ec '
-            mkdir -p /tmp/mock
-            printf "#!/bin/sh\necho \"\$*\" >> /tmp/actions\n" > /tmp/mock/systemctl
-            chmod +x /tmp/mock/systemctl
-            PATH=/tmp/mock /bin/sh /src/cmake/deb/prerm remove
-            grep -qx -- "--root=/ disable mbusgw-t2r.service" /tmp/actions'
+            sh -ec 'mkdir -p /run/systemd/system; sh /src/tests/package_scripts_test.sh /src'
 
       - name: Check manual installation and uninstall
         run: |

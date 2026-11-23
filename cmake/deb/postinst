@@ -1,25 +1,31 @@
 #!/bin/sh
-#	mbusgw-t2r: the unit is installed disabled - the settings file has to be tuned first;
-#	an already running service is restarted with the new binary.
+#	mbusgw-t2r: the unit is installed disabled - the settings file has to be tuned first.
+#	As dh_installsystemd does (--no-enable --restart-after-upgrade): deb-systemd-helper records
+#	the links of the unit, so that a purge removes them (a manual 'systemctl enable' too), and
+#	an enabled unit gets the new links (if any) of an upgraded unit file;
+#	deb-systemd-invoke (policy-rc.d is respected) starts the unit on a fresh installation and
+#	restarts it on an upgrade - only when it is enabled or running; abort-remove and the
+#	other abort-* start an enabled unit again after a failed removal. A failure to (re)start
+#	is told, it never leaves the package half-configured.
 set -e
-if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
-	systemctl daemon-reload
-	if systemctl is-active --quiet mbusgw-t2r.service; then
-		if command -v deb-systemd-invoke >/dev/null 2>&1; then
-			deb-systemd-invoke restart mbusgw-t2r.service
-		else
-			echo "mbusgw-t2r: deb-systemd-invoke not found; using systemctl" >&2
-			if [ -x /usr/sbin/policy-rc.d ]; then
-				rc=0
-				/usr/sbin/policy-rc.d mbusgw-t2r.service restart || rc=$?
-				case "$rc" in
-					0|104) ;;
-					101) echo "mbusgw-t2r: restart denied by policy-rc.d" >&2; exit 0 ;;
-					*) echo "mbusgw-t2r: policy-rc.d failed ($rc)" >&2; exit "$rc" ;;
-				esac
-			fi
-			systemctl restart mbusgw-t2r.service
+case "$1" in
+configure|abort-upgrade|abort-deconfigure|abort-remove)
+	if deb-systemd-helper debian-installed mbusgw-t2r.service; then
+		if deb-systemd-helper --quiet was-enabled mbusgw-t2r.service; then
+			deb-systemd-helper enable mbusgw-t2r.service >/dev/null || true
 		fi
 	fi
-fi
+	deb-systemd-helper update-state mbusgw-t2r.service >/dev/null || true
+	if [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
+		systemctl --system daemon-reload >/dev/null || true
+		if [ -n "${2:-}" ]; then
+			l_action=restart
+		else
+			l_action=start
+		fi
+		deb-systemd-invoke "$l_action" mbusgw-t2r.service ||
+			echo "mbusgw-t2r: $l_action of mbusgw-t2r.service failed, see: systemctl status mbusgw-t2r" >&2
+	fi
+	;;
+esac
 exit 0

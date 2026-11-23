@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04ECO01"
-#define	__REV__		"01.04.01"
+#define	__IDENT__	"V.01-04ECO02"
+#define	__REV__		"01.04.02"
 
 /*
 **++
@@ -280,6 +280,11 @@
 **				RPM packages go to the system paths (/usr/sbin, /etc/mbusgw-t2r, /usr/share/doc; was
 **				/opt/mbusgw-t2r), man pages mbusgw-t2r(8) and mbus-ctl(8) (PR #5, IgorKha); the RPM
 **				scriptlets: a failure of systemctl does not stop the removal.
+**
+**	23-NOV-2026	CLD	V.01-04ECO02 / REV: 01.04.02 (package version 1.4.2) - no code change: the .deb
+**				maintainer scripts as dh_installsystemd (Debian Policy 6, 9.3): apt remove keeps the unit
+**				enabled, a purge removes its links; abort-remove starts it again; a failure of systemd
+**				never breaks the installation or the removal.
 **--
 */
 
