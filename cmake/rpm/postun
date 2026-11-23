@@ -1,6 +1,7 @@
 #!/bin/sh
+#	mbusgw-t2r: a failure of systemctl is reported but never fails the removal.
 set -e
 if [ -d /run/systemd/system ]; then
-	systemctl daemon-reload
+	systemctl daemon-reload || echo "mbusgw-t2r: systemctl daemon-reload failed" >&2
 fi
 exit 0

@@ -3,9 +3,9 @@
 #	an already running service is restarted with the new binary ($1 >= 1: an install or an upgrade).
 set -e
 if [ -d /run/systemd/system ]; then
-	systemctl daemon-reload
+	systemctl daemon-reload || echo "mbusgw-t2r: systemctl daemon-reload failed" >&2
 	if [ "$1" -ge 1 ] && systemctl is-active --quiet mbusgw-t2r.service; then
-		systemctl restart mbusgw-t2r.service
+		systemctl restart mbusgw-t2r.service || echo "mbusgw-t2r: systemctl restart failed" >&2
 	fi
 fi
 exit 0

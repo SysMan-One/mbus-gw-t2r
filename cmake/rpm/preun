@@ -1,8 +1,14 @@
 #!/bin/sh
 #	mbusgw-t2r: the service is stopped on a removal ($1 == 0); an upgrade restarts it in %post.
+#	The unit is disabled with or without a running systemd (a chroot, an image build), as
+#	%systemd_preun does; a failure of systemctl is reported but never blocks the removal.
 set -e
-if [ "$1" -eq 0 ] && [ -d /run/systemd/system ]; then
-	systemctl stop mbusgw-t2r.service
-	systemctl disable mbusgw-t2r.service
+if [ "$1" -eq 0 ]; then
+	if [ -d /run/systemd/system ]; then
+		systemctl stop mbusgw-t2r.service || echo "mbusgw-t2r: systemctl stop failed" >&2
+		systemctl disable mbusgw-t2r.service || echo "mbusgw-t2r: systemctl disable failed" >&2
+	elif command -v systemctl >/dev/null 2>&1; then
+		systemctl --root=/ disable mbusgw-t2r.service || echo "mbusgw-t2r: systemctl disable failed" >&2
+	fi
 fi
 exit 0

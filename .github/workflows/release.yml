@@ -391,7 +391,7 @@ jobs:
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/sbin/mbusgw-t2r > deb.bin
           chmod +x deb.bin
           file rpm.bin | grep -q 'not stripped'
-          file deb.bin | grep -q 'stripped'
+          file deb.bin | grep -q ', stripped'
           deb_out=$(${{ matrix.qemu }} -L ${{ matrix.sysroot }} deb.bin 2>&1 || true)
           echo "$deb_out" | grep -q 'REVISNF'
           file build/mbusgw-t2r
