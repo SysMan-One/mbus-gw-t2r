@@ -32,6 +32,10 @@
 #				lateness of the slave; a slow CI runner gave foreign_r 1, TheWorks 47-30).
 #	22-NOV-2026	CLD	V.01-03: flow - the refused settings are told by the yaLIBCFG schema (CFG-E-..., CFGREJECT).
 #	22-NOV-2026	CLD	V.01-03ECO01: settings - a leading zero is octal (yaLIBCFG X.01-03), 08 is BADNUM, the ! comment.
+#	23-NOV-2026	CLD	V.01-04: a bad value of a setting with a default is a warning, the default is taken (yaLIBCFG
+#				X.01-04, CFG$M_FALLBACK): flow - DSR/DTR, HW, 1 run with NONE; settings - soft (the defaults,
+#				the good parts of <chars> kept, CHARSDEF, CFGDEFAULTS), bad (the errors refuse, the soft ones
+#				are CFG-W and are not counted), mode (no default: refused).
 #
 import argparse, os, pty, random, select, socket, struct, subprocess, sys, tempfile, termios, threading, time, tty
 
@@ -537,10 +541,19 @@ def t_flow():
         finally:
             gw.stop(); line.close()
 
-    for name, ser, lsn, code in (('dsr', 'flow = "DSR/DTR";', '', 'CFG-E-BADKWD'),		# V.01-03: yaLIBCFG, the schema
-                                 ('bogus', 'flow = "HW";', '', 'CFG-E-BADKWD'),
-                                 ('number', 'flow = 1;', '', 'CFG-E-VTYPE'),
-                                 ('rs485', 'flow = "RTS/CTS"; rs485 = 1;', '', 'RS-485 mode drives RTS'),
+    for name, ser, code in (('dsr', 'flow = "DSR/DTR";', 'CFG-W-BADKWD'),	# V.01-04: a bad <flow> - NONE is taken
+                            ('bogus', 'flow = "HW";', 'CFG-W-BADKWD'),
+                            ('number', 'flow = 1;', 'CFG-W-VTYPE')):
+        conf = os.path.join(TMP, f'flow_{name}.conf')
+        open(conf, 'w').write(f'''listeners = ( {{ bind = "TCP:127.0.0.1:{a.port}"; target = "/dev/null"; }} );
+serials = ( {{ device = "/dev/null"; chars = "9600, 8, N, 1"; {ser} }} );
+''')
+        p = subprocess.run([GW, '/settings=' + conf, '/check', '/control=NONE'], capture_output=True, text=True, timeout=10)
+        out = p.stdout + p.stderr
+        res &= report(f'flow/default-{name}', p.returncode == 0 and code in out and 'the default is taken' in out and 'Flow: NONE' in out
+                      and 'CFGDEFAULTS' in out and 'CHECKOK' in out, f'exit {p.returncode}, {code} {code in out}, Flow: NONE {"Flow: NONE" in out}')
+
+    for name, ser, lsn, code in (('rs485', 'flow = "RTS/CTS"; rs485 = 1;', '', 'RS-485 mode drives RTS'),
                                  ('xonmodbus', 'flow = "XON/XOFF";', '', 'a MODBUS listener needs NONE or RTS/CTS')):
         conf = os.path.join(TMP, f'flow_{name}.conf')
         open(conf, 'w').write(f'''listeners = ( {{ bind = "TCP:127.0.0.1:{a.port}"; {lsn} target = "/dev/null"; }} );
@@ -575,7 +588,12 @@ SERIALS = ( { Device = "/dev/null"; Chars = "115200,8,e,1"; Flow = "rts/cts"; la
 serials = ( { device = "/dev/null"; chars = "9600,8,N,1"; }, { device = "/DEV/NULL"; chars = "9600,8,N,1"; } );
 '''
     octal = good.replace('0135', '08')					# Not an octal number: BADNUM
-    for name, text in (('bad', bad), ('good', good), ('case', case), ('octal', octal)):
+    soft = f'''listeners = ( {{ bind = "TCP:127.0.0.1:5995"; target = "/dev/null"; connlm = 0; idletmo = "x"; }} );
+serials = ( {{ device = "/dev/null"; chars = "19201, 7, X, 2"; flow = "HW"; iotmo = 0; rs485 = 3; ts_enabled = 1; ts_unit = 999; }} );
+'''
+    mode = 'listeners = ( { bind = "TCP:127.0.0.1:5994"; target = "/dev/null"; mode = "BOGUS"; } );\nserials = ( { device = "/dev/null"; chars = 9600; } );\n'
+    ctype = 'listeners = ( { bind = "TCP:127.0.0.1:5993"; target = "/dev/null"; mode = "RAW"; connlm = 0; } );\nserials = ( { device = "/dev/null"; chars = 9600; flow = "RTS/CTS"; rs485 = 2; } );\n'
+    for name, text in (('bad', bad), ('good', good), ('case', case), ('octal', octal), ('soft', soft), ('mode', mode), ('ctype', ctype)):
         conf = os.path.join(TMP, f'settings_{name}.conf')
         open(conf, 'w').write(text)
         p = subprocess.run([GW, '/settings=' + conf, '/check', '/control=NONE'], capture_output=True, text=True, timeout=10)
@@ -587,13 +605,31 @@ serials = ( { device = "/dev/null"; chars = "9600,8,N,1"; }, { device = "/DEV/NU
             res &= report('settings/case', p.returncode != 0 and 'differ by the case only' in out and 'CFGREJECT' in out,
                           f'exit {p.returncode}, refused {"differ by the case only" in out}')
             continue
+        if name == 'soft':					# Every bad value has a default: the gateway runs with it
+            want = ['CFG-W-RANGE, out of range: listeners.[0].connlm = 0', 'listeners.[0].idletmo: an integer expected',
+                    'speed 19201 is not a line rate', 'flow = "HW"', 'iotmo = 0', 'rs485 = 3', 'ts_unit = 999',
+                    'CFGDEFAULTS, Settings', ': 7 value(s) not usable', '"19201,7,X,2" is not usable: speed, parity --- taken: 19200, 7, E, 2',
+                    'Chars: <19200, 7, E, 2>, Flow: NONE, Answer tmo: 1000 msec', 'Unit: 135', 'Connection limit: 32, Idle tmo: 60 sec', 'CHECKOK']
+            miss = [w for w in want if w not in out]
+            res &= report('settings/soft', p.returncode == 0 and not miss and 'CFG-E-' not in out, f'exit {p.returncode}, missing {miss or "none"}')
+            continue
+        if name == 'ctype':					# <chars> of another type: all four defaults; a bad rs485 is 0 for the cross check too
+            ok = (p.returncode == 0 and 'CFG-W-VTYPE' in out and '<chars> "" is not usable: speed, data bits, parity, stop bits --- taken: 19200, 8, E, 1' in out
+                  and 'rs485 = 2' in out and 'CFG-E-' not in out and 'Connection limit: 1,' in out and 'CHECKOK' in out)
+            res &= report('settings/ctype', ok, f'exit {p.returncode}, CFG-E {"CFG-E-" in out}')
+            continue
+        if name == 'mode':					# No default for <mode>: refused; a soft one beside it is not counted
+            res &= report('settings/mode', p.returncode != 0 and 'CFG-E-BADKWD' in out and 'CFG-W-VTYPE' in out and ': 1 problem(s)' in out,
+                          f'exit {p.returncode}, BADKWD {"CFG-E-BADKWD" in out}, 1 problem {": 1 problem(s)" in out}')
+            continue
         if name == 'good':
             res &= report('settings/good', p.returncode == 0 and 'CHECKOK' in out and 'Base register: 93]' in out,	# 0135 is octal
                           f'exit {p.returncode}, CHECKOK {"CHECKOK" in out}, octal 0135 = 93 {"Base register: 93]" in out}')
             continue
         want = [('target', 'is not a <device> of <serials>', 'line 2'), ('udp', 'UDP is not implemented', 'line 3'),
                 ('typo', 'CFG-E-UNKNOWN', 'conlm'), ('databits', 'data bits 9 is out of range', 'line 6'),
-                ('iotmo', 'CFG-E-RANGE', 'iotmo'), ('dupdevice', 'CFG-E-DUPKEY', 'line 7'), ('parity', "parity 'X' is unknown", 'line 7')]
+                ('iotmo', 'CFG-W-RANGE', 'iotmo'), ('dupdevice', 'CFG-E-DUPKEY', 'line 7'), ('parity', "parity 'X' is unknown", 'line 7'),
+                ('soft-databits', 'CFG-W-CHECK', 'data bits 9'), ('count', ': 4 problem(s)', 'CFGREJECT')]
         lines = out.splitlines()
         miss = [w for w, a, b in want if not any(a in l and b in l for l in lines)]
         res &= report('settings/bad', p.returncode != 0 and not miss and 'CFGREJECT' in out and 'DEVADDED' not in out,

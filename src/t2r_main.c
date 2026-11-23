@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-03ECO01"
-#define	__REV__		"01.03.01"
+#define	__IDENT__	"V.01-04"
+#define	__REV__		"01.04.00"
 
 /*
 **++
@@ -264,6 +264,17 @@
 **	22-NOV-2026	CLD	V.01-03ECO01 / REV: 01.03.01 (package version 1.3.1) - yaLIBCFG X.01-03ECO01 (1.3.1):
 **				CFGREJECT tells the number of the problems again, of a failed parse too (cfg$errcount(), X.01-02); a number with
 **				a leading zero is octal as in libconfig 1.6+ (0135 = 93, 08 is BADNUM), ! starts a comment.
+**
+**	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 (package version 1.4.0) - yaLIBCFG X.01-04 (1.4.0): a bad value of
+**				a setting that has a default does not refuse the file any more (CFG$M_FALLBACK): it is told
+**				as a warning (CFG-W-..., "- the default is taken") and the gateway runs with the default -
+**				<chars> (part by part: what is good of it stays, CHARSDEF tells what is taken), <flow>,
+**				<iotmo>, <lategd>, <rs485>, <ts_*>, <desc> of a serial; <connlm>, <idletmo>, <iotmo>,
+**				<takeover> of a listener; CFGDEFAULTS sums them up. Still refused: <device>, <bind>, <target>,
+**				<mode>, an unknown setting, a missing one, the cross checks. A speed of <chars> must be a line
+**				rate of the build (t2r$tty_speed_ok(); was any number 50..4000000, the tty took 9600 for
+**				another, BADSPEED). CFGREJECT counts the errors only (cfg$diagcount()). RRL: the product
+**				version V.01-04; T2R-NET, T2R-TTY, T2R-CTL and MBUS-CTL carry the same ident.
 **--
 */
 
@@ -436,7 +447,10 @@ static int s_settings_find_n_get_serial (
  * The schema of the settings file (yaLIBCFG, CFG$VALIDATE): every setting with its type, range or
  * keywords; a setting the schema does not know is an error (a typo never passes in silence). The
  * cross checks are the check routines below. The whole file is checked before anything is applied
- * and every problem is told with its file, line and column; a single one refuses the file.
+ * and every problem is told with its file, line and column; a single error refuses the file. A
+ * setting marked CFG$M_FALLBACK has a default: a bad value of it is a warning (CFG-W-...) and the
+ * default is taken (cfg$get_*() gives CFG$_FALLBACK). Those without the flag have no sensible
+ * default - a device, an address, the mode of a listener - or they are cross checks.
  */
 static const CFG$KEYWORD	s_cfg_flow_kwd[] =				/* <flow> of a serial */
 {
@@ -462,21 +476,21 @@ static unsigned	s_cfg_chk_serials (CFG$NODE *, void *, char *, uint32_t, uint32_
 
 static const CFG$SCHEMA	s_cfg_serial[] =					/* An element of <serials> */
 {
-	{ .name = "desc",	.type = CFG$K_TYPE_STRING,	.help = "a free text" },
+	{ .name = "desc",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_FALLBACK, .help = "a free text" },
 	{ .name = "device",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_KEY | CFG$M_LENGTH, .min = 1, .max = ASC$K_SZ - 1,
 		.help = "the device file of the serial port" },
-	{ .name = "chars",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_REQUIRED, .check = s_cfg_chk_chars,
+	{ .name = "chars",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_REQUIRED | CFG$M_FALLBACK, .check = s_cfg_chk_chars,
 		.help = "speed, data bits, parity, stop bits" },
-	{ .name = "flow",	.type = CFG$K_TYPE_KWD,		.kwd = s_cfg_flow_kwd, .help = "the flow control" },
-	{ .name = "iotmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 1, .max = T2R$K_ANSTMO_MAX,
+	{ .name = "flow",	.type = CFG$K_TYPE_KWD,		.flags = CFG$M_FALLBACK, .kwd = s_cfg_flow_kwd, .help = "the flow control" },
+	{ .name = "iotmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 1, .max = T2R$K_ANSTMO_MAX,
 		.help = "the answer timeout, msec" },
-	{ .name = "lategd",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = T2R$K_LATEGD_MAX,
+	{ .name = "lategd",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 0, .max = T2R$K_LATEGD_MAX,
 		.help = "the guard window after a failed exchange, msec" },
-	{ .name = "rs485",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 1 },
-	{ .name = "ts_enabled",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 1 },
-	{ .name = "ts_unit",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 255 },
-	{ .name = "ts_fncode",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 1, .max = 127 },
-	{ .name = "ts_base_reg0", .type = CFG$K_TYPE_INT,	.flags = CFG$M_RANGE, .min = 0, .max = 65535 },
+	{ .name = "rs485",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 0, .max = 1 },
+	{ .name = "ts_enabled",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 0, .max = 1 },
+	{ .name = "ts_unit",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 0, .max = 255 },
+	{ .name = "ts_fncode",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 1, .max = 127 },
+	{ .name = "ts_base_reg0", .type = CFG$K_TYPE_INT,	.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 0, .max = 65535 },
 	{ .name = NULL }
 };
 
@@ -486,11 +500,11 @@ static const CFG$SCHEMA	s_cfg_listener[] =					/* An element of <listeners> */
 		.help = "TCP:<address>:<port>" },
 	{ .name = "target",	.type = CFG$K_TYPE_STRING,	.flags = CFG$M_REQUIRED | CFG$M_LENGTH, .min = 1, .max = ASC$K_SZ - 1,
 		.help = "the <device> of a serial" },
-	{ .name = "connlm",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = T2R$K_CONNLM_MIN, .max = T2R$K_CONNLM_MAX },
-	{ .name = "idletmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = T2R$K_IDLETMO_MIN, .max = T2R$K_IDLETMO_MAX },
-	{ .name = "iotmo",	.type = CFG$K_TYPE_INT,		.help = "stored, not used yet" },
+	{ .name = "connlm",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = T2R$K_CONNLM_MIN, .max = T2R$K_CONNLM_MAX },
+	{ .name = "idletmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = T2R$K_IDLETMO_MIN, .max = T2R$K_IDLETMO_MAX },
+	{ .name = "iotmo",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK, .help = "stored, not used yet" },
 	{ .name = "mode",	.type = CFG$K_TYPE_KWD,		.kwd = s_cfg_mode_kwd },
-	{ .name = "takeover",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_RANGE, .min = 0, .max = 1 },
+	{ .name = "takeover",	.type = CFG$K_TYPE_INT,		.flags = CFG$M_FALLBACK | CFG$M_RANGE, .min = 0, .max = 1 },
 	{ .name = NULL }
 };
 
@@ -556,7 +570,8 @@ int	l_len;
  *	a_buf:		The collapsed string, zero-terminated
  *
  *   RETURNS:
- *	STS$K_SUCCESS, STS$K_ERROR (no such string or too long), CFG$_NOTFOUND
+ *	STS$K_SUCCESS, STS$K_ERROR (no such string or too long), CFG$_NOTFOUND, CFG$_TYPE;
+ *	CFG$_FALLBACK - a bad value of a CFG$M_FALLBACK setting, a_buf has it all the same
  */
 static unsigned	s_cfg_collapsed (
 		CFG$NODE	*a_base,
@@ -565,11 +580,11 @@ static unsigned	s_cfg_collapsed (
 		size_t		a_bufsz
 			)
 {
-const char *l_str;
-uint32_t l_len;
+const char *l_str = "";
+uint32_t l_len = 0;							/* CFG$_FALLBACK of another type: no value, "" */
 unsigned l_sts;
 
-	if ( !(1 & (l_sts = cfg$get_string(a_base, a_path, &l_str, &l_len))) )
+	if ( !(1 & (l_sts = cfg$get_string(a_base, a_path, &l_str, &l_len))) && (l_sts != CFG$_FALLBACK) )
 		return	l_sts;
 
 	if ( l_len >= a_bufsz )
@@ -579,7 +594,7 @@ unsigned l_sts;
 	a_buf[l_len] = '\0';
 	__util$collapse(a_buf, l_len);						/* "115200, 8, N, 1" -> "115200,8,N,1" */
 
-	return	STS$K_SUCCESS;
+	return	l_sts;
 }
 
 
@@ -614,6 +629,10 @@ static int	s_chars_parse (
 	if ( !$ISINRANGE(*a_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX) )
 		return	snprintf(a_why, a_whysz, "speed %d is out of range %d..%d", *a_speed, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX), STS$K_ERROR;
 
+	if ( !t2r$tty_speed_ok(*a_speed) )					/* 19201: the tty has no such line rate */
+		return	snprintf(a_why, a_whysz, "speed %d is not a line rate of the serial driver (1200, 9600, 19200, 115200 ...)", *a_speed),
+				STS$K_ERROR;
+
 	if ( !$ISINRANGE(*a_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX) )
 		return	snprintf(a_why, a_whysz, "data bits %d is out of range %d..%d", *a_databits, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX),
 				STS$K_ERROR;
@@ -631,6 +650,87 @@ static int	s_chars_parse (
 		}
 
 	return	snprintf(a_why, a_whysz, "parity '%c' is unknown, allowed: N, E, O", *a_parity), STS$K_ERROR;
+}
+
+
+/*
+ *   DESCRIPTION: Take what is good of a <chars> the schema found bad (CFG$M_FALLBACK): every part that
+ *	is not usable - missing, not a number, out of range, not a line rate - is the default of its own
+ *	(T2R$K_BAUD_DEF, _DATABITS_DEF, _PARITY_DEF, _STOPBITS_DEF), the others stay.
+ *
+ *   INPUTS:
+ *	a_chars:	The collapsed string, "" - none at all
+ *	a_whysz:	The size of a_why
+ *
+ *   OUTPUTS:
+ *	a_speed, a_databits, a_parity, a_stopbits:	The values (the parity is in upper case)
+ *	a_why:		The parts the defaults are taken for: "speed, parity"
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS
+ */
+static int	s_chars_lenient (
+	const	char	*a_chars,
+		int	*a_speed,
+		int	*a_databits,
+		char	*a_parity,
+		int	*a_stopbits,
+		char	*a_why,
+		size_t	a_whysz
+			)
+{
+static const char *s_part[4] = { "speed", "data bits", "parity", "stop bits" };
+char	l_f[4][32], *l_end;
+const char *l_p = a_chars, *l_c;
+size_t	l_len, l_wlen = 0;
+long	l_v;
+int	l_ok[4] = { 0 }, l_n;
+
+	for ( l_n = 0; (l_n < 4) && *l_p; l_n++ )
+		{
+		l_len = (l_c = strchr(l_p, ',')) ? (size_t) (l_c - l_p) : strlen(l_p);
+
+		if ( l_len >= sizeof(l_f[0]) )
+			l_len = 0;						/* Too long for a part: not usable	*/
+
+		memcpy(l_f[l_n], l_p, l_len);
+		l_f[l_n][l_len] = '\0';
+		l_p = l_c ? l_c + 1 : l_p + strlen(l_p);
+		}
+
+	for ( int i = l_n; i < 4; i++ )
+		l_f[i][0] = '\0';
+
+	*a_speed = T2R$K_BAUD_DEF;
+	*a_databits = T2R$K_DATABITS_DEF;
+	*a_parity = T2R$K_PARITY_DEF;
+	*a_stopbits = T2R$K_STOPBITS_DEF;
+
+	l_v = strtol(l_f[0], &l_end, 10);
+	if ( (l_ok[0] = (*l_f[0] && !*l_end && $ISINRANGE(l_v, T2R$K_BAUD_MIN, T2R$K_BAUD_MAX) && t2r$tty_speed_ok((int) l_v))) )
+		*a_speed = (int) l_v;
+
+	l_v = strtol(l_f[1], &l_end, 10);
+	if ( (l_ok[1] = (*l_f[1] && !*l_end && $ISINRANGE(l_v, T2R$K_DATABITS_MIN, T2R$K_DATABITS_MAX))) )
+		*a_databits = (int) l_v;
+
+	if ( (l_ok[2] = (l_f[2][0] && !l_f[2][1] && strchr("NEO", toupper((unsigned char) l_f[2][0])))) )
+		*a_parity = (char) toupper((unsigned char) l_f[2][0]);
+
+	l_v = strtol(l_f[3], &l_end, 10);
+	if ( (l_ok[3] = (*l_f[3] && !*l_end && $ISINRANGE(l_v, T2R$K_STOPBITS_MIN, T2R$K_STOPBITS_MAX))) )
+		*a_stopbits = (int) l_v;
+
+	a_why[0] = '\0';
+
+	for ( int i = 0; i < 4; i++ )
+		if ( !l_ok[i] && (l_wlen < a_whysz) )
+			l_wlen += (size_t) snprintf(a_why + l_wlen, a_whysz - l_wlen, "%s%s", l_wlen ? ", " : "", s_part[i]);
+
+	if ( !a_why[0] )							/* Each part is good, the whole is not (s_chars_parse()) */
+		snprintf(a_why, a_whysz, "the form of it");
+
+	return	STS$K_SUCCESS;
 }
 
 
@@ -797,7 +897,8 @@ int	l_flow;
 int32_t	l_rs485 = 0;
 
 	s_cfg_kwd (a_node, "flow", s_cfg_flow_kwd, T2R$K_FLOW_NONE, &l_flow);
-	cfg$get_int(a_node, "rs485", &l_rs485);
+	if ( !(1 & cfg$get_int(a_node, "rs485", &l_rs485)) )			/* Absent, or bad: its default */
+		l_rs485 = 0;
 
 #ifdef HAVE_TIOCRS485
 	if ( (l_flow == T2R$K_FLOW_RTSCTS) && l_rs485 )
@@ -976,7 +1077,7 @@ const char *l_str;
 uint32_t l_len;
 int32_t	l_int;
 int	l_speed, l_databits, l_stopbits, l_rc;
-unsigned l_sts;
+unsigned l_sts, l_csts;
 char	l_parity = 0, l_chars[64], l_why[160];
 T2R$_SERIAL	*l_serial;
 
@@ -999,8 +1100,20 @@ T2R$_SERIAL	*l_serial;
 #endif
 			}
 
-		s_cfg_collapsed (l_elem, "chars", l_chars, sizeof(l_chars));	/* Validated by s_cfg_chk_chars() */
-		s_chars_parse (l_chars, &l_speed, &l_databits, &l_parity, &l_stopbits, l_why, sizeof(l_why));
+		/*
+		 * Validated by s_cfg_chk_chars(); a bad one (CFG$_FALLBACK: the string is given all the same, of
+		 * another type it is "") keeps what is good of it, the rest is the default; one too long for
+		 * l_chars is all the defaults.
+		 */
+		if ( 1 & (l_csts = s_cfg_collapsed (l_elem, "chars", l_chars, sizeof(l_chars))) )
+			s_chars_parse (l_chars, &l_speed, &l_databits, &l_parity, &l_stopbits, l_why, sizeof(l_why));
+		else	{
+			if ( l_csts != CFG$_FALLBACK )				/* Of another type, too long: nothing of it */
+				l_chars[0] = '\0';
+
+			s_chars_lenient (l_chars, &l_speed, &l_databits, &l_parity, &l_stopbits, l_why, sizeof(l_why));
+			$PUTMSG_FAO(T2R$__CHARSDEF, i, &l_serial->devname, l_chars, l_why, l_speed, l_databits, 1, &l_parity, l_stopbits);
+			}
 
 		s_cfg_kwd (l_elem, "flow", s_cfg_flow_kwd, T2R$K_FLOW_NONE, &l_serial->flow);
 
@@ -1181,7 +1294,7 @@ static int	s_settings_load_n_parse (
 {
 CFG$TREE *l_tree = NULL;
 CFG$NODE *l_root;
-uint32_t l_nerr = 0;
+uint32_t l_nerr = 0, l_nwarn = 0;
 unsigned l_rc;
 
 	cfg$inimsg();								/* The texts of CFG-x-... ; a repeated call is harmless */
@@ -1203,15 +1316,20 @@ unsigned l_rc;
 	if ( !(1 & (l_rc = cfg$validate(l_tree, s_cfg_settings, l_root, &l_nerr))) )
 		{
 		cfg$puterrs(l_tree);
-		cfg$free(l_tree);
 
 		if ( !l_nerr )							/* Not the file: the schema, no memory ... */
 			$PUTMSG_FAO(T2R$__SYSERR, "cfg$validate()", (int) l_rc, 0);
+		else	cfg$diagcount(l_tree, &l_nerr, NULL);			/* The errors: the warnings refuse nothing */
+
+		cfg$free(l_tree);
 
 		return	$PUTMSG_FAO(T2R$__CFGREJECT, a_settings_conf, l_nerr ? l_nerr : 1);
 		}
 
-	cfg$puterrs(l_tree);							/* The warnings, if any */
+	cfg$puterrs(l_tree);							/* The warnings: the defaults taken */
+
+	if ( (1 & cfg$diagcount(l_tree, NULL, &l_nwarn)) && l_nwarn )
+		$PUTMSG_FAO(T2R$__CFGDEFAULTS, a_settings_conf, l_nwarn);
 
 	if ( 1 & (l_rc = s_settings_process_serials (l_root)) )
 		l_rc = s_settings_process_listeners (l_root);

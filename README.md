@@ -147,14 +147,14 @@ at the Step 4. StarLet 1.7 or newer is needed.
 ####	Step 3. Install the yaLIBCFG package
 
 ```
-$ git clone --depth 1 --branch X.01-03ECO01 https://github.com/SysMan-One/yaLIBCFG.git
+$ git clone --depth 1 --branch X.01-04 https://github.com/SysMan-One/yaLIBCFG.git
 $ cmake -S yaLIBCFG -B yaLIBCFG/build -DCMAKE_BUILD_TYPE=Release \
 	-DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
 $ cmake --build yaLIBCFG/build
 $ sudo cmake --install yaLIBCFG/build
 ```
 
-This is yaLIBCFG, release X.01-03ECO01 (https://github.com/SysMan-One/yaLIBCFG). If StarLet is not in
+This is yaLIBCFG, release X.01-04 (https://github.com/SysMan-One/yaLIBCFG). If StarLet is not in
 the default prefix, add `-DCMAKE_PREFIX_PATH=<StarLet prefix>` to the first cmake.
 
 ####	Step 4. Build the gateway
@@ -254,7 +254,7 @@ statically. The package puts the gateway to `/opt/mbusgw-t2r/` and the systemd u
 `mbusgw-t2r.service`, which is installed **disabled** - tune the settings first:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.3.1-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.4.0-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -275,7 +275,7 @@ attached to the releases made after this text was written: `x86_64`, `aarch64`, 
 `%config(noreplace)`, the unit is installed disabled:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.3.1-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.4.0-1.x86_64.rpm
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -294,8 +294,8 @@ OpenWrt 24.10 and an `.apk` for OpenWrt 25.12. Your board's package architecture
 package has no dependencies, the router needs no network for the install:
 
 ```
-# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.4.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.0-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 The package puts the gateway to `/usr/sbin/mbusgw-t2r`, the configuration to `/etc/mbusgw-t2r/`
@@ -348,7 +348,7 @@ same steps as above, in the `gcc` Docker image:
 1. installs `cmake`;
 2. clones StarLet from `https://gitlab.com/SysMan-One/utility_routines.git`, builds it and installs it
    into `/usr/local` (the variable `STARLET_REPO` holds the address - change it to use a mirror);
-3. clones yaLIBCFG from its release tag (`YALIBCFG_TAG`, `X.01-03ECO01`), builds it and installs it;
+3. clones yaLIBCFG from its release tag (`YALIBCFG_TAG`, `X.01-04`), builds it and installs it;
 4. builds the gateway in the `build/` directory (Debug).
 
 The job only checks that the code compiles: it does not install the gateway and does not keep the
@@ -410,9 +410,9 @@ The `listeners` section --- one record per TCP port:
 | `takeover` | no | **RAW only.** `1`: a new client kicks the current one out (`%T2R-W-RAWKICK`); `0`: a new client is rejected while one is connected (`%T2R-W-RAWBUSY`). In the MODBUS mode the key is an error | 0..1, default 1 |
 | `iotmo` | no | Reserved, not used yet | |
 
-An out of range `connlm`/`idletmo` is an error (`%CFG-E-RANGE`). Since V.01-03 the whole settings file is
+An out of range `connlm`/`idletmo` is a warning (`%CFG-W-RANGE`): the default is taken. Since V.01-03 the whole settings file is
 checked by a schema **before anything is applied**: the problems are printed at once, each with the
-setting path, the file, the line and the column, then `%T2R-E-CFGREJECT` and the gateway does not
+setting path, the file, the line and the column, then, if there are errors, `%T2R-E-CFGREJECT` and the gateway does not
 start (`/check` exits with a failure; `RESTART GATEWAY` of `mbus-ctl` is refused and the gateway goes on
 as it is). Before V.01-03 a wrong record was skipped with a message and the gateway went on with
 the rest: **this has changed**. A setting the gateway does not know is an error, two `serials` with the
@@ -420,6 +420,7 @@ same `device` are an error, at most 128 `serials` and 128 `listeners` are allowe
 is not a `device` of `serials` refuses the file. The shipped sample `modbus-t2r_settings.conf` has its two
 listeners of `/dev/ttyS1` and `/dev/ttyS0` commented out for this reason. The messages are
 explained in the User Guide, 7.2; the full list of the `CFG` messages is in the yaLIBCFG manual (Appendix A).
+Since V.01-04 a bad value of a setting which has a default (`chars` part by part, `flow`, `iotmo`, `lategd`, `connlm`, `idletmo`, ...) is only a warning (`%CFG-W-...`, `%T2R-W-CFGDEFAULTS`): the gateway starts with the default, so watch for these lines in the log and run `/check` after editing the file. A setting with no sensible default (`device`, `bind`, `target`, `mode`, an unknown or a missing required setting, a duplicate) still refuses the file.
 In the RAW mode `connlm` may only be 1 and the default `idletmo` is 86400 (not 60).
 Every simultaneous client takes one thread: with many clients mind the `TasksMax` limit of the
 systemd unit (see *Troubleshooting*, `SESSFAIL`, in the User Guide).

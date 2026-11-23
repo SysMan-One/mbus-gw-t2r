@@ -86,6 +86,8 @@
 #				instead, the matrix key is libc); no "linked dynamically" check of libconfig.
 #
 #	22-NOV-2026	CLD	V.01-03ECO01: yaLIBCFG X.01-03ECO01 (YALIBCFG_TAG).
+#
+#	23-NOV-2026	CLD	V.01-04: yaLIBCFG X.01-04 (YALIBCFG_TAG; CFG$M_FALLBACK, cfg$diagcount()).
 #--
 
 name: release
@@ -106,7 +108,7 @@ permissions:
 env:
   STARLET_REPO: "https://gitlab.com/SysMan-One/utility_routines.git"
   YALIBCFG_REPO: "https://github.com/SysMan-One/yaLIBCFG.git"
-  YALIBCFG_TAG: "X.01-03ECO01"
+  YALIBCFG_TAG: "X.01-04"
 
 jobs:
   deb:

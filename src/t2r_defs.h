@@ -70,6 +70,10 @@
 **	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - T2R$K_ANSTMO_MAX (the range of <iotmo> in the schema of the
 **				settings, yaLIBCFG).
 **
+**	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - T2R$K_BAUD_DEF, _DATABITS_DEF, _PARITY_DEF, _STOPBITS_DEF: what is
+**				taken for a part of <chars> that is not usable (19200, 8, E, 1 - the default of the MODBUS
+**				over Serial Line specification); t2r$tty_speed_ok().
+**
 **--
 */
 
@@ -179,6 +183,11 @@ enum	{
 #define		T2R$K_DATABITS_MAX	8				/* CS8						*/
 #define		T2R$K_STOPBITS_MIN	1
 #define		T2R$K_STOPBITS_MAX	2
+
+#define		T2R$K_BAUD_DEF		19200				/* <chars> not usable: the default of the MODBUS	*/
+#define		T2R$K_DATABITS_DEF	8				/* over Serial Line specification, 19200 8 E 1	*/
+#define		T2R$K_PARITY_DEF	'E'
+#define		T2R$K_STOPBITS_DEF	1
 #define		T2R$K_PORT_MIN		1				/* TCP port range				*/
 #define		T2R$K_PORT_MAX		65535
 
@@ -334,6 +343,7 @@ int	t2r$tty_open(T2R$_SERIAL *);
 int	t2r$tty_close(T2R$_SERIAL *);
 int	t2r$tty_exec_req(T2R$_SERIAL *, int a_sd, void *a_req_dsc, void *a_resp_dsc, uint8_t *a_excode);
 int	t2r$tty_check(T2R$_SERIAL *);
+int	t2r$tty_speed_ok(int a_speed);
 int	t2r$tty_raw_relay(T2R$_SERIAL *, int a_sd, int a_idletmo, uint64_t *a_net2tty, uint64_t *a_tty2net);
 
 #ifdef __cplusplus

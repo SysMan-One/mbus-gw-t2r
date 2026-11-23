@@ -77,6 +77,11 @@
 #
 #	22-NOV-2026	CLD	V.01-03ECO01: CFGREJECT tells the number of the problems; numbers with a leading zero are octal,
 #				the ! comment (yaLIBCFG X.01-03, 3.1); the package names in the examples are 1.3.1.
+#
+#	23-NOV-2026	CLD	V.01-04: a bad value of a setting which has a default is a warning (CFG-W, the default is taken), not a
+#				refusal of the file; the new sub-section "Bad values and defaults" in 3.1; chars part by part, the speed is a real
+#				line rate; the codes CFGDEFAULTS, CHARSDEF; CFGREJECT counts the errors only; yaLIBCFG X.01-04; the version
+#				on the cover and the package names in the examples are 1.4.0.
 #--
 import sys
 
@@ -107,7 +112,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'V.01-03'
+VERSION   = 'V.01-04'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -558,7 +563,7 @@ def s_pack_en ():
 		 tbl(['Key', 'Required', 'Meaning and the allowed values'], [
 			('device', 'yes', 'The serial port file, e.g. /dev/ttyUSB0.'),
 			('chars', 'yes', 'The line parameters: speed, data bits, parity, stop bits. '
-				'Speed 50..4000000; data bits 5..8; parity N (none), E (even), O (odd); stop bits 1..2.'),
+				'Speed - a real line rate of the serial driver (see Bad values and defaults), 50..4000000; data bits 5..8; parity N (none), E (even), O (odd); stop bits 1..2.'),
 			('iotmo', 'no', 'How long to wait for the answer of the device, milliseconds. Default 1000. '
 				'Take it with a margin over the slowest device on the line: an answer which comes later is lost. Range 1..3600000.'),
 			('lategd', 'no', 'After a failed request (no answer, a broken answer) listen to the line for this many '
@@ -582,16 +587,49 @@ def s_pack_en ():
 		 P('The whole settings file is checked <b>before anything is applied</b>. The gateway finds the '
 		   'problems at once and prints each of them with the setting path, the file, the line and the column, '
 		   'for example:'),
-		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 7 problem(s),\n    see the CFG messages above --- nothing is applied'),
-		 P('If there is at least one problem, the <b>whole file is refused</b>: nothing is applied and the gateway '
+		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 4 problem(s),\n    see the CFG messages above --- nothing is applied'),
+		 P('If there is at least one <b>error</b>, the <b>whole file is refused</b>: nothing is applied and the gateway '
 		   'does not start (/check exits with a failure; restart gateway of mbus-ctl is refused and the gateway '
 		   'goes on as it is). Fix every line shown and try again. A check which compares several settings (a '
 		   'target against serials, two RAW listeners on one line, XON/XOFF under MODBUS) is made when those '
 		   'settings themselves are right, so such a problem may show up only after the first ones are fixed.'),
-		 P('<b>This has changed in V.01-03.</b> Before it, a wrong record was skipped with a %T2R-E-... message and '
-		   'the gateway went on with the rest of the file. Now one wrong record refuses the whole file. So a file '
-		   'which worked before may be refused after the upgrade: check it with '
-		   '<font face="Mono">mbusgw-t2r /settings=&lt;file&gt; /check</font> before you restart the gateway.'),
+		 P('<b>This has changed in V.01-03 and V.01-04.</b> Before V.01-03, a wrong record was skipped with a '
+		   '%T2R-E-... message and the gateway went on with the rest of the file. In V.01-03 any problem refused the '
+		   'whole file. Since V.01-04 only an <b>error</b> refuses the file: a bad value of a setting which has a '
+		   'default is only a warning (see <i>Bad values and defaults</i> below). A file which worked before may '
+		   'still be refused after an upgrade (for example because of a setting the gateway does not know): check it '
+		   'with mbusgw-t2r /settings=&lt;file&gt; /check before you restart the gateway.'),
+		 H3('Bad values and defaults'),
+		 P('Many settings have a default. If the value of such a setting is bad (out of its range, a wrong word, a '
+		   'wrong type), the gateway does <b>not</b> refuse the file. It prints a <b>warning</b> and uses the '
+		   'default. The warning is a %CFG-W-... message with the file, the line and the column; it ends with - the '
+		   'default is taken. After them you see %T2R-W-CFGDEFAULTS with the number of such values. The gateway '
+		   'starts.'),
+		 P('<b>Settings with a default</b> (a bad value is only a warning):'),
+		 P('&bull; serials: chars (part by part, see below), flow (default NONE), iotmo (default 1000 msec), lategd '
+		   '(default iotmo / 2, at least 100), rs485 (default 0), ts_enabled, ts_unit (default 135), ts_fncode '
+		   '(default 3), ts_base_reg0 (default 8135), desc;'),
+		 P('&bull; listeners: connlm (default 32; RAW: 1), idletmo (default 60 s; RAW: the maximum), iotmo, takeover '
+		   '(default 1).'),
+		 P('<b>Errors</b> (there is no sensible default, so the whole file is still refused): a bad device of a '
+		   'serial; a bad bind, target or mode of a listener; a setting which the gateway does not know (a typo); a '
+		   'missing required setting (listeners, serials, chars, bind, target, device); a duplicate device; the cross '
+		   'checks (RTS/CTS with rs485 = 1; an XON/XOFF line under a MODBUS listener; the rules of a RAW listener; '
+		   'two devices which differ only by capital and small letters); a syntax error.'),
+		 P('<b>chars part by part.</b> chars must be in the file (a missing chars is an error), but its four parts '
+		   'are checked one by one: speed, data bits, parity, stop bits. What is good stays. Each bad part gets its '
+		   'default: speed 19200, data bits 8, parity E, stop bits 1 (the default of the MODBUS over Serial Line '
+		   'specification). %T2R-W-CHARSDEF tells which parts were bad and what was taken.'),
+		 P('The speed must be a real line rate of the serial driver: 50, 75, 110, ... 1200, 2400, 4800, 9600, 19200, '
+		   '38400, 57600, 115200, 230400 ... 4000000. Before V.01-04 any number from 50 to 4000000 was taken, and a '
+		   'non-standard one was silently replaced by 9600 when the port was opened (BADSPEED). Now, for example, '
+		   '19201 is a warning and 19200 is taken.'),
+		 P('A real output of the check of a file with bad values:'),
+		 C('%CFG-W-CHECK, serials.[device="/dev/null"].chars: speed 19201 is not a line rate of\n    the serial driver (1200, 9600, 19200, 115200 ...) - the default is taken,\n    /tmp/soft.conf line 2 column 37\n%CFG-W-BADKWD, not an allowed value: serials.[device="/dev/null"].flow = "HW",\n    allowed: NONE, XON/XOFF, RTS/CTS - the default is taken,\n    /tmp/soft.conf line 2 column 63\n%CFG-W-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0,\n    allowed 1..3600000 - the default is taken, /tmp/soft.conf line 2 column 76\n%T2R-W-CFGDEFAULTS, Settings </tmp/soft.conf>: 3 value(s) not usable,\n    see the CFG-W messages above --- the defaults are taken\n%T2R-W-CHARSDEF, [serial #00:</dev/null>] <chars> "19201,8,X,1" is not usable: speed,\n    parity --- taken: 19200, 8, E, 1\n%T2R-I-DEVADDED, Added device #00 [</dev/null>, Chars: <19200, 8, E, 1>, Flow: NONE,\n    Answer tmo: 1000 msec, Inter RTU PDU: 2002 usec] --- added\n%T2R-S-CHECKOK, Settings </tmp/soft.conf> --- are good: 1 serial(s), 1 listener(s)'),
+		 P('<b>Be careful.</b> A default may be wrong for your line: with the default speed the gateway may not talk '
+		   'to your devices at all. So look for CFG-W and CFGDEFAULTS in the log, and run mbusgw-t2r '
+		   '/settings=&lt;file&gt; /check after every edit of the file. /check exits with 0 when there are only '
+		   'warnings.'),
 		 P('<b>Numbers.</b> Since V.01-03ECO01 a number with a leading zero is <b>octal</b>, as libconfig 1.6 and newer read '
 		   'it: <font face="Mono">ts_base_reg0 = 0135;</font> is 93, not 135, and 08 or 09 is an error (CFG-E-BADNUM). '
 		   'Write numbers without leading zeros (135). After an upgrade a file which worked before keeps working but '
@@ -728,8 +766,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.4.0-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.0-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -771,7 +809,7 @@ def s_pack_en ():
 		 P('Id is the number of the connection for reset. Sd is the number in [#8] of the log lines of this client. '
 		   'Errors are the answers with a MODBUS exception plus the requests which broke the connection.'),
 		 P('<b>restart gateway</b> first checks the settings file in a separate process '
-		   '(<font face="Mono">mbusgw-t2r /settings=&lt;file&gt; /check</font>). If the file has an error, nothing is '
+		   '(<font face="Mono">mbusgw-t2r /settings=&lt;file&gt; /check</font>). If the file has an error (a warning is not an error), nothing is '
 		   'restarted: you see the error line and the gateway works on with the old settings. If the file is good, the '
 		   'gateway disconnects the clients, closes the ports and starts itself again with the same command line. The '
 		   'PID stays the same: systemd and procd see nothing. mbus-ctl waits until the gateway answers again '
@@ -879,7 +917,8 @@ def s_pack_en ():
 				'another program. Find it: sudo ss -tlnp | grep 502.'),
 			('%T2R-E-LSNRERR, ... errno: 13', 'The ports below 1024 need root. Run with sudo, or '
 				'take a port above 1024 (e.g. 5502).'),
-			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused: N problem(s)', 'The settings file has errors. Nothing is applied: the gateway does not start (/check fails; restart gateway is refused and the gateway goes on as it is). Read the %CFG-E-... lines above it: each names the setting, the file, the line and the column. Fix all of them and check with mbusgw-t2r /settings=&lt;file&gt; /check (see 7.3). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose target is not in serials, or a setting the gateway does not know.'),
+			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused: N problem(s)', 'The settings file has errors (the warnings are not counted). Nothing is applied: the gateway does not start (/check fails; restart gateway is refused and the gateway goes on as it is). Read the %CFG-E-... lines above it: each names the setting, the file, the line and the column. Fix all of them and check with mbusgw-t2r /settings=&lt;file&gt; /check (see 7.3). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose target is not in serials, or a setting the gateway does not know.'),
+			('%T2R-W-CFGDEFAULTS, Settings &lt;...&gt;: N value(s) not usable ...', 'A value of a setting which has a default is bad (see also CHARSDEF). The gateway has started, but with the default, and the default may not fit your line (for example, the speed: the devices do not answer). Read the %CFG-W-... lines above, correct the file and check it with mbusgw-t2r /settings=&lt;file&gt; /check (see Bad values and defaults in 3.1).'),
 			('The data is wrong or shifted', 'The byte order confusion on the client side: the MODBUS '
 				'registers are the big-endian 16-bit words; check how the client assembles the '
 				'32/64-bit values.'),
@@ -934,7 +973,9 @@ def s_pack_en ():
 			('TSENABLED', 'I', 'The Time Stamp pseudo device is on for this port.'),
 			('TSDISABLED', 'I', 'The Time Stamp pseudo device is off for this port (the default).'),
 			('LSNADDED', 'I', 'A listeners record is accepted; the address, the port, the target, the limits and the mode are shown (the text ends with ", Mode: MODBUS", ", Mode: RAW" or ", Mode: RAW (takeover)").'),
-			('CFGREJECT', 'E', 'The settings file is refused: the problems are in the CFG messages above it, nothing is applied and the gateway does not start (see 7.3).'),
+			('CFGREJECT', 'E', 'The settings file is refused because of errors: they are in the CFG-E messages above it (the warnings are not counted), nothing is applied and the gateway does not start (see 7.3).'),
+			('CFGDEFAULTS', 'W', 'N values of the settings file are not usable: see the CFG-W messages above it. The gateway starts, the defaults are taken. Read them, correct the file and run /check again (see Bad values and defaults in 3.1).'),
+			('CHARSDEF', 'W', 'A part of chars (speed, data bits, parity, stop bits) is not usable; the default is taken for it (speed 19200, data bits 8, parity E, stop bits 1). Correct chars.'),
 			('SIGERR', 'E', 'A signal handler cannot be set — an internal error, please report it.'),
 			('CFGERR', 'E', 'The configuration cannot be processed; the previous lines say why.'),
 			('CFGABORT', 'F', 'The gateway stops because of the configuration errors above.'),
@@ -945,7 +986,7 @@ def s_pack_en ():
 			('RXBUFFULL', 'W', 'The device sent more than 256 octets; the rest is dropped.'),
 			('RXNODATA', 'E', 'The answer started but no octet was collected.'),
 			('RESPMISM', 'W', 'The answer came from another slave or for another function: two masters or two devices with one address.'),
-			('BADSPEED', 'W', 'The speed is not a standard one; 9600 is used.'),
+			('BADSPEED', 'W', 'The speed is not a standard one; 9600 is used. Since V.01-04 the check of the settings does not let such a speed in: see CHARSDEF.'),
 			('NOTTTY', 'W', 'The device is not a serial port.'),
 			('RS485OFF', 'W', 'The RS485 mode cannot be switched on for this port; the port works without it.'),
 			('RS485ON', 'S', 'The RS485 mode is on for this port.'),
@@ -975,7 +1016,7 @@ def s_pack_en ():
 			('CTLRESET', 'I', 'The operator has disconnected this client (mbus-ctl reset connection). Nothing to do.'),
 			('CTLRESTART', 'I', 'The operator has asked to restart, the settings file is good; the gateway restarts.'),
 			('CTLCHKFAIL', 'E', 'restart gateway is refused: the settings file has errors (mbus-ctl shows them). The gateway works on. Fix the file and try again.'),
-			('CHECKOK', 'S', '/check: the settings file is good.'),
+			('CHECKOK', 'S', '/check: the settings file is good (maybe with warnings).'),
 			('RESTARTING', 'I', 'The gateway starts itself again with the same command line; the usual start lines follow.'),
 			('EXECERR', 'F', 'The restart has failed; the gateway stops. systemd and procd start it again; by hand --- start it again.'),
 			('CTLNOGW', 'E', 'mbus-ctl cannot reach the gateway. errno 2: not running or another socket file (/socket=); 13: no rights --- use sudo; 111: not running, its old file is left.'),
@@ -989,9 +1030,9 @@ def s_pack_en ():
 			('CTLCUT', 'W', 'The answer did not fit into 64 KB (many hundreds of clients): the table is not full.'),
 		 ], [26*mm, 10*mm, 127*mm], a_mono_cols=(0,)),
 		 H2('7.3.  The CFG Messages (the Check of the Settings File)'),
-		 P('The settings file is read and checked by the library yaLIBCFG; its messages start with %CFG-E- and end '
-		   'with the file, the line and the column of the problem. After all of them the gateway prints '
-		   'CFGREJECT. The ones you will meet:'),
+		 P('The settings file is read and checked by the library yaLIBCFG; its messages start with %CFG-E- (an error) or '
+		   '%CFG-W- (a warning) and end with the file, the line and the column of the problem. After the errors the '
+		   'gateway prints CFGREJECT, after the warnings CFGDEFAULTS. The ones you will meet:'),
 		 tbl(['Code', 'What it says', 'What to do'], [
 			('SYNTAX', 'The file is not written in the right syntax.', 'Look at the line and the column shown (the real mistake is often just before it): a missing ; or = or a bracket or a quote.'),
 			('OPENIN', 'The file cannot be opened; errno says why (2 = no such file, 13 = no rights).', 'Check the name in /settings= and the rights on the file.'),
@@ -1006,6 +1047,7 @@ def s_pack_en ():
 			('DUPNAME', 'A setting is written twice in one group (capital and small letters are not told apart), or a section twice.', 'Remove one of them.'),
 			('CHECK', 'A rule of the gateway is broken; the message says which (the form of chars or bind, UDP, a target which is not in serials, a serial port of a RAW listener used by another listener, XON/XOFF under MODBUS, RTS/CTS with rs485 = 1, ...).', 'Read the text of the message and fix the setting it names.'),
 		 ], [22*mm, 74*mm, 67*mm], a_mono_cols=(0,)),
+		 P('RANGE, BADKWD, VTYPE and CHECK are printed as %CFG-W-... with - the default is taken at the end, when the setting has a default: the meaning is the same, but it is only a warning (see Bad values and defaults in 3.1).'),
 		 P('The full list of the CFG messages is in the yaLIBCFG manual (Appendix A).'),
 		 H2('7.4.  If Nothing Helps'),
 		 P('Collect and attach to your question: 1) the full start-up log with /trace (from '
@@ -1146,7 +1188,7 @@ def s_pack_ru ():
 		 tbl(['Ключ', 'Обяз.', 'Значение и допустимые величины'], [
 			('device', 'да', 'Файл последовательного порта, например /dev/ttyUSB0.'),
 			('chars', 'да', 'Параметры линии: скорость, биты данных, чётность, стоп-биты. '
-				'Скорость 50..4000000; биты данных 5..8; чётность N (нет), E (чётная), O (нечётная); '
+				'Скорость - настоящая скорость линии драйвера (см. Плохие значения и умолчания), 50..4000000; биты данных 5..8; чётность N (нет), E (чётная), O (нечётная); '
 				'стоп-биты 1..2.'),
 			('iotmo', 'нет', 'Сколько ждать ответа устройства, миллисекунды. По умолчанию 1000. '
 				'Берите с запасом относительно самого медленного устройства на линии: опоздавший ответ теряется. Диапазон 1..3600000.'),
@@ -1170,16 +1212,49 @@ def s_pack_ru ():
 		 ], [30*mm, 14*mm, 119*mm], a_mono_cols=(0,)),
 		 P('Весь файл настроек проверяется <b>до того, как что-либо применено</b>. Шлюз находит проблемы '
 		   'сразу и печатает каждую с путём настройки, файлом, строкой и столбцом, например:'),
-		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8,\n    settings.conf line 6 column 27\n%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000,\n    settings.conf line 6 column 52\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity \'X\' is unknown,\n    allowed: N, E, O, settings.conf line 7 column 27\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 7 problem(s),\n    see the CFG messages above --- nothing is applied'),
-		 P('Если есть хотя бы одна проблема, <b>весь файл отклоняется</b>: ничего не применяется, и шлюз не '
+		 C('%CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>,\n    settings.conf line 2 column 3\n%CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP,\n    settings.conf line 3 column 5\n%CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56\n%CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6,\n    settings.conf line 7 column 3\n%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 4 problem(s),\n    see the CFG messages above --- nothing is applied'),
+		 P('Если есть хотя бы одна <b>ошибка</b>, <b>весь файл отклоняется</b>: ничего не применяется, и шлюз не '
 		   'запускается (/check завершается неудачей; restart gateway в mbus-ctl отклоняется, а шлюз продолжает '
 		   'работать как работал). Исправьте все показанные строки и повторите. Проверка, которая сравнивает '
 		   'несколько настроек (target с serials, два RAW-слушателя на одной линии, XON/XOFF под MODBUS), '
 		   'выполняется, когда сами эти настройки верны, поэтому такая проблема может показаться только после исправления первых.'),
-		 P('<b>Это изменилось в V.01-03.</b> До неё неправильная запись пропускалась с сообщением %T2R-E-..., а '
-		   'шлюз работал дальше с остальным файлом. Теперь одна неправильная запись отклоняет весь файл. Поэтому '
-		   'файл, который раньше работал, после обновления может быть отклонён: проверьте его командой '
-		   '<font face="Mono">mbusgw-t2r /settings=&lt;файл&gt; /check</font>, прежде чем перезапускать шлюз.'),
+		 P('<b>Это изменилось в V.01-03 и V.01-04.</b> До V.01-03 неправильная запись пропускалась с сообщением '
+		   '%T2R-E-..., а шлюз работал дальше с остальным файлом. В V.01-03 любая проблема отклоняла весь файл. '
+		   'Начиная с V.01-04 файл отклоняет только <b>ошибка</b>: плохое значение настройки, у которой есть '
+		   'умолчание, --- лишь предупреждение (см. <i>Плохие значения и умолчания</i> ниже). Файл, который раньше '
+		   'работал, после обновления всё же может быть отклонён (например, из-за настройки, которой шлюз не знает): '
+		   'проверьте его командой mbusgw-t2r /settings=&lt;файл&gt; /check, прежде чем перезапускать шлюз.'),
+		 H3('Плохие значения и умолчания'),
+		 P('У многих настроек есть умолчание. Если значение такой настройки плохое (вне диапазона, неверное слово, '
+		   'неверный тип), шлюз <b>не</b> отклоняет файл. Он печатает <b>предупреждение</b> и берёт умолчание. '
+		   'Предупреждение --- сообщение %CFG-W-... с файлом, строкой и столбцом; оно заканчивается словами - the '
+		   'default is taken. После них печатается %T2R-W-CFGDEFAULTS с числом таких значений. Шлюз запускается.'),
+		 P('<b>Настройки с умолчанием</b> (плохое значение --- только предупреждение):'),
+		 P('&bull; serials: chars (по частям, см. ниже), flow (по умолчанию NONE), iotmo (по умолчанию 1000 мсек), '
+		   'lategd (по умолчанию iotmo / 2, но не меньше 100), rs485 (по умолчанию 0), ts_enabled, ts_unit (по '
+		   'умолчанию 135), ts_fncode (по умолчанию 3), ts_base_reg0 (по умолчанию 8135), desc;'),
+		 P('&bull; listeners: connlm (по умолчанию 32; RAW: 1), idletmo (по умолчанию 60 с; RAW: максимум), iotmo, '
+		   'takeover (по умолчанию 1).'),
+		 P('<b>Ошибки</b> (разумного умолчания нет, поэтому весь файл по-прежнему отклоняется): плохой device у '
+		   'serials; плохой bind, target или mode у слушателя; настройка, которой шлюз не знает (опечатка); '
+		   'пропущенная обязательная настройка (listeners, serials, chars, bind, target, device); повтор device; '
+		   'перекрёстные проверки (RTS/CTS при rs485 = 1; линия XON/XOFF под MODBUS-слушателем; правила '
+		   'RAW-слушателя; два устройства, отличающиеся только заглавными и строчными буквами); синтаксическая '
+		   'ошибка.'),
+		 P('<b>chars по частям.</b> chars должен быть в файле (отсутствие chars --- ошибка), но четыре его части '
+		   'проверяются по одной: скорость, биты данных, чётность, стоп-биты. Что хорошо --- остаётся. Каждая плохая '
+		   'часть получает умолчание: скорость 19200, биты данных 8, чётность E, стоп-биты 1 (умолчание спецификации '
+		   'MODBUS over Serial Line). %T2R-W-CHARSDEF говорит, какие части были плохи и что взято.'),
+		 P('Скорость должна быть настоящей скоростью линии драйвера последовательного порта: 50, 75, 110, ... 1200, '
+		   '2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400 ... 4000000. До V.01-04 принималось любое число от '
+		   '50 до 4000000, а нестандартное при открытии порта молча заменялось на 9600 (BADSPEED). Теперь, например, '
+		   '19201 --- предупреждение, и берётся 19200.'),
+		 P('Настоящий вывод проверки файла с плохими значениями:'),
+		 C('%CFG-W-CHECK, serials.[device="/dev/null"].chars: speed 19201 is not a line rate of\n    the serial driver (1200, 9600, 19200, 115200 ...) - the default is taken,\n    /tmp/soft.conf line 2 column 37\n%CFG-W-BADKWD, not an allowed value: serials.[device="/dev/null"].flow = "HW",\n    allowed: NONE, XON/XOFF, RTS/CTS - the default is taken,\n    /tmp/soft.conf line 2 column 63\n%CFG-W-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0,\n    allowed 1..3600000 - the default is taken, /tmp/soft.conf line 2 column 76\n%T2R-W-CFGDEFAULTS, Settings </tmp/soft.conf>: 3 value(s) not usable,\n    see the CFG-W messages above --- the defaults are taken\n%T2R-W-CHARSDEF, [serial #00:</dev/null>] <chars> "19201,8,X,1" is not usable: speed,\n    parity --- taken: 19200, 8, E, 1\n%T2R-I-DEVADDED, Added device #00 [</dev/null>, Chars: <19200, 8, E, 1>, Flow: NONE,\n    Answer tmo: 1000 msec, Inter RTU PDU: 2002 usec] --- added\n%T2R-S-CHECKOK, Settings </tmp/soft.conf> --- are good: 1 serial(s), 1 listener(s)'),
+		 P('<b>Осторожно.</b> Умолчание может не подойти вашей линии: с умолчательной скоростью шлюз может вообще не '
+		   'говорить с вашими устройствами. Поэтому ищите в журнале CFG-W и CFGDEFAULTS и запускайте mbusgw-t2r '
+		   '/settings=&lt;файл&gt; /check после каждой правки файла. /check завершается с кодом 0, если есть только '
+		   'предупреждения.'),
 		 P('<b>Числа.</b> Начиная с V.01-03ECO01 число с ведущим нулём — <b>восьмеричное</b>, как его читает libconfig 1.6 и '
 		   'новее: <font face="Mono">ts_base_reg0 = 0135;</font> — это 93, а не 135, а 08 или 09 — ошибка (CFG-E-BADNUM). '
 		   'Пишите числа без ведущих нулей (135). После обновления файл, который раньше работал, продолжит работать, '
@@ -1314,8 +1389,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.4.0-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.0-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1356,7 +1431,7 @@ def s_pack_ru ():
 		 P('Id — номер соединения для reset. Sd — число в [#8] в строках журнала этого клиента. '
 		   'Errors — ответы с исключением MODBUS плюс запросы, на которых соединение оборвалось.'),
 		 P('<b>restart gateway</b> сначала проверяет файл настроек в отдельном процессе '
-		   '(<font face="Mono">mbusgw-t2r /settings=&lt;файл&gt; /check</font>). Если в файле ошибка, ничего не '
+		   '(<font face="Mono">mbusgw-t2r /settings=&lt;файл&gt; /check</font>). Если в файле ошибка (предупреждение не ошибка), ничего не '
 		   'перезапускается: вы видите строку ошибки, шлюз работает дальше со старыми настройками. Если файл хороший, '
 		   'шлюз отключает клиентов, закрывает порты и запускает сам себя заново с той же командной строкой. PID остаётся '
 		   'прежним: systemd и procd ничего не замечают. mbus-ctl ждёт, пока шлюз снова ответит (CTLBACK), 3–15 секунд. '
@@ -1461,7 +1536,8 @@ def s_pack_ru ():
 				'программа. Найдите: sudo ss -tlnp | grep 502.'),
 			('%T2R-E-LSNRERR, ... errno: 13', 'Порты ниже 1024 требуют root. Запустите под sudo '
 				'или возьмите порт выше 1024 (например 5502).'),
-			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused: N problem(s)', 'В файле настроек есть ошибки. Ничего не применено: шлюз не запускается (/check завершается неудачей; restart gateway отклоняется, а шлюз продолжает работать как работал). Читайте строки %CFG-E-... выше: каждая называет настройку, файл, строку и столбец. Исправьте всё и проверьте командой mbusgw-t2r /settings=&lt;файл&gt; /check (см. 7.3). После обновления до V.01-03 файл, который раньше работал, может быть отклонён: например, у слушателя target нет в serials, или в файле настройка, которой шлюз не знает.'),
+			('%T2R-E-CFGREJECT, Settings &lt;...&gt; are refused: N problem(s)', 'В файле настроек есть ошибки (предупреждения не считаются). Ничего не применено: шлюз не запускается (/check завершается неудачей; restart gateway отклоняется, а шлюз продолжает работать как работал). Читайте строки %CFG-E-... выше: каждая называет настройку, файл, строку и столбец. Исправьте всё и проверьте командой mbusgw-t2r /settings=&lt;файл&gt; /check (см. 7.3). После обновления до V.01-03 файл, который раньше работал, может быть отклонён: например, у слушателя target нет в serials, или в файле настройка, которой шлюз не знает.'),
+			('%T2R-W-CFGDEFAULTS, Settings &lt;...&gt;: N value(s) not usable ...', 'Значение настройки, у которой есть умолчание, плохое (см. также CHARSDEF). Шлюз запустился, но с умолчанием, а оно может не подойти вашей линии (например, скорость: устройства не отвечают). Читайте строки %CFG-W-... выше, исправьте файл и проверьте командой mbusgw-t2r /settings=&lt;файл&gt; /check (см. Плохие значения и умолчания в 3.1).'),
 			('Данные неверные или сдвинутые', 'Путаница порядка байт у клиента: регистры MODBUS — '
 				'16-битные слова big-endian; проверьте, как клиент собирает 32/64-битные значения.'),
 		 ], [52*mm, 111*mm], a_mono_cols=(0,)),
@@ -1511,7 +1587,9 @@ def s_pack_ru ():
 			('TSENABLED', 'I', 'Псевдоустройство меток времени включено для этого порта.'),
 			('TSDISABLED', 'I', 'Псевдоустройство меток времени выключено для этого порта (по умолчанию).'),
 			('LSNADDED', 'I', 'Запись listeners принята; показаны адрес, порт, устройство, ограничения и режим (текст заканчивается на ", Mode: MODBUS", ", Mode: RAW" или ", Mode: RAW (takeover)").'),
-			('CFGREJECT', 'E', 'Файл настроек отклонён: проблемы указаны в сообщениях CFG выше, ничего не применено, шлюз не запускается (см. 7.3).'),
+			('CFGREJECT', 'E', 'Файл настроек отклонён из-за ошибок: они указаны в сообщениях CFG-E выше (предупреждения не считаются), ничего не применено, шлюз не запускается (см. 7.3).'),
+			('CFGDEFAULTS', 'W', 'N значений файла настроек непригодны: см. сообщения CFG-W выше. Шлюз запускается, берутся умолчания. Прочитайте их, исправьте файл и снова запустите /check (см. Плохие значения и умолчания в 3.1).'),
+			('CHARSDEF', 'W', 'Часть chars (скорость, биты данных, чётность, стоп-биты) непригодна; для неё взято умолчание (скорость 19200, биты данных 8, чётность E, стоп-биты 1). Исправьте chars.'),
 			('SIGERR', 'E', 'Не удалось установить обработчик сигнала — внутренняя ошибка, сообщите о ней.'),
 			('CFGERR', 'E', 'Конфигурацию не удалось обработать; причина — в строках выше.'),
 			('CFGABORT', 'F', 'Шлюз останавливается из-за ошибок конфигурации выше.'),
@@ -1522,7 +1600,7 @@ def s_pack_ru ():
 			('RXBUFFULL', 'W', 'Устройство прислало больше 256 октетов; остаток отброшен.'),
 			('RXNODATA', 'E', 'Ответ начался, но не собрано ни одного октета.'),
 			('RESPMISM', 'W', 'Ответ пришёл от другого slave или на другую функцию: два мастера или два устройства с одним адресом.'),
-			('BADSPEED', 'W', 'Скорость нестандартная; используется 9600.'),
+			('BADSPEED', 'W', 'Скорость нестандартная; используется 9600. С V.01-04 проверка настроек такую скорость не пропускает: см. CHARSDEF.'),
 			('NOTTTY', 'W', 'Устройство — не последовательный порт.'),
 			('RS485OFF', 'W', 'Режим RS485 для этого порта не включился; порт работает без него.'),
 			('RS485ON', 'S', 'Режим RS485 для этого порта включён.'),
@@ -1552,7 +1630,7 @@ def s_pack_ru ():
 			('CTLRESET', 'I', 'Оператор отключил этого клиента (mbus-ctl reset connection). Ничего делать не нужно.'),
 			('CTLRESTART', 'I', 'Оператор попросил перезапуск, файл настроек хороший; шлюз перезапускается.'),
 			('CTLCHKFAIL', 'E', 'restart gateway отклонён: в файле настроек ошибки (mbus-ctl их показывает). Шлюз работает дальше. Исправьте файл и повторите.'),
-			('CHECKOK', 'S', '/check: файл настроек хороший.'),
+			('CHECKOK', 'S', '/check: файл настроек хороший (возможно, с предупреждениями).'),
 			('RESTARTING', 'I', 'Шлюз запускает сам себя заново с той же командной строкой; дальше обычные строки запуска.'),
 			('EXECERR', 'F', 'Перезапуск не удался; шлюз останавливается. systemd и procd запустят его снова; вручную — запустите снова.'),
 			('CTLNOGW', 'E', 'mbus-ctl не достучался до шлюза. errno 2: не запущен или другой файл-сокет (/socket=); 13: нет прав — sudo; 111: не запущен, остался старый файл.'),
@@ -1566,9 +1644,9 @@ def s_pack_ru ():
 			('CTLCUT', 'W', 'Ответ не поместился в 64 КБ (многие сотни клиентов): таблица неполная.'),
 		 ], [26*mm, 11*mm, 126*mm], a_mono_cols=(0,)),
 		 H2('7.3.  Сообщения CFG (проверка файла настроек)'),
-		 P('Файл настроек читает и проверяет библиотека yaLIBCFG; её сообщения начинаются с %CFG-E- и заканчиваются '
-		   'файлом, строкой и столбцом проблемы. После всех них шлюз печатает CFGREJECT. Те, с которыми вы '
-		   'встретитесь:'),
+		 P('Файл настроек читает и проверяет библиотека yaLIBCFG; её сообщения начинаются с %CFG-E- (ошибка) или '
+		   '%CFG-W- (предупреждение) и заканчиваются файлом, строкой и столбцом проблемы. После ошибок шлюз печатает '
+		   'CFGREJECT, после предупреждений — CFGDEFAULTS. Те, с которыми вы встретитесь:'),
 		 tbl(['Код', 'Что говорит', 'Что делать'], [
 			('SYNTAX', 'Файл написан не по правилам синтаксиса.', 'Посмотрите строку и столбец (настоящая ошибка часто прямо перед ними): пропущены ; или = или скобка или кавычка.'),
 			('OPENIN', 'Файл не открывается; errno говорит почему (2 = нет такого файла, 13 = нет прав).', 'Проверьте имя в /settings= и права на файл.'),
@@ -1583,6 +1661,7 @@ def s_pack_ru ():
 			('DUPNAME', 'Настройка записана дважды в одной группе (заглавные и строчные буквы не различаются) или раздел дважды.', 'Уберите одну из них.'),
 			('CHECK', 'Нарушено правило шлюза; сообщение говорит какое (вид chars или bind, UDP, target, которого нет в serials, последовательный порт RAW-слушателя занят другим слушателем, XON/XOFF при MODBUS, RTS/CTS при rs485 = 1, ...).', 'Прочитайте текст сообщения и исправьте названную им настройку.'),
 		 ], [22*mm, 74*mm, 67*mm], a_mono_cols=(0,)),
+		 P('RANGE, BADKWD, VTYPE и CHECK печатаются как %CFG-W-... с - the default is taken в конце, если у настройки есть умолчание: смысл тот же, но это только предупреждение (см. Плохие значения и умолчания в 3.1).'),
 		 P('Полный список сообщений CFG — в руководстве yaLIBCFG (Приложение A).'),
 		 H2('7.4.  Если ничего не помогло'),
 		 P('Соберите и приложите к вопросу: 1) полный журнал запуска с /trace (от REVISNF до '

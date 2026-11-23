@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-03"
-#define	__REV__		"01.03.00"
+#define	__IDENT__	"V.01-04"
+#define	__REV__		"01.04.00"
 
 /*
 **++
@@ -161,6 +161,10 @@
 **
 **	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - RRL: the product version V.01-03 (package 1.3.0), no code
 **				change in this module.
+**
+**	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - t2r$tty_speed_ok(): is a speed one of the line rates of this
+**				build (T2R-MAIN checks <chars> by it - a speed the tty cannot take is not usable, the
+**				default is taken, and BADSPEED with its 9600 is not met at the open).
 **--
 */
 #ifndef	_GNU_SOURCE								/* POLLRDHUP; the musl build gives -D_GNU_SOURCE */
@@ -879,18 +883,21 @@ uint8_t	*l_data;
 
 
 /*
- *   DESCRIPTION: Translate line rate to internal representative. In error case return <B9600>
+ *   DESCRIPTION: Translate a line rate to its termios representation.
  *
  *   INPUTS:
  *	a_speed:	A data speed in bauds
  *
  *   OUTPUTS:
- *	NONE
+ *	a_bits:		The B<n> constant
  *
  *   RETURNS:
- *	<line_speed>
+ *	STS$K_SUCCESS, STS$K_ERROR - not a line rate of this build
  */
-static	speed_t s_tty_speed2bits(int a_speed)
+static	int s_tty_speed_lookup (
+		int	a_speed,
+		speed_t	*a_bits
+			)
 {
 speed_t l_speed;
 
@@ -1033,11 +1040,56 @@ speed_t l_speed;
 		#endif
 
 		default:
-			$PUTMSG_FAO(T2R$__BADSPEED, a_speed);
-			l_speed = B9600;
+			return	STS$K_ERROR;
 		}
 
-	return l_speed;
+	*a_bits = l_speed;
+
+	return	STS$K_SUCCESS;
+}
+
+
+/*
+ *   DESCRIPTION: Is a speed one of the line rates of this build? For the check of <chars> (T2R-MAIN).
+ *
+ *   INPUTS:
+ *	a_speed:	A data speed in bauds
+ *
+ *   RETURNS:
+ *	1 - yes, 0 - no
+ */
+int	t2r$tty_speed_ok (
+		int	a_speed
+			)
+{
+speed_t	l_bits;
+
+	return	1 & s_tty_speed_lookup(a_speed, &l_bits);
+}
+
+
+/*
+ *   DESCRIPTION: Translate line rate to internal representative. In error case return <B9600>
+ *
+ *   INPUTS:
+ *	a_speed:	A data speed in bauds
+ *
+ *   OUTPUTS:
+ *	NONE
+ *
+ *   RETURNS:
+ *	<line_speed>
+ */
+static	speed_t s_tty_speed2bits(int a_speed)
+{
+speed_t l_speed;
+
+	if ( 1 & s_tty_speed_lookup(a_speed, &l_speed) )
+		return	l_speed;
+
+	$PUTMSG_FAO(T2R$__BADSPEED, a_speed);
+
+	return	B9600;
 }
 
 /*

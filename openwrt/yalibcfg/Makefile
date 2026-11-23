@@ -14,17 +14,18 @@
 #
 #	22-NOV-2026	CLD	V.01-03: Initial revision (the release X.01-01), replaces libconfig-static.
 #	22-NOV-2026	CLD	V.01-03ECO01: the release X.01-03ECO01 (1.3.1).
+#	23-NOV-2026	CLD	V.01-04: the release X.01-04 (1.4.0) - CFG$M_FALLBACK, cfg$diagcount().
 #--
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=yalibcfg
-PKG_VERSION:=1.3.1
+PKG_VERSION:=1.4.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/SysMan-One/yaLIBCFG.git
-PKG_SOURCE_VERSION:=80bfefb25653fb703c252c496ab6f489f47aff06
+PKG_SOURCE_VERSION:=38cf7b5e6b13eed2846897703d02accbcc00917d
 PKG_MIRROR_HASH:=skip
 
 PKG_LICENSE:=Apache-2.0

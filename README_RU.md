@@ -143,14 +143,14 @@ $ sudo cmake --install .
 ####	Шаг 3. Установить пакет yaLIBCFG
 
 ```
-$ git clone --depth 1 --branch X.01-03ECO01 https://github.com/SysMan-One/yaLIBCFG.git
+$ git clone --depth 1 --branch X.01-04 https://github.com/SysMan-One/yaLIBCFG.git
 $ cmake -S yaLIBCFG -B yaLIBCFG/build -DCMAKE_BUILD_TYPE=Release \
 	-DYALIBCFG_M_HELPLIB=OFF -DYALIBCFG_M_EXAMPLES=OFF -DYALIBCFG_M_TESTS=OFF
 $ cmake --build yaLIBCFG/build
 $ sudo cmake --install yaLIBCFG/build
 ```
 
-Это yaLIBCFG, релиз X.01-03ECO01 (https://github.com/SysMan-One/yaLIBCFG). Если StarLet стоит не в
+Это yaLIBCFG, релиз X.01-04 (https://github.com/SysMan-One/yaLIBCFG). Если StarLet стоит не в
 префиксе по умолчанию, добавьте к первому cmake `-DCMAKE_PREFIX_PATH=<префикс StarLet>`.
 
 ####	Шаг 4. Собрать шлюз
@@ -251,7 +251,7 @@ glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ub
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.3.1-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.4.0-1_arm64.deb
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -272,7 +272,7 @@ glibc 2.34 или новее. Перед релизом он лишь запус
 выключенной:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.3.1-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.4.0-1.x86_64.rpm
 $ sudo nano /opt/mbusgw-t2r/etc/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -291,8 +291,8 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 сеть роутеру для установки не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.4.0-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.0-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 Пакет ставит шлюз в `/usr/sbin/mbusgw-t2r`, настройки — в `/etc/mbusgw-t2r/`, службу procd —
@@ -344,7 +344,7 @@ StarLet, yaLIBCFG и шлюз на amd64 и arm64 и прогоняет тест
 1. ставит `cmake`;
 2. клонирует StarLet из `https://gitlab.com/SysMan-One/utility_routines.git`, собирает его и ставит
    в `/usr/local` (адрес задан переменной `STARLET_REPO` — замените его, чтобы брать StarLet из зеркала);
-3. клонирует yaLIBCFG из его релизного тега (`YALIBCFG_TAG`, `X.01-03ECO01`), собирает его и ставит;
+3. клонирует yaLIBCFG из его релизного тега (`YALIBCFG_TAG`, `X.01-04`), собирает его и ставит;
 4. собирает шлюз в каталоге `build/` (Debug).
 
 Задание только проверяет, что код компилируется: шлюз оно не устанавливает и бинарник не сохраняет.
@@ -405,9 +405,9 @@ PDF собираются скриптом `docs/make_userguide_pdf.py` (набо
 | `takeover` | нет | **Только RAW.** `1`: новый клиент вытесняет текущего (`%T2R-W-RAWKICK`); `0`: пока клиент подключён, новый отклоняется (`%T2R-W-RAWBUSY`). В режиме MODBUS ключ --- ошибка | 0..1, по умолчанию 1 |
 | `iotmo` | нет | Зарезервирован, пока не используется | |
 
-Значение `connlm`/`idletmo` вне диапазона --- ошибка (`%CFG-E-RANGE`). Начиная с V.01-03 весь файл
+Значение `connlm`/`idletmo` вне диапазона --- предупреждение (`%CFG-W-RANGE`): берётся умолчание. Начиная с V.01-03 весь файл
 настроек проверяется схемой **до того, как что-либо применено**: проблемы печатаются сразу, каждая
-с путём настройки, файлом, строкой и столбцом, затем `%T2R-E-CFGREJECT`, и шлюз не запускается
+с путём настройки, файлом, строкой и столбцом, затем, если есть ошибки, `%T2R-E-CFGREJECT`, и шлюз не запускается
 (`/check` завершается неудачей; `RESTART GATEWAY` в `mbus-ctl` отклоняется, а шлюз продолжает работать
 как работал). До V.01-03 неправильная запись пропускалась с сообщением, и шлюз работал дальше с
 остальными: **это изменилось**. Настройка, которую шлюз не знает, --- ошибка, две записи `serials` с
@@ -415,6 +415,7 @@ PDF собираются скриптом `docs/make_userguide_pdf.py` (набо
 среди `device` в `serials`, отклоняет файл. Поэтому в поставляемом образце `modbus-t2r_settings.conf`
 два слушателя для `/dev/ttyS1` и `/dev/ttyS0` закомментированы. Сообщения разобраны в руководстве
 пользователя, 7.2; полный список сообщений `CFG` --- в руководстве yaLIBCFG (Приложение A).
+Начиная с V.01-04 плохое значение настройки, у которой есть умолчание (`chars` по частям, `flow`, `iotmo`, `lategd`, `connlm`, `idletmo`, ...), --- лишь предупреждение (`%CFG-W-...`, `%T2R-W-CFGDEFAULTS`): шлюз запускается с умолчанием, поэтому следите за этими строками в журнале и запускайте `/check` после правки файла. Настройка без разумного умолчания (`device`, `bind`, `target`, `mode`, неизвестная или пропущенная обязательная настройка, повтор) по-прежнему отклоняет файл.
 В режиме RAW `connlm` может быть только 1, а `idletmo` по умолчанию равен 86400 (не 60).
 Каждый одновременный клиент занимает один поток: при большом числе клиентов учитывайте лимит
 `TasksMax` юнита systemd (см. в руководстве пользователя *Траблшутинг*, `SESSFAIL`).

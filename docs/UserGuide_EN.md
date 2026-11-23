@@ -74,7 +74,7 @@ listen for TCP clients on every network interface, port 502, and forward them to
 | Key | Required? | What it means | Allowed values |
 |-----|-----------|---------------|----------------|
 | `device` | **yes** | The serial port file | e.g. `/dev/ttyUSB0` |
-| `chars` | **yes** | The line parameters: `speed, data bits, parity, stop bits` | speed 50..4000000; data bits 5..8; parity `N` (none), `E` (even), `O` (odd); stop bits 1..2 |
+| `chars` | **yes** | The line parameters: `speed, data bits, parity, stop bits` | speed: a real line rate of the serial driver, 50..4000000 (see *Bad values and defaults* below); data bits 5..8; parity `N` (none), `E` (even), `O` (odd); stop bits 1..2 |
 | `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | 1..3600000 |
 | `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request: an answer to a read carries nothing of its request, so a device which answers later than `iotmo` + `lategd` can give one client the data of another. Take `lategd` with a margin over how late your devices can be. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 2, but not less than 100; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
 | `rs485` | no | `1` --- ask the kernel to drive the RS-485 direction control (only for ports that support it) | `0` or `1` |
@@ -92,21 +92,44 @@ for example:
 %CFG-E-CHECK, listeners.[0]: <target> "/dev/ttyQ9" is not a <device> of <serials>, settings.conf line 2 column 3
 %CFG-E-CHECK, listeners.[1].bind: UDP is not implemented, use TCP, settings.conf line 3 column 5
 %CFG-E-UNKNOWN, unknown setting: listeners.[1].conlm, settings.conf line 3 column 56
-%CFG-E-CHECK, serials.[device="/dev/null"].chars: data bits 9 is out of range 5..8, settings.conf line 6 column 27
-%CFG-E-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000, settings.conf line 6 column 52
 %CFG-E-DUPKEY, duplicate key: serials.[device="/dev/null"], the same as line 6, settings.conf line 7 column 3
-%CFG-E-CHECK, serials.[device="/dev/null"].chars: parity 'X' is unknown, allowed: N, E, O, settings.conf line 7 column 27
-%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 7 problem(s), see the CFG messages above --- nothing is applied
+%T2R-E-CFGREJECT, Settings <settings.conf> are refused: 4 problem(s), see the CFG messages above --- nothing is applied
 ```
 
-If there is at least one problem, the **whole file is refused**: nothing is applied and the gateway
+If there is at least one **error**, the **whole file is refused**: nothing is applied and the gateway
 does not start (`/check` exits with a failure; `restart gateway` of `mbus-ctl` is refused and the
 gateway goes on as it is). Fix every line shown and try again. A check which compares several settings (a `target` against `serials`, two RAW listeners on one line, XON/XOFF under MODBUS) is made when those settings themselves are right, so such a problem may show up only after the first ones are fixed.
 
-**This has changed in V.01-03.** Before it, a wrong record was skipped with a `%T2R-E-...` message
-and the gateway went on with the rest of the file. Now one wrong record refuses the whole file. So
-a file which worked before may be refused after the upgrade: check it with
-`mbusgw-t2r /settings=<file> /check` before you restart the gateway.
+**This has changed in V.01-03 and V.01-04.** Before V.01-03, a wrong record was skipped with a `%T2R-E-...` message and the gateway went on with the rest of the file. In V.01-03 any problem refused the whole file. Since V.01-04 only an **error** refuses the file: a bad value of a setting which has a default is only a warning (see *Bad values and defaults* below). A file which worked before may still be refused after an upgrade (for example because of a setting the gateway does not know): check it with `mbusgw-t2r /settings=<file> /check` before you restart the gateway.
+
+#### Bad values and defaults
+
+Many settings have a default. If the value of such a setting is bad (out of its range, a wrong word, a wrong type), the gateway does **not** refuse the file. It prints a **warning** and uses the default. The warning is a `%CFG-W-...` message with the file, the line and the column; it ends with `- the default is taken`. After them you see `%T2R-W-CFGDEFAULTS` with the number of such values. The gateway starts.
+
+**Settings with a default** (a bad value is only a warning):
+
+- `serials`: `chars` (part by part, see below), `flow` (default `NONE`), `iotmo` (default 1000 msec), `lategd` (default `iotmo` / 2, at least 100), `rs485` (default 0), `ts_enabled`, `ts_unit` (default 135), `ts_fncode` (default 3), `ts_base_reg0` (default 8135), `desc`;
+- `listeners`: `connlm` (default 32; RAW: 1), `idletmo` (default 60 s; RAW: the maximum), `iotmo`, `takeover` (default 1).
+
+**Errors** (there is no sensible default, so the whole file is still refused): a bad `device` of a serial; a bad `bind`, `target` or `mode` of a listener; a setting which the gateway does not know (a typo); a missing required setting (`listeners`, `serials`, `chars`, `bind`, `target`, `device`); a duplicate `device`; the cross checks (RTS/CTS with `rs485 = 1`; an XON/XOFF line under a MODBUS listener; the rules of a RAW listener; two devices which differ only by capital and small letters); a syntax error.
+
+**`chars` part by part.** `chars` must be in the file (a missing `chars` is an error), but its four parts are checked one by one: speed, data bits, parity, stop bits. What is good stays. Each bad part gets its default: speed 19200, data bits 8, parity `E`, stop bits 1 (the default of the MODBUS over Serial Line specification). `%T2R-W-CHARSDEF` tells which parts were bad and what was taken.
+
+The speed must be a real line rate of the serial driver: 50, 75, 110, ... 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400 ... 4000000. Before V.01-04 any number from 50 to 4000000 was taken, and a non-standard one was silently replaced by 9600 when the port was opened (`BADSPEED`). Now, for example, 19201 is a warning and 19200 is taken.
+
+The check of a file with bad values prints, for example:
+
+```
+%CFG-W-CHECK, serials.[device="/dev/null"].chars: speed 19201 is not a line rate of the serial driver (1200, 9600, 19200, 115200 ...) - the default is taken, /tmp/soft.conf line 2 column 37
+%CFG-W-BADKWD, not an allowed value: serials.[device="/dev/null"].flow = "HW", allowed: NONE, XON/XOFF, RTS/CTS - the default is taken, /tmp/soft.conf line 2 column 63
+%CFG-W-RANGE, out of range: serials.[device="/dev/null"].iotmo = 0, allowed 1..3600000 - the default is taken, /tmp/soft.conf line 2 column 76
+%T2R-W-CFGDEFAULTS, Settings </tmp/soft.conf>: 3 value(s) not usable, see the CFG-W messages above --- the defaults are taken
+%T2R-W-CHARSDEF, [serial #00:</dev/null>] <chars> "19201,8,X,1" is not usable: speed, parity --- taken: 19200, 8, E, 1
+%T2R-I-DEVADDED, Added device #00 [</dev/null>, Chars: <19200, 8, E, 1>, Flow: NONE, Answer tmo: 1000 msec, Inter RTU PDU: 2002 usec] --- added
+%T2R-S-CHECKOK, Settings </tmp/soft.conf> --- are good: 1 serial(s), 1 listener(s)
+```
+
+**Be careful.** A default may be wrong for your line: with the default speed the gateway may not talk to your devices at all. So look for `CFG-W` and `CFGDEFAULTS` in the log, and run `mbusgw-t2r /settings=<file> /check` after every edit of the file. `/check` exits with 0 when there are only warnings.
 
 **Numbers.** Since V.01-03ECO01 a number with a leading zero is **octal**, as libconfig 1.6 and newer read it: `ts_base_reg0 = 0135;` is 93, not 135, and `08` or `09` is an error (`%CFG-E-BADNUM`). Write numbers without leading zeros (`135`). After an upgrade a file which worked before keeps working but may **change its meaning without a word**: before V.01-03ECO01 `0135` was 135. Look for `= 0` followed by a digit in your files. Hexadecimal is `0x87` or `%X87`; `%D`, `%B` and `%O` give decimal, binary and octal. Besides `#`, `//` and `/* */`, an exclamation mark `!` starts a comment to the end of the line, as in DCL.
 
@@ -277,8 +300,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.3.1-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.3.1-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.4.0-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.0-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -338,7 +361,7 @@ connection. For a RAW port the columns are `To line` and `From line`.
 **restart gateway** step by step:
 
 1. The gateway checks the settings file in a separate process (`mbusgw-t2r /settings=<file> /check`).
-2. If the file has an error, nothing is restarted. You see the problems, for example
+2. If the file has an error (a warning is not an error), nothing is restarted. You see the problems, for example
    `%CFG-E-SYNTAX, ...` and then `%T2R-E-CFGREJECT, ... are refused` (section 7.2); the gateway works
    on with the old settings. Fix the file and try again.
 3. If the file is good, the gateway disconnects the clients, closes the ports and starts itself
@@ -356,7 +379,7 @@ Two more options of the gateway:
 |--------|---------|
 | `/control=<file>` | Another socket file (two gateways on one computer need two files); then `mbus-ctl ... /socket=<file>` |
 | `/control=NONE` | No control channel at all |
-| `/check` | Only check the settings file and exit: `%T2R-S-CHECKOK` and exit status 0 --- the file is good |
+| `/check` | Only check the settings file and exit: `%T2R-S-CHECKOK` and exit status 0 --- the file is good (the status is 0 also when there are only warnings, `%CFG-W-...`) |
 
 The gateway and `mbus-ctl` talk a small binary protocol (TLV records, see README.md). You cannot
 type to the gateway by hand: always use `mbus-ctl`.
@@ -407,7 +430,8 @@ dislikes.**
 | `%T2R-W-DEVABSENT, Device <...> is absent --- it will be opened every 1000 msec ...` | At the start the serial port could not be opened (the line above says why); its TCP port works and answers the exception 10 | plug in the adapter --- `DEVREADY` follows; or fix `device` in the settings |
 | The client gets the exception `0x0A` (10) | The serial port of this TCP port is absent or lost (see `DEVLOST`, `DEVABSENT`) | see `DEVLOST` above |
 | the same, `errno: 13` | Permission denied | run with `sudo` or add yourself to the `dialout` group |
-| `%T2R-E-CFGREJECT, Settings <...> are refused: N problem(s), ...` | The settings file has errors. Nothing is applied: the gateway does not start (`/check` fails; `restart gateway` is refused and the gateway goes on as it is) | read the `%CFG-E-...` lines above it: each names the setting, the file, the line and the column. Fix all of them, check with `mbusgw-t2r /settings=<file> /check` (see 7.2). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose `target` is not in `serials`, or a setting the gateway does not know |
+| `%T2R-E-CFGREJECT, Settings <...> are refused: N problem(s), ...` | The settings file has errors (the warnings are not counted). Nothing is applied: the gateway does not start (`/check` fails; `restart gateway` is refused and the gateway goes on as it is) | read the `%CFG-E-...` lines above it: each names the setting, the file, the line and the column. Fix all of them, check with `mbusgw-t2r /settings=<file> /check` (see 7.2). After an upgrade to V.01-03 a file which worked before may be refused: for example a listener whose `target` is not in `serials`, or a setting the gateway does not know |
+| `%T2R-W-CFGDEFAULTS, Settings <...>: N value(s) not usable ...` and `%T2R-W-CHARSDEF, ...` | A value of a setting which has a default is bad. The gateway has started, but with the default, and the default may not fit your line (for example, the speed: the devices do not answer) | read the `%CFG-W-...` lines above, correct the file, check it with `mbusgw-t2r /settings=<file> /check` (see *Bad values and defaults* in 3.1) |
 | the same, `errno: 16` | The port is busy: another program holds it | find it: `sudo fuser /dev/ttyUSB0`; stop it |
 | `%T2R-E-NOANSWER, [...] Did not get an answer in 1000 msec` | The request went out, nothing came back | 1) wrong slave address in the client's request; 2) wrong wiring (swap A/B of RS-485); 3) wrong speed/parity --- re-check `chars`; 4) the device is simply off |
 | `%T2R-E-CRC16ERR, [...] (received: X, calculated: Y)` | Octets arrive, but damaged | 1) `chars` does not match the device (most common!); 2) line noise --- check the grounding, the termination resistors, the cable length; 3) two masters on one line |
@@ -475,7 +499,9 @@ dislikes.**
 | `TSENABLED` | I | The Time Stamp pseudo device is on for this port |
 | `TSDISABLED` | I | The Time Stamp pseudo device is off for this port (the default) |
 | `LSNADDED` | I | A listeners record is accepted; the address, the port, the target, the limits and the mode are shown (the text ends with `, Mode: MODBUS`, `, Mode: RAW` or `, Mode: RAW (takeover)`) |
-| `CFGREJECT` | E | The settings file is refused: the problems are in the `%CFG-E-...` lines above it, nothing is applied and the gateway does not start (see 7.2) |
+| `CFGREJECT` | E | The settings file is refused because of errors: they are in the `%CFG-E-...` lines above it (the warnings are not counted), nothing is applied and the gateway does not start (see 7.2) |
+| `CFGDEFAULTS` | W | N values of the settings file are not usable: see the `%CFG-W-...` lines above it. The gateway starts, the defaults are taken. Read the lines, correct the file and run `/check` again (see *Bad values and defaults* in 3.1) |
+| `CHARSDEF` | W | A part of `<chars>` (speed, data bits, parity, stop bits) is not usable; the default is taken for it (speed 19200, data bits 8, parity E, stop bits 1). Correct `<chars>` |
 | `SIGERR` | E | A signal handler cannot be set --- an internal error, please report it |
 | `CFGERR` | E | The configuration cannot be processed; the previous lines say why |
 | `CFGABORT` | F | The gateway stops because of the configuration errors above |
@@ -486,7 +512,7 @@ dislikes.**
 | `RXBUFFULL` | W | The device sent more than 256 octets; the rest is dropped |
 | `RXNODATA` | E | The answer started but no octet was collected |
 | `RESPMISM` | W | The answer came from another slave or for another function: two masters or two devices with one address |
-| `BADSPEED` | W | The speed is not a standard one; 9600 is used |
+| `BADSPEED` | W | The speed is not a standard one; 9600 is used. Since V.01-04 the check of the settings does not let such a speed in: see `CHARSDEF` |
 | `NOTTTY` | W | The device is not a serial port |
 | `RS485OFF` | W | The RS485 mode cannot be switched on for this port; the port works without it |
 | `RS485ON` | S | The RS485 mode is on for this port |
@@ -516,7 +542,7 @@ dislikes.**
 | `CTLRESET` | I | The operator has disconnected this client (`mbus-ctl reset connection`). Nothing to do |
 | `CTLRESTART` | I | The operator has asked to restart (`mbus-ctl restart gateway`), the settings file is good; the gateway restarts |
 | `CTLCHKFAIL` | E | `restart gateway` is refused: the settings file has errors (`mbus-ctl` shows them). The gateway works on with the old settings. Fix the file and try again |
-| `CHECKOK` | S | `/check`: the settings file is good; the numbers of the serial ports and listeners are shown |
+| `CHECKOK` | S | `/check`: the settings file is good (maybe with warnings); the numbers of the serial ports and listeners are shown |
 | `RESTARTING` | I | The gateway starts itself again with the same command line; the usual start lines follow |
 | `EXECERR` | F | The restart has failed; the gateway stops. systemd and procd start it again; by hand --- start it again |
 | `CTLNOGW` | E | `mbus-ctl` cannot reach the gateway. errno 2: the gateway is not running or the socket file is another (`/socket=`); 13: no rights --- use `sudo`; 111: the gateway is not running, its old file is left |
@@ -533,9 +559,9 @@ dislikes.**
 
 ### 7.2. The CFG messages (the check of the settings file)
 
-The settings file is read and checked by the library yaLIBCFG; its messages start with `%CFG-E-`
-and end with the file, the line and the column of the problem. After all of them the gateway prints
-`%T2R-E-CFGREJECT`. The ones you will meet:
+The settings file is read and checked by the library yaLIBCFG; its messages start with `%CFG-E-` (an error)
+or `%CFG-W-` (a warning) and end with the file, the line and the column of the problem. After the errors
+the gateway prints `%T2R-E-CFGREJECT`, after the warnings `%T2R-W-CFGDEFAULTS`. The ones you will meet:
 
 | Code | What it says | What to do |
 |------|--------------|------------|
@@ -551,6 +577,8 @@ and end with the file, the line and the column of the problem. After all of them
 | `DUPKEY` | Two records have the same key (for example the same `device` twice); the line of the first one is shown | remove one of them |
 | `DUPNAME` | A setting is written twice in one group (capital and small letters are not told apart), or a section twice | remove one of them |
 | `CHECK` | A rule of the gateway is broken; the message says which (the form of `chars` or `bind`, UDP, a `target` which is not in `serials`, a serial port of a RAW listener used by another listener, `XON/XOFF` under `MODBUS`, `RTS/CTS` with `rs485 = 1`, ...) | read the text of the message and fix the setting it names |
+
+`RANGE`, `BADKWD`, `VTYPE` and `CHECK` are printed as `%CFG-W-...` with `- the default is taken` at the end, when the setting has a default: the meaning is the same, but it is only a warning (see *Bad values and defaults* in 3.1).
 
 The full list of the `CFG` messages is in the yaLIBCFG manual (Appendix A).
 

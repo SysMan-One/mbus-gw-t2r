@@ -1,6 +1,6 @@
 #define	__MODULE__	"MBUS-CTL"
-#define	__IDENT__	"V.01-03"
-#define	__REV__		"01.03.00"
+#define	__IDENT__	"V.01-04"
+#define	__REV__		"01.04.00"
 
 /*
 **++
@@ -49,6 +49,9 @@
 **				change in this module.
 **
 **	22-NOV-2026	CLD	V.01-03 / REV: 01.03.00 - RRL: the product version V.01-03 (package 1.3.0), no code
+**				change in this module.
+**
+**	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - RRL: the product version V.01-04 (package 1.4.0), no code
 **				change in this module.
 **--
 */

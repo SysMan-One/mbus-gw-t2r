@@ -86,6 +86,10 @@
 **
 **	22-NOV-2026	CLD	V.01-03ECO01 / REV: 01.03.01 - CFGREJECT tells the number of the problems again (yaLIBCFG
 **				X.01-02 and newer, cfg$errcount()).
+**
+**	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - CHARSDEF, CFGDEFAULTS are appended: a bad value of a setting that
+**				has a default is a warning (yaLIBCFG X.01-04, CFG$M_FALLBACK), the gateway runs with the
+**				default; CFGREJECT counts the errors only (cfg$diagcount()).
 **--
 */
 
@@ -230,6 +234,8 @@ $DEF_MSG(T2R, WARN,	RAWSTALL,		"[#!SL] <!AC> has sent nothing of the last data f
 $DEF_MSG(T2R, WARN,	FLOWNOTSET,		"<!AC> the driver has not taken <flow> !AZ --- the line works without this flow control") \
 $DEF_MSG(T2R, WARN,	LATEPRETX,		"[#!SL:<!AC>] !UL octets have arrived just before the request has been sent (a late answer to an earlier request) --- dropped") \
 $DEF_MSG(T2R, ERROR,	CFGREJECT,		"Settings <!AZ> are refused: !UL problem(s), see the CFG messages above --- nothing is applied") \
+$DEF_MSG(T2R, WARN,	CHARSDEF,		"[serial #!2ZL:<!AC>] <chars> \"!AZ\" is not usable: !AZ --- taken: !UL, !UL, !AD, !UL") \
+$DEF_MSG(T2R, WARN,	CFGDEFAULTS,		"Settings <!AZ>: !UL value(s) not usable, see the CFG-W messages above --- the defaults are taken") \
 
 
 

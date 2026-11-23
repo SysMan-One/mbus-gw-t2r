@@ -112,6 +112,9 @@
 #
 #	22-NOV-2026	CLD	V.01-03ECO01: yaLIBCFG 1.3 (X.01-03) at least - a number with a leading zero is octal;
 #				the builds take X.01-03ECO01.
+#
+#	23-NOV-2026	CLD	V.01-04: yaLIBCFG 1.4 (X.01-04) at least - CFG$M_FALLBACK, cfg$diagcount(); the builds
+#				take X.01-04.
 #--
 
 cmake_minimum_required (VERSION 3.10)
@@ -158,7 +161,7 @@ set ( CMAKE_COLOR_MAKEFILE   ON )
 #   yaLIBCFG - the settings file (the libconfig syntax, a schema, the positional diagnostics): a
 #   static library of the StarLet family, found as StarLet is (CMAKE_PREFIX_PATH); see README.md.
 #
-find_package(yaLIBCFG 1.3 REQUIRED CONFIG)				# X.01-03: octal numbers as libconfig (cfg$errcount() since X.01-02)
+find_package(yaLIBCFG 1.4 REQUIRED CONFIG)				# X.01-04: CFG$M_FALLBACK, cfg$diagcount(); octal numbers since X.01-03
 message (STATUS "yaLIBCFG: ${yaLIBCFG_VERSION} from ${yaLIBCFG_DIR}")
 
 find_package(StarLet REQUIRED)						# The installed UTILITY$ROUTINES package,
