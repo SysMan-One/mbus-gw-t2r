@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-04"
-#define	__REV__		"01.04.00"
+#define	__IDENT__	"V.01-04ECO05"
+#define	__REV__		"01.04.05"
 
 /*
 **++
@@ -165,6 +165,14 @@
 **	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - t2r$tty_speed_ok(): is a speed one of the line rates of this
 **				build (T2R-MAIN checks <chars> by it - a speed the tty cannot take is not usable, the
 **				default is taken, and BADSPEED with its 9600 is not met at the open).
+**
+**	25-NOV-2026	CLD	V.01-04ECO05 / REV: 01.04.05 - s_tty_tx_purge(): the unsent output is really discarded. usb-serial
+**				has no .flush_buffer, tcflush(TCOFLUSH) of an USB port is a successful no-op: a request which got
+**				exception 4 (TXDRAINTMO, XMITERR, XMITSHORT; any other failure with CTS off), the data of RAWSTALL went to the
+**				line once CTS came back (seen on an FTDI FT232R, kernel 6.18). A usb-serial port with a flow control is
+**				closed without the closing_wait and opened again (FTDI tried only), TXNOPURGE tells that it could not be done.
+**				s_tty_rtu_tx(): with RTS/CTS nothing is written while CTS is off; it is waited for <iotmo> at most
+**				(CTSOFF, exception 4). s_tty_open(): a CRTSCTS the driver has not taken is cleared in .tios.
 **--
 */
 #ifndef	_GNU_SOURCE								/* POLLRDHUP; the musl build gives -D_GNU_SOURCE */
@@ -181,6 +189,8 @@
 #include	<fcntl.h>
 #include	<termios.h>
 #include	<sys/uio.h>
+#include	<sys/stat.h>
+#include	<sys/sysmacros.h>
 #include	<linux/serial.h>
 #include	<sys/ioctl.h>
 #include	<sys/socket.h>
@@ -429,7 +439,8 @@ struct timespec l_now_ts;
  *	   after the writev().
  *	The step 1 is limited by the air time plus the answer timeout; on the timeout the output
  *	queue is discarded (tcflush(TCOFLUSH)) and TXDRAINTMO is signalled. A failed TIOCOUTQ is
- *	signalled by TTYSYSWRN, then the air time only is waited out.
+ *	signalled by TTYSYSWRN, then the air time only is waited out. On usb-serial the tcflush()
+ *	discards nothing: t2r$tty_exec_req() calls s_tty_tx_purge() after TXDRAINTMO.
  *
  *   INPUTS:
  *	a_serial:	A context of the serial line: .fd, .baud, .databits, .parity, .stopbits, .anstmo_msec
@@ -493,9 +504,126 @@ struct timespec	l_now_ts, l_end_ts, l_deadline_ts, l_tmo_ts, l_step_ts = {.tv_ns
 
 
 /*
+ *   DESCRIPTION: Is the tty a port of an USB serial adapter (the usb-serial core of the kernel)?
+ *
+ *   INPUTS:
+ *	a_fd:		A descriptor of the tty
+ *
+ *   OUTPUTS:
+ *	NONE
+ *
+ *   RETURNS:
+ *	1 - yes; 0 - no, or not known (no sysfs)
+ */
+static int	s_tty_is_usbserial (
+		int	a_fd
+		)
+{
+ssize_t	l_len;
+struct stat l_st;
+char	l_path[64], l_link[256], *l_name;
+
+	if ( fstat(a_fd, &l_st) )
+		return	0;
+
+	snprintf(l_path, sizeof(l_path), "/sys/dev/char/%u:%u/device/subsystem", major(l_st.st_rdev), minor(l_st.st_rdev));
+
+	if ( 0 >= (l_len = readlink(l_path, l_link, sizeof(l_link) - 1)) )
+		return	0;
+
+	l_link[l_len] = '\0';
+
+	return	(l_name = strrchr(l_link, '/')) && !strcmp(l_name + 1, "usb-serial");
+}
+
+
+/*
+ *   DESCRIPTION: Is the CTS of a line with the RTS/CTS flow control off?
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line: .fd, .tios (CRTSCTS - the handshake the driver has taken), .usbser, .cts_seen
+ *
+ *   OUTPUTS:
+ *	a_serial:	.cts_seen = 1 - CTS is on
+ *
+ *   RETURNS:
+ *	1 - CTS is off; 0 - it is on, the line has no RTS/CTS, or the state is not known: no TIOCMGET, or not an
+ *	    usb-serial port and CTS has never been on (an UART with the handshake in its chip may not report the pin)
+ */
+static inline int s_tty_cts_off (
+		T2R$_SERIAL	*a_serial
+		)
+{
+int	l_modem = 0;
+
+	if ( !(a_serial->tios.c_cflag & CRTSCTS) || ioctl(a_serial->fd, TIOCMGET, &l_modem) )
+		return	0;
+
+	if ( l_modem & TIOCM_CTS )
+		return	a_serial->cts_seen = 1, 0;
+
+	return	a_serial->usbser || a_serial->cts_seen;
+}
+
+
+/*
+ *   DESCRIPTION: Wait until the device lets us send: CTS of a line with RTS/CTS. What has been written
+ *	while CTS is off sits in the adapter, TIOCOUTQ does not show it there. A device may drop CTS
+ *	for a moment, so it is waited for about the answer timeout at most.
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line: .fd, .tios, .usbser, .cts_seen, .anstmo_msec
+ *
+ *   IMPLICIT INPUTS:
+ *	g_exit_flag
+ *
+ *   OUTPUTS:
+ *	a_serial:	.cts_seen, see s_tty_cts_off()
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS
+ *	T2R$__CTSOFF	- CTS is still off (signalled), or the gateway is stopping (not signalled)
+ */
+static int	s_tty_wait_cts (
+		T2R$_SERIAL	*a_serial
+		)
+{
+struct timespec	l_now_ts, l_end_ts, l_tmo_ts, l_step_ts = {.tv_nsec = T2R$K_CTS_STEP_MSEC * 1000000L};
+
+	if ( !s_tty_cts_off (a_serial) )
+		return	STS$K_SUCCESS;
+
+	l_tmo_ts.tv_sec = a_serial->anstmo_msec / 1000;
+	l_tmo_ts.tv_nsec = (a_serial->anstmo_msec % 1000) * 1000000L;
+
+	clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+	__util$add_time (&l_now_ts, &l_tmo_ts, &l_end_ts);
+
+	while ( !g_exit_flag )
+		{
+		nanosleep(&l_step_ts, NULL);
+
+		if ( !s_tty_cts_off (a_serial) )
+			return	STS$K_SUCCESS;
+
+		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
+
+		if ( 0 < __util$cmp_time (&l_now_ts, &l_end_ts) )
+			break;
+		}
+
+	if ( g_exit_flag )
+		return	T2R$__CTSOFF;
+
+	return	$PUTMSG_FAO(T2R$__CTSOFF, a_serial->fd, &a_serial->devname, a_serial->anstmo_msec);
+}
+
+
+/*
  *   DESCRIPTION: Send a request PDU over the serial line:
  *	- an empty PDU is skipped (TXNODATA is signalled, success is returned)
  *	- compute CRC16 (the low octet goes first on the wire)
+ *	- with RTS/CTS: wait for CTS (s_tty_wait_cts()), nothing is written while it is off
  *	- flush a stale input (tcflush(TCIFLUSH))
  *	- wait the inter-PDU interval (t3.5), drop an input which has come meanwhile (LATEPRETX)
  *	- writev() PDU + CRC16, s_tty_tx_drain()
@@ -509,7 +637,7 @@ struct timespec	l_now_ts, l_end_ts, l_deadline_ts, l_tmo_ts, l_step_ts = {.tv_ns
  *	NONE
  *
  *   RETURNS:
- *	STS$K_SUCCESS, T2R$__XMITERR, T2R$__XMITSHORT, T2R$__TXDRAINTMO,
+ *	STS$K_SUCCESS, T2R$__XMITERR, T2R$__XMITSHORT, T2R$__TXDRAINTMO, T2R$__CTSOFF,
  *	T2R$__DEVLOST	- the device has gone (EIO/ENODEV/ENXIO), it is closed - see s_tty_lost()
  */
 static int	s_tty_rtu_tx (
@@ -541,6 +669,13 @@ struct timespec l_inter_pdu_ts, l_start_ts;
 
 	l_iov[IOV$K_CRC].iov_base = l_crcbuf;
 	l_len += l_iov[IOV$K_CRC].iov_len = sizeof(l_crcbuf);
+
+	/*
+	 * CTS first: a late answer to an earlier request may come while it is waited for, the flush and the
+	 * LATEPRETX check below must be after the wait.
+	 */
+	if ( !(1 & (l_rc = s_tty_wait_cts (a_serial))) )
+		return	l_rc;
 
 	/*
 	 * Drop a garbage which could be left in the input FIFO by a previous timed out exchange:
@@ -1178,6 +1313,7 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 	if ( 0 > (a_serial->fd = open($ASCPTR(&a_serial->devname), l_flags)) )	/* sts is NUL-terminated */
 		return	$SIGQ(a_quiet, T2R$__DEVOPNERR, &a_serial->devname, errno);
 
+	a_serial->usbser = s_tty_is_usbserial (a_serial->fd);
 	memset(&a_serial->savedtios, 0, sizeof(struct termios));
 
 	if ( (l_rc = tcgetattr(a_serial->fd , &a_serial->savedtios)) )
@@ -1293,7 +1429,10 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 	 * fatal, the line works without the flow control.
 	 */
 	if ( (a_serial->flow == T2R$K_FLOW_RTSCTS) && !tcgetattr(a_serial->fd, &l_tios) && !(l_tios.c_cflag & CRTSCTS) )
+		{
+		a_serial->tios.c_cflag &= ~CRTSCTS;						/* CTS does not count, see s_tty_cts_off() */
 		$PUTMSG_FAO(T2R$__FLOWNOTSET, &a_serial->devname, "RTS/CTS");
+		}
 
 
 #ifdef HAVE_TIOCRS485
@@ -1337,6 +1476,114 @@ struct timespec l_settle_ts = {.tv_nsec = T2R$K_SETTLE_MSEC * 1000000L};
 
 
 
+
+
+/*
+ *   DESCRIPTION: Discard the output which has not left the port. A driver with a .flush_buffer (an UART)
+ *	drops its queue by tcflush(TCOFLUSH); a FIFO of the chip may keep its octets, that is not looked at.
+ *	usb-serial has none - the call succeeds and discards nothing; the data sits in the queue of the kernel, in the USB transfers on the way and in the adapter itself (not
+ *	shown by TIOCOUTQ). Only the last close of the port kills the transfers and empties the queue, and
+ *	the open of an FTDI resets the adapter (other chips: not tried, theirs may keep what they have). A
+ *	usb-serial port with a flow control is closed with closing_wait = NONE (else
+ *	the close waits up to 30 sec; CAP_SYS_ADMIN is needed) and opened again. HUPCL is off meanwhile: the
+ *	close does not drop DTR/RTS of an FTDI, the saved attributes and the closing_wait are put back (not if the
+ *	port has not opened again). Must be called
+ *	under the device lock.
+ *
+ *   INPUTS:
+ *	a_serial:	A context of the serial line
+ *
+ *   OUTPUTS:
+ *	a_serial:	.fd, .tios - of the reopened port; see s_tty_lost() if it cannot be opened
+ *
+ *   RETURNS:
+ *	STS$K_SUCCESS	- discarded, as far as the driver does it
+ *	T2R$__TXNOPURGE	- cannot be discarded (signalled), the port is as it was, or reopened; TIOCEXCL tells that: it
+ *			  lives as long as the tty, and is gone after the last close only
+ *	T2R$__DEVLOST	- the port has not opened again
+ */
+static int	s_tty_tx_purge (
+		T2R$_SERIAL	*a_serial
+		)
+{
+int	l_rc, l_excl = 0;
+unsigned short l_closing_wait;
+struct serial_struct l_ser = {0};
+struct termios	l_saved = a_serial->savedtios, l_tios = a_serial->tios;
+
+	if ( 0 > (l_rc = tcflush(a_serial->fd, TCOFLUSH)) )
+		return	s_tty_gone_errno (l_rc = errno) ? s_tty_lost (a_serial, "tcflush()", l_rc)
+			: (int) $PUTMSG_FAO(T2R$__TXNOPURGE, a_serial->fd, &a_serial->devname, "tcflush()", l_rc);
+
+	if ( !a_serial->usbser )
+		return	STS$K_SUCCESS;
+
+	/* No flow control: nothing but a hung adapter holds the output, and reopening a hung one takes long */
+	if ( !(a_serial->tios.c_cflag & CRTSCTS) && !(a_serial->tios.c_iflag & IXON) )
+		return	$PUTMSG_FAO(T2R$__TXNOPURGE, a_serial->fd, &a_serial->devname, "no flow control, the port is not reopened", 0);
+
+	if ( 0 > ioctl(a_serial->fd, TIOCGSERIAL, &l_ser) )
+		return	s_tty_gone_errno (l_rc = errno) ? s_tty_lost (a_serial, "ioctl(TIOCGSERIAL)", l_rc)
+			: (int) $PUTMSG_FAO(T2R$__TXNOPURGE, a_serial->fd, &a_serial->devname, "ioctl(TIOCGSERIAL)", l_rc);
+
+	l_closing_wait = l_ser.closing_wait;
+	l_ser.closing_wait = ASYNC_CLOSING_WAIT_NONE;
+
+	if ( 0 > ioctl(a_serial->fd, TIOCSSERIAL, &l_ser) )
+		return	s_tty_gone_errno (l_rc = errno) ? s_tty_lost (a_serial, "ioctl(TIOCSSERIAL)", l_rc)
+			: (int) $PUTMSG_FAO(T2R$__TXNOPURGE, a_serial->fd, &a_serial->devname, "ioctl(TIOCSSERIAL)", l_rc);
+
+	/* A driver may take the call and ignore .closing_wait: close() would hold the line up to 30 sec */
+	if ( ioctl(a_serial->fd, TIOCGSERIAL, &l_ser) || (l_ser.closing_wait != ASYNC_CLOSING_WAIT_NONE) )
+		return	$PUTMSG_FAO(T2R$__TXNOPURGE, a_serial->fd, &a_serial->devname, "the driver does not take closing_wait", 0);
+
+	if ( 0 > (l_rc = ioctl(a_serial->fd, TIOCEXCL)) )				/* A mark of this tty, see the check after the open */
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "ioctl(TIOCEXCL)", l_rc, errno);
+
+	l_tios.c_cflag &= ~HUPCL;
+
+	if ( 0 > tcsetattr(a_serial->fd, TCSANOW, &l_tios) )				/* Not fatal: DTR/RTS blink */
+		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcsetattr()", -1, errno);
+
+	close(a_serial->fd);
+	a_serial->fd = -1;
+
+	if ( !(1 & s_tty_open (a_serial, OPEN$K_QUIET)) )
+		return	s_tty_lost (a_serial, "open() after the purge", errno);
+
+	/* s_tty_open() has saved our own attributes: those of before the gateway are put back */
+	a_serial->savedtios = l_saved;
+
+	if ( l_saved.c_cflag & HUPCL )
+		{
+		a_serial->tios.c_cflag |= HUPCL;
+
+		if ( 0 > tcsetattr(a_serial->fd, TCSANOW, &a_serial->tios) )
+			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcsetattr()", -1, errno);
+		}
+
+	/* The serial_struct is read again: the open could change the other fields */
+	if ( !ioctl(a_serial->fd, TIOCGSERIAL, &l_ser) )
+		{
+		l_ser.closing_wait = l_closing_wait;
+
+		if ( 0 > (l_rc = ioctl(a_serial->fd, TIOCSSERIAL, &l_ser)) )
+			$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "ioctl(TIOCSSERIAL)", l_rc, errno);
+		}
+
+	/*
+	 * The mark is still there: it was not the last close, another process has the port open, nothing is
+	 * discarded (TIOCOUTQ does not tell: it does not count what the adapter has taken).
+	 */
+	if ( !ioctl(a_serial->fd, TIOCGEXCL, &l_excl) && l_excl )
+		{
+		ioctl(a_serial->fd, TIOCNXCL);
+
+		return	$PUTMSG_FAO(T2R$__TXNOPURGE, a_serial->fd, &a_serial->devname, "the port is open by another process", 0);
+		}
+
+	return	STS$K_SUCCESS;
+}
 
 
 /*
@@ -1789,7 +2036,8 @@ struct pollfd	l_pfd = {.fd = a_serial->fd, .events = POLLIN};
  *	configured Time Stamp pseudo device (T2R$M_SERIAL_ADDTS is set and the unit, the function
  *	and the start register match) is answered locally, without the lock and without touching
  *	the line; a bad quantity is answered by the ILLEGAL_DATA_ADDRESS exception. On an RTU I/O
- *	error the line is flushed and a SERVER_DEVICE_FAILURE exception PDU is formed. An absent or
+ *	error the line is flushed - the unsent output too, see s_tty_tx_purge() - and a
+ *	SERVER_DEVICE_FAILURE exception PDU is formed. An absent or
  *	lost device (see s_tty_reopen(), s_tty_lost()) gets the GW_NO_PATH (10) exception, without
  *	EXCRPT: DEVLOST/DEVABSENT has told it once. A request of a client which has gone (a_sd, see
  *	s_tty_peer_gone()) - an RST before the lock; an RST or a FIN while waiting for it or with the
@@ -1871,6 +2119,16 @@ MODBUS_REQ_T	*l_req_pdu;
 		l_rc = s_tty_rtu_rx (a_serial, l_req_dsc, l_resp_dsc);
 
 
+	/*
+	 * The requester gets an exception: the request must not go out later. A short one goes at once into the
+	 * adapter, TIOCOUTQ is 0 - the failure is of the receive then (NOANSWER, or RESPMISM, CRC16ERR ... of foreign
+	 * octets), not TXDRAINTMO: CTS tells that it still may be there. CTSOFF - nothing has been written.
+	 */
+	if ( !(1 & l_rc) && !a_serial->nodev && (l_rc != (int) T2R$__CTSOFF)
+		&& ((l_rc == (int) T2R$__TXDRAINTMO) || (l_rc == (int) T2R$__XMITERR) || (l_rc == (int) T2R$__XMITSHORT)
+		|| s_tty_cts_off (a_serial)) )
+		s_tty_tx_purge (a_serial);						/* A failure is signalled inside */
+
 	if ( !(1 & l_rc) && !a_serial->nodev )
 		{
 		s_tty_flush (a_serial);
@@ -1911,7 +2169,7 @@ MODBUS_REQ_T	*l_req_pdu;
  *	the takeover), an error of the socket or of the line, <a_idletmo> seconds of the silence in
  *	both directions, a line which does not move (TIOCOUTQ) the last portion of a gone client for
  *	<iotmo> + T2R$K_RAW_STALL_SEC + the air time of T2R$K_RAW_STALL_STEP octets (RAWSTALL, the output
- *	is flushed), <g_exit_flag> (checked every
+ *	is discarded, s_tty_tx_purge()), <g_exit_flag> (checked every
  *	T2R$K_RAW_POLL_MSEC). An absent or lost device
  *	is reopened at the start (s_tty_reopen()); if it is still not there the session ends at once.
  *	A hangup or EIO/ENODEV/ENXIO of the line closes the device (s_tty_lost()) and ends the session.
@@ -2069,9 +2327,9 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 				if ( (l_lastio.tv_sec + l_stall_sec) < l_now.tv_sec )
 					{
-					tcflush(a_serial->fd, TCOFLUSH);
 					l_sts = $PUTMSG_FAO(T2R$__RAWSTALL, a_sd, &a_serial->devname, l_stall_sec,
 						l_n2t_len - l_n2t_off + ((0 < l_outq_last) ? l_outq_last : 0));
+					s_tty_tx_purge (a_serial);			/* A failure is signalled inside */
 					break;
 					}
 

@@ -300,8 +300,8 @@ architecture is the `DISTRIB_ARCH` line of `/etc/openwrt_release`): `.ipk` for O
 `.apk` for OpenWrt 25.12. The package needs nothing else, the router needs no network:
 
 ```
-# opkg install ./mbusgw-t2r_1.4.4-*_mipsel_24kc.ipk
-# apk add --allow-untrusted ./mbusgw-t2r_1.4.4-*_mipsel_24kc.apk
+# opkg install ./mbusgw-t2r_1.4.5-*_mipsel_24kc.ipk
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.5-*_mipsel_24kc.apk
 ```
 
 The files are at other places than on Debian: the program is `/usr/sbin/mbusgw-t2r`, the
@@ -446,7 +446,7 @@ dislikes.**
 | `%T2R-W-IDLETMO, [...] No activity for the past N seconds (idletmo) --- close the connection` | A client has sent nothing for `idletmo` seconds | normal for a client which polls rarely --- it reconnects; to keep the connection, raise `idletmo` of this listener |
 | `%T2R-W-RAWBUSY, [...] --- the raw listener is busy and <takeover> is off --- the connection is rejected` | A client is already connected to the RAW port and `takeover = 0` | normal. Disconnect the first client, or set `takeover = 1` |
 | `%T2R-E-TXDRAINTMO, [...] --- the request has not been transmitted in N msec` | The USB adapter took the request but did not send it out; the request gets exception 4 | the adapter or its USB link hangs: `dmesg \| tail`; replug the adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it: the next request tries again |
-| `TXDRAINTMO` on a port with `flow = "RTS/CTS"` | The device (or the cable) holds CTS off, so the gateway may not send | check that the cable has the RTS and CTS wires and that the device uses the RTS/CTS handshake; if it does not, set `flow = "NONE"`. On a RAW listener the data from the client just does not go out; if the client goes, its last data may be dropped by `RAWSTALL`. With a USB adapter a short MODBUS request goes into the buffer of the adapter, so you see `NOANSWER`, not `TXDRAINTMO` |
+| `TXDRAINTMO` on a port with `flow = "RTS/CTS"` | The device (or the cable) holds CTS off, so the gateway may not send | check that the cable has the RTS and CTS wires and that the device uses the RTS/CTS handshake; if it does not, set `flow = "NONE"`. On a RAW listener the data from the client just does not go out; if the client goes, its last data may be dropped by `RAWSTALL`. While CTS is off a MODBUS request waits for it up to `iotmo`, then it is not sent at all (`CTSOFF`, exception 4). If CTS goes off in the middle, the rest of the request is discarded; a USB adapter of the usb-serial kind is closed and opened again for that (tried on FTDI) |
 | `%T2R-E-DEVLOCKERR` / `DEVBUSY` on every request of one port, the other ports are fine | Another request holds the line and does not end | update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial driver). Before the restart, save what the stuck thread does: `for t in /proc/$(pidof mbusgw-t2r)/task/*; do echo $t $(cat $t/wchan); done` |
 | `%T2R-E-SESSFAIL, [...] --- cannot start a session thread, pthread_create()->11` | Too many TCP clients at once: every client takes a thread, and systemd limits the service (`TasksMax`, 578 on a small board) | find who keeps so many connections open (`ss -tn`); if they are all real, raise the limit: `TasksMax=2048` in the `[Service]` section of the unit, then `systemctl daemon-reload` |
 | `%T2R-E-LSNRERR, Listener 0.0.0.0:502 --- bind() error, errno: 98` | errno 98 = the TCP port is already taken | another gateway instance is running, or another program owns the port: `sudo ss -tlnp \| grep 502` |
@@ -525,6 +525,8 @@ dislikes.**
 | `DEVBUSY` | E | The serial line cannot be taken for a request; the request gets exception 4 |
 | `CONNLIMIT` | W | A new TCP client is disconnected at once: the port already has `connlm` clients |
 | `TXDRAINTMO` | E | The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4 |
+| `CTSOFF` | E | The port has `flow = "RTS/CTS"` and the device has held CTS off for `iotmo`: the request is not sent, it gets exception 4 |
+| `TXNOPURGE` | W | The data which was not sent cannot be discarded (no flow control, the gateway does not run as root, another program has the port open, or the driver cannot do it: the message tells which): it may still go to the line when the device is ready |
 | `ECHOMISM` | W | The answer to a write request is not its echo (another address or value); the request gets exception 4 |
 | `DEVLOST` | E | The serial port has gone (an USB adapter unplugged); it is closed and opened again every second, the requests get exception 10 meanwhile |
 | `DEVABSENT` | W | The serial port cannot be opened at the start; the TCP port works anyway, the serial port is opened every second |

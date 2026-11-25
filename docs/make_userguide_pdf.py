@@ -91,6 +91,8 @@
 #	23-NOV-2026	CLD	V.01-04ECO03: the version on the cover and the package names in the examples are 1.4.3.
 #
 #	25-NOV-2026	CLD	V.01-04ECO04: the version on the cover and the package names in the examples are 1.4.4.
+#
+#	25-NOV-2026	CLD	V.01-04ECO05: 1.4.5; the codes CTSOFF, TXNOPURGE, TXDRAINTMO/RAWSTALL on an USB port.
 #--
 import sys
 
@@ -121,7 +123,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'V.01-04ECO04'
+VERSION   = 'V.01-04ECO05'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -776,8 +778,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.4.4-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.4-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.4.5-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.5-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -914,8 +916,8 @@ def s_pack_en ():
 				'request gets exception 4. The adapter or its USB link hangs: dmesg | tail; replug the '
 				'adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it.'),
 			('TXDRAINTMO on a port with flow = "RTS/CTS"', 'The device (or the cable) holds CTS off, so the gateway '
-				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS; if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data. With a USB adapter a short MODBUS request goes into '
-				'the buffer of the adapter: NOANSWER, not TXDRAINTMO.'),
+				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS; if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data. While CTS is off a '
+				'MODBUS request waits for it up to iotmo, then it is not sent at all: CTSOFF, exception 4. If CTS goes off in the middle, the rest of it is discarded; the port of a USB adapter is closed and opened again for that (tried on FTDI).'),
 			('DEVLOCKERR / DEVBUSY on every request of one port', 'Another request holds the line and does '
 				'not end. Update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial '
 				'driver). Before the restart save what the threads do: for t in /proc/$(pidof mbusgw-t2r)/task/*; '
@@ -1014,6 +1016,8 @@ def s_pack_en ():
 			('RAWKICK', 'W', 'A new client took the RAW port over (takeover = 1): the old connection is shut down. If this happens again and again by itself, two programs fight for one port --- stop one of them or set takeover = 0.'),
 			('RAWBUSY', 'W', 'A new client is refused: the RAW port is busy and takeover = 0. Wait until the first client leaves, or set takeover = 1.'),
 			('TXDRAINTMO', 'E', 'The request was not sent out by the serial adapter in time; it is dropped, the request gets exception 4.'),
+			('CTSOFF', 'E', 'flow = "RTS/CTS" and the device has held CTS off for iotmo: the request is not sent, it gets exception 4.'),
+			('TXNOPURGE', 'W', 'The unsent data cannot be discarded (no flow control, the gateway is not root, another program has the port open, or the driver cannot do it): it may still go to the line.'),
 			('ECHOMISM', 'W', 'The answer to a write request is not its echo (another address or value); the request gets exception 4.'),
 			('LATEANS', 'W', 'After a failed request something came from the line within lategd --- a late answer; it is dropped.'),
 			('LATEPRETX', 'W', 'Something came from the line just before a request was sent --- a late answer to an earlier request; it is dropped.'),
@@ -1401,8 +1405,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.4.4-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.4-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.4.5-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.5-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),
@@ -1535,8 +1539,8 @@ def s_pack_ru ():
 				'исключение 4. Адаптер или его USB-связь зависли: dmesg | tail; переподключите адаптер или '
 				'перезагрузите плату. С X.00-13ECO01 линия из-за этого не блокируется.'),
 			('TXDRAINTMO на порту с flow = "RTS/CTS"', 'Устройство (или кабель) не даёт CTS, и шлюзу нельзя передавать. '
-				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS; если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные. С USB-адаптером короткий запрос MODBUS '
-				'уходит в буфер адаптера: NOANSWER, а не TXDRAINTMO.'),
+				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS; если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные. Пока CTS снят, запрос MODBUS '
+				'ждёт его до iotmo, потом не отправляется вовсе: CTSOFF, исключение 4. Если CTS снят посреди передачи, остаток выбрасывается; порт USB-адаптера для этого закрывается и открывается снова (проверено на FTDI).'),
 			('DEVLOCKERR / DEVBUSY на каждом запросе одного порта', 'Линию держит другой запрос, который не '
 				'заканчивается. Обновитесь до X.00-13ECO01 или новее (старый шлюз мог навсегда зависнуть в '
 				'драйвере порта). Перед перезапуском сохраните, что делают потоки: for t in /proc/$(pidof '
@@ -1630,6 +1634,8 @@ def s_pack_ru ():
 			('RAWKICK', 'W', 'Новый клиент занял RAW-порт (takeover = 1): старое соединение закрыто. Если это само повторяется снова и снова, две программы борются за один порт — остановите одну из них или поставьте takeover = 0.'),
 			('RAWBUSY', 'W', 'Новому клиенту отказано: RAW-порт занят, а takeover = 0. Подождите, пока первый клиент уйдёт, или поставьте takeover = 1.'),
 			('TXDRAINTMO', 'E', 'Адаптер не передал запрос в линию вовремя; запрос сброшен и получает исключение 4.'),
+			('CTSOFF', 'E', 'flow = "RTS/CTS", и устройство держало CTS снятым всё время iotmo: запрос не отправлен, он получает исключение 4.'),
+			('TXNOPURGE', 'W', 'Неотправленные данные нельзя выбросить (нет управления потоком, шлюз не root, порт открыт другой программой или драйвер этого не умеет): они могут уйти в линию.'),
 			('ECHOMISM', 'W', 'Ответ на запрос записи — не его эхо (другой адрес или значение); запрос получает исключение 4.'),
 			('LATEANS', 'W', 'После неудачного запроса за lategd из линии что-то пришло — опоздавший ответ; он выброшен.'),
 			('LATEPRETX', 'W', 'Перед отправкой запроса из линии что-то пришло — опоздавший ответ на прежний запрос; он выброшен.'),

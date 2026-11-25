@@ -1,3 +1,14 @@
+mbusgw-t2r (1.4.5-1) unstable; urgency=medium
+
+  * V.01-04ECO05: USB serial ports with <flow>: a MODBUS request which the line
+    has not taken (RTS/CTS), the data dropped by RAWSTALL (RTS/CTS, XON/XOFF)
+    are discarded by closing and opening the port; TXNOPURGE tells that it could
+    not be done. Tried on FTDI with RTS/CTS only: another chip may keep a part.
+  * With RTS/CTS a MODBUS request is not sent while CTS is off (CTSOFF,
+    exception 4 after iotmo). A port whose CTS is not wired needs flow = NONE.
+
+ -- StarLet Squad <zator@yandex.ru>  Wed, 25 Nov 2026 15:00:00 +0000
+
 mbusgw-t2r (1.4.4-1) unstable; urgency=medium
 
   * V.01-04ECO04: a Release build by GCC 14 (Debian 13) does not stop on

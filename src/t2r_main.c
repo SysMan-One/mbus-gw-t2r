@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04ECO04"
-#define	__REV__		"01.04.04"
+#define	__IDENT__	"V.01-04ECO05"
+#define	__REV__		"01.04.05"
 
 /*
 **++
@@ -294,6 +294,9 @@
 **	25-NOV-2026	CLD	V.01-04ECO04 / REV: 01.04.04 (package version 1.4.4) - s_settings_process_listeners():
 **				l_why[] is 256 octets (was 160): GCC 14 at -O3 (a Release build) stopped on format-truncation in
 **				s_bind_parse(); no change of behaviour. T2R-CTL carries the same ident.
+**
+**	25-NOV-2026	CLD	V.01-04ECO05 / REV: 01.04.05 (package version 1.4.5) - the unsent request on an usb-serial port
+**				with a flow control is discarded, CTS is checked before a request is sent: T2R-TTY, T2R-MSGS. No code change here.
 **--
 */
 

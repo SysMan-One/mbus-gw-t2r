@@ -74,6 +74,9 @@
 **				taken for a part of <chars> that is not usable (19200, 8, E, 1 - the default of the MODBUS
 **				over Serial Line specification); t2r$tty_speed_ok().
 **
+**	25-NOV-2026	CLD	V.01-04ECO05 / REV: 01.04.05 - T2R$K_CTS_STEP_MSEC (CTSOFF);
+**				.usbser, .cts_seen of T2R$_SERIAL.
+**
 **--
 */
 
@@ -170,6 +173,7 @@ enum	{
 #define		T2R$K_RAW_POLL_MSEC	1000				/* <g_exit_flag> and <idletmo> check interval	*/
 #define		T2R$K_RAW_STALL_SEC	10				/* A gone client's data: the line may not move this + <iotmo> */
 #define		T2R$K_RAW_STALL_STEP	2048				/* ... + the air time of this: TIOCOUTQ of an USB adapter falls by URBs */
+#define		T2R$K_CTS_STEP_MSEC	5				/* CTS is off: check it again after this	*/
 #define		T2R$K_RAW_KAIDLE	30				/* TCP keepalive: idle seconds before probing	*/
 #define		T2R$K_RAW_KAINTVL	10				/* TCP keepalive: seconds between probes	*/
 #define		T2R$K_RAW_KACNT		3				/* TCP keepalive: unanswered probes = dead peer	*/
@@ -239,6 +243,8 @@ typedef struct	t2r$_serial {
 			onebyte_time_usec,				/* Estimated time to send byte over serial line in nanoseconds */
 			lategd_msec;					/* A guard window after a failed exchange: <lategd> */
 
+		int	usbser,						/* A port of the usb-serial core, see s_tty_is_usbserial() */
+			cts_seen;					/* CTS has been seen on: an "off" of it can be trusted */
 		int	nodev;						/* The device is absent or lost: .fd = -1, reopen by .devname */
 	struct timespec	reopen_ts;					/* CLOCK_MONOTONIC of the next reopen attempt */
 

@@ -90,6 +90,9 @@
 **	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - CHARSDEF, CFGDEFAULTS are appended: a bad value of a setting that
 **				has a default is a warning (yaLIBCFG X.01-04, CFG$M_FALLBACK), the gateway runs with the
 **				default; CFGREJECT counts the errors only (cfg$diagcount()).
+**
+**	25-NOV-2026	CLD	V.01-04ECO05 / REV: 01.04.05 - CTSOFF, TXNOPURGE are appended (the unsent output of an usb-serial
+**				port with a flow control is discarded, a request is not sent while CTS is off).
 **--
 */
 
@@ -236,6 +239,8 @@ $DEF_MSG(T2R, WARN,	LATEPRETX,		"[#!SL:<!AC>] !UL octets have arrived just befor
 $DEF_MSG(T2R, ERROR,	CFGREJECT,		"Settings <!AZ> are refused: !UL problem(s), see the CFG messages above --- nothing is applied") \
 $DEF_MSG(T2R, WARN,	CHARSDEF,		"[serial #!2ZL:<!AC>] <chars> \"!AZ\" is not usable: !AZ --- taken: !UL, !UL, !AD, !UL") \
 $DEF_MSG(T2R, WARN,	CFGDEFAULTS,		"Settings <!AZ>: !UL value(s) not usable, see the CFG-W messages above --- the defaults are taken") \
+$DEF_MSG(T2R, ERROR,	CTSOFF,			"[#!SL:<!AC>] CTS has been off for !UL msec --- the request is not sent") \
+$DEF_MSG(T2R, WARN,	TXNOPURGE,		"[#!SL:<!AC>] !AZ, errno: !SL --- the unsent output cannot be discarded, it may still go to the line") \
 
 
 
