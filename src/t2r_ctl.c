@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-CTL"
-#define	__IDENT__	"V.01-04"
-#define	__REV__		"01.04.00"
+#define	__IDENT__	"V.01-04ECO04"
+#define	__REV__		"01.04.04"
 
 /*
 **++
@@ -62,6 +62,10 @@
 **
 **	23-NOV-2026	CLD	V.01-04 / REV: 01.04.00 - RRL: the product version V.01-04 (package 1.4.0), no code
 **				change in this module.
+**
+**	25-NOV-2026	CLD	V.01-04ECO04 / REV: 01.04.04 - t2r$ctl_start(): s_ctl_path is copied by the known
+**				length of the path: __util$str2asc() looks for the NUL in up to 254 octets, sun_path has 108
+**				(-Wstringop-overread of GCC 14); no change of behaviour.
 **--
 */
 
@@ -1075,7 +1079,8 @@ const  ASC l_none = {$ASCINI("NONE")};
 
 
 	s_ctl_sd = l_sd;
-	__util$str2asc(l_sun.sun_path, &s_ctl_path);					/* With its NUL, for unlink() at the stop */
+	s_ctl_path.len = $ASCLEN(a_path);
+	memcpy(s_ctl_path.sts, l_sun.sun_path, (size_t) s_ctl_path.len + 1);		/* With its NUL, for unlink() at the stop */
 
 
 	if ( (l_rc = pthread_create(&s_ctl_tid, NULL, s_ctl_thread, NULL)) )

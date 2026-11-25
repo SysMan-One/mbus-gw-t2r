@@ -1,3 +1,10 @@
+mbusgw-t2r (1.4.4-1) unstable; urgency=medium
+
+  * V.01-04ECO04: a Release build by GCC 14 (Debian 13) does not stop on
+    format-truncation any more; no change of behaviour.
+
+ -- StarLet Squad <zator@yandex.ru>  Wed, 25 Nov 2026 12:00:00 +0000
+
 mbusgw-t2r (1.4.3-1) unstable; urgency=medium
 
   * V.01-04ECO03: the copy of the command line for RESTART GATEWAY is

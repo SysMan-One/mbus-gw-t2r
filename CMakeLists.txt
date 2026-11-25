@@ -123,6 +123,8 @@
 #	23-NOV-2026	CLD	V.01-04ECO02: the .deb maintainer scripts as dh_installsystemd (cmake/deb/).
 #
 #	23-NOV-2026	CLD	V.01-04ECO03: the package version 1.4.3 (t2r_main.c, no change here).
+#
+#	25-NOV-2026	CLD	V.01-04ECO04: the package version 1.4.4 (t2r_main.c, no change here).
 #--
 
 cmake_minimum_required (VERSION 3.10)

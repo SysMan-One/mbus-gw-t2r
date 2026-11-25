@@ -249,7 +249,7 @@ glibc 2.34 или новее (проверены на Debian 12, Debian 13 и Ub
 `mbusgw-t2r.service` — она ставится **выключенной**: сначала настройте файл настроек:
 
 ```
-$ sudo apt install ./mbusgw-t2r_1.4.3-1_arm64.deb
+$ sudo apt install ./mbusgw-t2r_1.4.4-1_arm64.deb
 $ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -279,7 +279,7 @@ glibc 2.34 или новее. Перед релизом он лишь запус
 выключенной:
 
 ```
-$ sudo dnf install ./mbusgw-t2r-1.4.3-1.x86_64.rpm
+$ sudo dnf install ./mbusgw-t2r-1.4.4-1.x86_64.rpm
 $ sudo nano /etc/mbusgw-t2r/modbus-t2r_settings.conf
 $ sudo systemctl enable --now mbusgw-t2r
 ```
@@ -298,8 +298,8 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 сеть роутеру для установки не нужна:
 
 ```
-# opkg install ./mbusgw-t2r_1.4.3-*_mipsel_24kc.ipk			# OpenWrt 24.10
-# apk add --allow-untrusted ./mbusgw-t2r_1.4.3-*_mipsel_24kc.apk	# OpenWrt 25.12
+# opkg install ./mbusgw-t2r_1.4.4-*_mipsel_24kc.ipk			# OpenWrt 24.10
+# apk add --allow-untrusted ./mbusgw-t2r_1.4.4-*_mipsel_24kc.apk	# OpenWrt 25.12
 ```
 
 Пакет ставит шлюз в `/usr/sbin/mbusgw-t2r`, настройки — в `/etc/mbusgw-t2r/`, службу procd —
@@ -340,7 +340,7 @@ big-endian), `mipsel_24kc` (ramips: MT7621, MT7628/MT7688), `aarch64_cortex-a53`
 ####	Автоматические тесты (GitHub Actions)
 
 Workflow `.github/workflows/ci.yml` (значок в начале файла) при каждом push и pull request собирает
-StarLet, yaLIBCFG и шлюз на amd64 и arm64 и прогоняет тесты, которым не нужно железо:
+StarLet, yaLIBCFG и шлюз на amd64 и arm64 (Ubuntu 24.04) и на amd64 в контейнере Debian 13 и прогоняет тесты, которым не нужно железо:
 `tests/issues_test.py all` и `tests/ctl_test.py` (пара pty и имитатор ведомого RTU).
 
 ####	Автоматическая сборка (GitLab CI)

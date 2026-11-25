@@ -89,6 +89,8 @@
 #	23-NOV-2026	CLD	V.01-04ECO02: the version on the cover and the package names in the examples are 1.4.2.
 #
 #	23-NOV-2026	CLD	V.01-04ECO03: the version on the cover and the package names in the examples are 1.4.3.
+#
+#	25-NOV-2026	CLD	V.01-04ECO04: the version on the cover and the package names in the examples are 1.4.4.
 #--
 import sys
 
@@ -119,7 +121,7 @@ pdfmetrics.registerFont(TTFont('MonoB',   FDIR + 'DejaVuSansMono-Bold.ttf'))
 PAGE_W, PAGE_H = A4
 LM, RM, TM, BM = 25*mm, 22*mm, 22*mm, 22*mm
 
-VERSION   = 'V.01-04ECO03'
+VERSION   = 'V.01-04ECO04'
 PUBDATE_EN = 'November 2026'
 PUBDATE_RU = 'Ноябрь 2026'
 ORG       = 'NaPi World & StarLet Squad collaboration'
@@ -774,8 +776,8 @@ def s_pack_en ():
 		   '<font face="Mono">/etc/openwrt_release</font>): <font face="Mono">.ipk</font> for OpenWrt '
 		   '24.10, <font face="Mono">.apk</font> for OpenWrt 25.12. The package needs nothing else, the '
 		   'router needs no network:'),
-		 C('# opkg install ./mbusgw-t2r_1.4.3-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.3-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.4.4-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.4-*_mipsel_24kc.apk'),
 		 P('The files are at other places than on Debian: the program is '
 		   '<font face="Mono">/usr/sbin/mbusgw-t2r</font>, the settings file is '
 		   '<font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. The service is switched '
@@ -1399,8 +1401,8 @@ def s_pack_ru ():
 		   'строка <font face="Mono">DISTRIB_ARCH</font> в <font face="Mono">/etc/openwrt_release</font>): '
 		   '<font face="Mono">.ipk</font> для OpenWrt 24.10, <font face="Mono">.apk</font> для OpenWrt 25.12. '
 		   'Пакету больше ничего не нужно, сеть роутеру не нужна.'),
-		 C('# opkg install ./mbusgw-t2r_1.4.3-*_mipsel_24kc.ipk\n'
-		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.3-*_mipsel_24kc.apk'),
+		 C('# opkg install ./mbusgw-t2r_1.4.4-*_mipsel_24kc.ipk\n'
+		   '# apk add --allow-untrusted ./mbusgw-t2r_1.4.4-*_mipsel_24kc.apk'),
 		 P('Файлы лежат не там, где на Debian: программа — <font face="Mono">/usr/sbin/mbusgw-t2r</font>, '
 		   'файл настроек — <font face="Mono">/etc/mbusgw-t2r/modbus-t2r_settings.conf</font>. После '
 		   'установки служба выключена. Настройте файл настроек, затем включите службу и запустите её:'),

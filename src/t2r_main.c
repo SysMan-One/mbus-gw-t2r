@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04ECO03"
-#define	__REV__		"01.04.03"
+#define	__IDENT__	"V.01-04ECO04"
+#define	__REV__		"01.04.04"
 
 /*
 **++
@@ -290,6 +290,10 @@
 **				command line is one block (the pointers, then the strings) instead of a strdup() of each
 **				argument - nothing to unwind on a failure; gcc -fanalyzer (GCC 12) lost the strdup() copies
 **				stored by an index in the loop and told a false leak [CWE-401].
+**
+**	25-NOV-2026	CLD	V.01-04ECO04 / REV: 01.04.04 (package version 1.4.4) - s_settings_process_listeners():
+**				l_why[] is 256 octets (was 160): GCC 14 at -O3 (a Release build) stopped on format-truncation in
+**				s_bind_parse(); no change of behaviour. T2R-CTL carries the same ident.
 **--
 */
 
@@ -1223,7 +1227,7 @@ uint32_t l_len;
 int32_t	l_int;
 int	l_rc;
 unsigned l_sts;
-char	l_bind[128], l_why[160];
+char	l_bind[128], l_why[256];
 T2R$_LISTENER	*l_listener;
 
 	cfg$lookup(a_root, "listeners", &l_list);

@@ -19,6 +19,7 @@
 #       22-NOV-2026     CLD     V.01-03ECO01: yaLIBCFG X.01-03ECO01 (a number with a leading zero is octal).
 #       23-NOV-2026     CLD     V.01-04: yaLIBCFG X.01-04 (CFG$M_FALLBACK: a bad value of a setting with a default is a warning).
 #       23-NOV-2026     CLD     V.01-04ECO02: the .deb maintainer scripts are checked by tests/package_scripts_test.sh only.
+#       25-NOV-2026     CLD     V.01-04ECO04: one more build - Debian 13 (GCC 14) in a container, as root.
 #--
 
 name: ci
@@ -45,14 +46,17 @@ jobs:
         include:
           - { arch: amd64, runner: ubuntu-24.04 }
           - { arch: arm64, runner: ubuntu-24.04-arm }
+          - { arch: amd64-trixie, runner: ubuntu-24.04, container: 'debian:trixie' }
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }} # none for the Ubuntu builds
     timeout-minutes: 20
     steps:
       - name: Install prerequisites
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends build-essential cmake \
-            git ca-certificates python3
+          SUDO=; [ "$(id -u)" = 0 ] || SUDO=sudo # No sudo in the Debian image
+          $SUDO apt-get update
+          $SUDO apt-get install --yes --no-install-recommends build-essential cmake \
+            git ca-certificates python3 file
 
       - uses: actions/checkout@v5
 
@@ -92,6 +96,7 @@ jobs:
         run: python3 tests/ctl_test.py --gw build/mbusgw-t2r --ctl build/mbus-ctl
 
       - name: Test package service scripts (tests/package_scripts_test.sh)
+        if: ${{ !matrix.container }}                                  # No docker in a container
         run: |
           docker run --rm -v "$PWD:/src:ro" alpine:3.21 \
             sh -ec 'mkdir -p /run/systemd/system; sh /src/tests/package_scripts_test.sh /src'
