@@ -1,3 +1,15 @@
+mbusgw-t2r (1.4.6-1) unstable; urgency=medium
+
+  * V.01-04ECO06: RAW with RTS/CTS on a USB serial port: what the previous
+    client has left in the adapter is discarded at the start of the next
+    session if CTS is off (tried on FTDI only). A session which comes at once
+    waits for CTS first, up to iotmo (5 seconds at most) since the end of the
+    previous one; the port is opened again then, its input is dropped.
+  * A port which cannot be opened a second time (EBUSY, EMFILE) is not closed
+    to discard the output: TXNOPURGE instead of DEVLOST.
+
+ -- StarLet Squad <zator@yandex.ru>  Wed, 25 Nov 2026 18:00:00 +0000
+
 mbusgw-t2r (1.4.5-1) unstable; urgency=medium
 
   * V.01-04ECO05: USB serial ports with <flow>: a MODBUS request which the line

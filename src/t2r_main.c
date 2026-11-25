@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04ECO05"
-#define	__REV__		"01.04.05"
+#define	__IDENT__	"V.01-04ECO06"
+#define	__REV__		"01.04.06"
 
 /*
 **++
@@ -297,6 +297,9 @@
 **
 **	25-NOV-2026	CLD	V.01-04ECO05 / REV: 01.04.05 (package version 1.4.5) - the unsent request on an usb-serial port
 **				with a flow control is discarded, CTS is checked before a request is sent: T2R-TTY, T2R-MSGS. No code change here.
+**
+**	25-NOV-2026	CLD	V.01-04ECO06 / REV: 01.04.06 (package version 1.4.6) - what a RAW client has left behind a CTS
+**				which is off is discarded at the next session (T2R-TTY); no change in this module.
 **--
 */
 
