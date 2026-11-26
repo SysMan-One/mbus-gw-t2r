@@ -1,3 +1,12 @@
+mbusgw-t2r (1.4.7-1) unstable; urgency=medium
+
+  * V.01-04ECO07: RAW with RTS/CTS on a USB serial port: the waits for CTS at
+    the start of the sessions do not add up when a client reconnects often
+    (a session which has come before the end of such a wait does not wait or
+    discard anything itself; its data goes behind the data of the one before).
+
+ -- StarLet Squad <zator@yandex.ru>  Wed, 25 Nov 2026 21:00:00 +0000
+
 mbusgw-t2r (1.4.6-1) unstable; urgency=medium
 
   * V.01-04ECO06: RAW with RTS/CTS on a USB serial port: what the previous

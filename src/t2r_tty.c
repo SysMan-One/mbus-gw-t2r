@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-TTY"
-#define	__IDENT__	"V.01-04ECO06"
-#define	__REV__		"01.04.06"
+#define	__IDENT__	"V.01-04ECO07"
+#define	__REV__		"01.04.07"
 
 /*
 **++
@@ -179,6 +179,10 @@
 **				which comes at once waits for CTS before that (<iotmo> since the end of the previous one, 5 sec at most).
 **				s_tty_tx_purge(): the port is opened a second time before the close - if that is refused (EBUSY by
 **				our TIOCEXCL, EMFILE) the port stays open, TXNOPURGE (was DEVLOST).
+**
+**	25-NOV-2026	CLD	V.01-04ECO07 / REV: 01.04.07 - s_tty_raw_leftover(): a session which has come before the end of the
+**				wait for CTS of another one goes on behind it, with no wait and no purge of its own. A client reconnecting
+**				every second with CTS off piled up sessions, each waited up to 5 sec.
 **--
 */
 #ifndef	_GNU_SOURCE								/* POLLRDHUP; the musl build gives -D_GNU_SOURCE */
@@ -1617,32 +1621,39 @@ struct termios	l_saved = a_serial->savedtios, l_tios = a_serial->tios;
  *	tcflush() of such a port discards nothing, and they would go out before the data of the new client.
  *	While CTS is on nothing is done: they go out; .raw_left stays, CTS may go off before they are out.
  *	A device may drop CTS for a moment, so it has the answer timeout (T2R$K_RAW_LEFT_MSEC at most) since
- *	the end of that session to raise it; a later session does not wait. A new client which goes away or is
- *	taken over does not end the wait: the tail of the previous one would lose its time. The line is not
+ *	the end of that session to raise it; a later session does not wait. The sessions which have come before
+ *	the end of a wait go on behind it at once (.raw_wait), or the waits of frequent reconnects would add up:
+ *	what one of them leaves is not discarded, it goes out before the data of the next of them. A new
+ *	client which goes away or is taken over does not end the wait: the tail of the previous one would lose its time. The line is not
  *	read during the wait, its input is kept by the kernel (the purge drops it). An XON/XOFF stop is not
  *	seen here. Must be called under the device lock.
  *
  *   INPUTS:
- *	a_serial:	A context of the serial line: .usbser, .raw_left, .raw_end, .anstmo_msec
+ *	a_serial:	A context of the serial line: .usbser, .raw_left, .raw_end, .raw_wait, .anstmo_msec
+ *	a_start_ts:	CLOCK_MONOTONIC of the start of the new session, before it has got the line
  *
  *   IMPLICIT INPUTS:
  *	g_exit_flag
  *
  *   OUTPUTS:
- *	a_serial:	.raw_left = 0 after the purge; see s_tty_tx_purge()
+ *	a_serial:	.raw_left = 0 after the purge, .raw_wait; see s_tty_tx_purge()
  *
  *   RETURNS:
  *	STS$K_SUCCESS	- nothing is left, or it goes out, or the gateway is stopping
  *	otherwise	- the status of s_tty_tx_purge()
  */
 static int	s_tty_raw_leftover (
-		T2R$_SERIAL	*a_serial
+		T2R$_SERIAL	*a_serial,
+	const struct timespec	*a_start_ts
 		)
 {
-int	l_rc, l_msec;
+int	l_rc = STS$K_SUCCESS, l_msec, l_waited = 0;
 struct timespec	l_now_ts, l_end_ts, l_tmo_ts, l_step_ts = {.tv_nsec = T2R$K_CTS_STEP_MSEC * 1000000L};
 
 	if ( !a_serial->raw_left || !a_serial->usbser )
+		return	STS$K_SUCCESS;
+
+	if ( 0 >= __util$cmp_time (a_start_ts, &a_serial->raw_wait) )	/* Has come before its end */
 		return	STS$K_SUCCESS;
 
 	l_msec = $MIN(a_serial->anstmo_msec, T2R$K_RAW_LEFT_MSEC);
@@ -1651,11 +1662,8 @@ struct timespec	l_now_ts, l_end_ts, l_tmo_ts, l_step_ts = {.tv_nsec = T2R$K_CTS_
 
 	__util$add_time (&a_serial->raw_end, &l_tmo_ts, &l_end_ts);
 
-	while ( !g_exit_flag )
+	while ( !g_exit_flag && s_tty_cts_off (a_serial) )
 		{
-		if ( !s_tty_cts_off (a_serial) )
-			return	STS$K_SUCCESS;
-
 		clock_gettime(CLOCK_MONOTONIC, &l_now_ts);
 
 		if ( 0 < __util$cmp_time (&l_now_ts, &l_end_ts) )
@@ -1663,13 +1671,17 @@ struct timespec	l_now_ts, l_end_ts, l_tmo_ts, l_step_ts = {.tv_nsec = T2R$K_CTS_
 			if ( 1 & (l_rc = s_tty_tx_purge (a_serial)) )			/* A failure is signalled inside */
 				a_serial->raw_left = 0;
 
-			return	l_rc;
+			break;
 			}
 
 		nanosleep(&l_step_ts, NULL);
+		l_waited = 1;
 		}
 
-	return	STS$K_SUCCESS;
+	if ( l_waited )
+		clock_gettime(CLOCK_MONOTONIC, &a_serial->raw_wait);
+
+	return	l_rc;
 }
 
 
@@ -2297,11 +2309,13 @@ int	l_waited, l_rc, l_sts = STS$K_SUCCESS, l_n2t_len = 0, l_n2t_off = 0, l_t2n_l
 	l_stall_sec, l_outq = 0, l_outq_last = -1, l_purged = 0;
 ssize_t	l_cnt;
 struct pollfd	l_pfd[FD$K_MAX];
-struct timespec	l_now, l_lastio;
+struct timespec	l_now, l_lastio, l_start;
 uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 
 
 	*a_net2tty = *a_tty2net = 0;
+
+	clock_gettime(CLOCK_MONOTONIC, &l_start);
 
 	if ( !(1 & s_tty_lock (a_serial, -1, &l_waited)) )
 		return	$PUTMSG_FAO(T2R$__DEVBUSY, a_serial->fd, &a_serial->devname);
@@ -2336,7 +2350,7 @@ uint8_t	l_n2t[T2R$K_RAW_BUFSZ], l_t2n[T2R$K_RAW_BUFSZ];
 		$PUTMSG_FAO(T2R$__TTYSYSWRN, a_serial->fd, &a_serial->devname, "tcflush()", l_rc, l_errno);
 		}
 
-	s_tty_raw_leftover (a_serial);						/* A failure is signalled inside */
+	s_tty_raw_leftover (a_serial, &l_start);						/* A failure is signalled inside */
 
 	if ( a_serial->nodev )								/* Lost by the purge: a FIN, as above */
 		{

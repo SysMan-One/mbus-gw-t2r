@@ -1,6 +1,6 @@
 #define	__MODULE__	"T2R-MAIN"
-#define	__IDENT__	"V.01-04ECO06"
-#define	__REV__		"01.04.06"
+#define	__IDENT__	"V.01-04ECO07"
+#define	__REV__		"01.04.07"
 
 /*
 **++
@@ -300,6 +300,9 @@
 **
 **	25-NOV-2026	CLD	V.01-04ECO06 / REV: 01.04.06 (package version 1.4.6) - what a RAW client has left behind a CTS
 **				which is off is discarded at the next session (T2R-TTY); no change in this module.
+**
+**	25-NOV-2026	CLD	V.01-04ECO07 / REV: 01.04.07 (package version 1.4.7) - a RAW client which reconnects often with
+**				CTS off does not pile up sessions (T2R-TTY); no change in this module.
 **--
 */
 

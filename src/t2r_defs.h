@@ -79,6 +79,8 @@
 **
 **	25-NOV-2026	CLD	V.01-04ECO06 / REV: 01.04.06 - T2R$K_RAW_LEFT_MSEC, .raw_left, .raw_end of T2R$_SERIAL.
 **
+**	25-NOV-2026	CLD	V.01-04ECO07 / REV: 01.04.07 - .raw_wait of T2R$_SERIAL.
+**
 **--
 */
 
@@ -250,7 +252,8 @@ typedef struct	t2r$_serial {
 			cts_seen;					/* CTS has been seen on: an "off" of it can be trusted */
 		int	nodev;						/* The device is absent or lost: .fd = -1, reopen by .devname */
 		int	raw_left;					/* A RAW session may have left its output, see s_tty_raw_leftover() */
-	struct timespec	raw_end;					/* CLOCK_MONOTONIC of the end of that session */
+	struct timespec	raw_end,					/* CLOCK_MONOTONIC of the end of that session */
+			raw_wait;					/* - of the end of the last wait for CTS at a start */
 	struct timespec	reopen_ts;					/* CLOCK_MONOTONIC of the next reopen attempt */
 
 		uint8_t	ts_unit_nr,
