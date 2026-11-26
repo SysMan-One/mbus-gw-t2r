@@ -97,6 +97,9 @@
 #	25-NOV-2026	CLD	V.01-04ECO06: the version on the cover and the package names 1.4.6; a RAW client gone with CTS off.
 #
 #	25-NOV-2026	CLD	V.01-04ECO07: the version on the cover and the package names 1.4.7.
+#
+#	26-NOV-2026	CLD	V.01-04ECO07: 3.1 "A device with the DTR/DSR handshake" - the cable for flow = "RTS/CTS"
+#				(dia_dtrdsr()); the flow row and the TXDRAINTMO row point to it.
 #--
 import sys
 
@@ -226,6 +229,33 @@ def dia_architecture (a_L):
 		g.add(Line(l_x + 10, 86, l_x + 10, 64, strokeWidth=1))
 		s_box(g, l_x, 38, 22, 26, [str(i + 1)], 8)
 	g.add(String(405, 20, a_L['dia_slaves'], fontName='SerifI', fontSize=8, textAnchor='middle'))
+	return l_d
+
+def dia_dtrdsr (a_L):
+	"""The cable for a device with the DTR/DSR handshake under flow = "RTS/CTS" (DE-9 pins)."""
+	l_d = Drawing(460, 150)
+	g = Group(); l_d.add(g)
+	l_blue = colors.Color(0.1, 0.25, 0.7)
+	for (l_x, l_t) in ((8, a_L['dia_gwside']), (330, a_L['dia_devside'])):
+		g.add(Rect(l_x, 14, 122, 118, fillColor=colors.whitesmoke, strokeColor=colors.black, strokeWidth=1))
+		g.add(String(l_x + 61, 138, l_t, fontName='SerifI', fontSize=8, textAnchor='middle'))
+	for (l_y, l_gw, l_dev, l_dir, l_txt) in (
+			(116, 'TxD  3', '2  RxD', 1, ''),
+			(94,  'RxD  2', '3  TxD', -1, ''),
+			(72,  'RTS  7', '6  DSR', 1, a_L['dia_gwready']),
+			(50,  'CTS  8', '4  DTR', -1, a_L['dia_devready']),
+			(28,  'GND  5', '5  GND', 0, '')):
+		g.add(String(124, l_y - 3, l_gw, fontName='Mono', fontSize=8.5, textAnchor='end'))
+		g.add(String(336, l_y - 3, l_dev, fontName='Mono', fontSize=8.5, textAnchor='start'))
+		if l_dir > 0:
+			s_arrow(g, 130, l_y, 330, l_y)
+		elif l_dir < 0:
+			s_arrow(g, 330, l_y, 130, l_y)
+		else:
+			g.add(Line(130, l_y, 330, l_y, strokeWidth=1.2))
+		if l_txt:
+			g.add(String(230, l_y + 4, l_txt, fontName='Sans', fontSize=7.5, textAnchor='middle',
+				fillColor=l_blue))
 	return l_d
 
 def dia_lifecycle (a_L):
@@ -508,6 +538,8 @@ def s_pack_en ():
 	L.update({
 		'dia_client': 'TCP client', 'dia_tcpside': 'SCADA, mbpoll, scripts ...',
 		'dia_queue': '(the request queue)', 'dia_slaves': 'RTU devices (slaves)',
+		'dia_gwside': 'The gateway (USB adapter, DE-9)', 'dia_devside': 'The device (DE-9, like a PC)',
+		'dia_gwready': 'the gateway can take data', 'dia_devready': 'the device can take data',
 		'dia_recv': 'Receive and check', 'dia_tx': 'Transmit to the line',
 		'dia_rx': 'Receive the answer', 'dia_tmo': 'timeout', 'dia_check': 'Check the answer',
 		'dia_send': 'Answer the client', 'dia_exc': 'Form a MODBUS exception (EXCRPT is logged)',
@@ -594,7 +626,7 @@ def s_pack_en ():
 				'handshake: the gateway sends only while the device holds CTS on; needs the RTS and CTS wires; not '
 				'with rs485 = 1. XON/XOFF --- the device stops and starts the gateway by XOFF (0x13) and XON (0x11); '
 				'only for a RAW listener: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is an error. Not case-sensitive; '
-				'another value or a number (DSR/DTR too: Linux has no such flow control) is an error.'),
+				'another value or a number (DSR/DTR too: Linux has no such flow control; for a DTR/DSR device rewire the cable, see below) is an error.'),
 			('ts_enabled', 'no', '1 --- enable the Time Stamp pseudo device (Chapter 5). Default 0.'),
 			('ts_unit', 'no', 'The slave address the pseudo device answers on. Range 0..255. Default 135.'),
 			('ts_fncode', 'no', 'The function code it answers to. Range 1..127. Default 3.'),
@@ -675,6 +707,26 @@ def s_pack_en ():
 		   '(the ports of a 4-port FT4232H differ by the :1.0 ... :1.3 part), or your own name made by a udev rule:'),
 		 C('SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-xhci-hcd.0-usb-0:1.1:1.0", SYMLINK+="rs485-1"'),
 		 P('in /etc/udev/rules.d/99-rs485.rules gives /dev/rs485-1 (see udevadm info /dev/ttyUSB0 for the values).'),
+		 P('<b>A device with the DTR/DSR handshake.</b> Some devices do not use RTS/CTS: they turn their DTR on '
+		   'when they can take data, and send only while their DSR is on. Linux cannot do this kind of flow control '
+		   '(its serial drivers know only RTS/CTS and XON/XOFF), so the gateway cannot do it either. Rewire the cable '
+		   'instead, and set flow = "RTS/CTS": then the adapter and its driver do the work. This is mostly for a RAW listener '
+		   '(3.3); a MODBUS device is usually on RS-485, which has no such wires: there flow = "NONE". The CTS of the gateway '
+		   'side goes to the DTR of the device (the device can take data: the gateway sends only while it is on); the '
+		   'RTS goes to the DSR (the gateway can take data: the adapter turns it off when its buffer is full, and the '
+		   'device waits).'),
+		 fig(dia_dtrdsr(L), 'The cable for a DTR/DSR device, flow = "RTS/CTS"'),
+		 P('&bull; The pin numbers are for a DE-9 plug like the one of a PC, on both ends: so the cable has two DE-9 sockets (female). If the device has another socket, go by '
+		   'the names of the signals in its manual.'),
+		 P('&bull; DTR, DSR and DCD of the gateway side are not connected: the gateway does not use them. If the '
+		   'device also wants its DCD or CTS on, see its manual.'),
+		 P('&bull; A common null-modem cable joins DTR to DSR (and DCD), and RTS to CTS. With such a cable and flow = "RTS/CTS" the '
+		   'device cannot stop the gateway when it is busy (data is lost), or, if the device keeps its RTS off, the gateway '
+		   'never sends (TXDRAINTMO). Make the cable above, or put an adapter which swaps the wires.'),
+		 P('&bull; The adapter must have the RTS and CTS wires (a three-wire TxD, RxD, GND adapter cannot do it); if its '
+		   'driver does not take RTS/CTS, the gateway prints FLOWNOTSET. Not together with rs485 = 1.'),
+		 P('&bull; In the messages and in Chapter 7, CTS is the DTR of the device: "CTS is off" means that the device '
+		   'holds its DTR off.'),
 		 H2('3.2.  The listeners Section'),
 		 tbl(['Key', 'Required', 'Meaning and the allowed values'], [
 			('bind', 'yes', 'Where to listen: TCP:&lt;IP address&gt;:&lt;port&gt;. The port is 1..65535; '
@@ -920,7 +972,7 @@ def s_pack_en ():
 				'request gets exception 4. The adapter or its USB link hangs: dmesg | tail; replug the '
 				'adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it.'),
 			('TXDRAINTMO on a port with flow = "RTS/CTS"', 'The device (or the cable) holds CTS off, so the gateway '
-				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS; if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data, or (USB) the next client does if CTS is still off; one which comes at once may wait up to iotmo, 5 seconds at most (the data of the clients which come before the end of that wait is not dropped, it goes out in turn). While CTS is off a '
+				'may not send. Check the RTS and CTS wires and that the device uses RTS/CTS (a DTR/DSR device needs the cable of 3.1); if not, set flow = "NONE". On a RAW listener the data just does not go out; if the client goes, RAWSTALL may drop its last data, or (USB) the next client does if CTS is still off; one which comes at once may wait up to iotmo, 5 seconds at most (the data of the clients which come before the end of that wait is not dropped, it goes out in turn). While CTS is off a '
 				'MODBUS request waits for it up to iotmo, then it is not sent at all: CTSOFF, exception 4. If CTS goes off in the middle, the rest of it is discarded; the port of a USB adapter is closed and opened again for that (tried on FTDI).'),
 			('DEVLOCKERR / DEVBUSY on every request of one port', 'Another request holds the line and does '
 				'not end. Update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial '
@@ -1143,6 +1195,8 @@ def s_pack_ru ():
 	L.update({
 		'dia_client': 'TCP-клиент', 'dia_tcpside': 'SCADA, mbpoll, скрипты ...',
 		'dia_queue': '(очередь запросов)', 'dia_slaves': 'RTU-устройства (ведомые)',
+		'dia_gwside': 'Шлюз (USB-адаптер, DE-9)', 'dia_devside': 'Устройство (DE-9, как у ПК)',
+		'dia_gwready': 'шлюз готов принять', 'dia_devready': 'устройство готово принять',
 		'dia_recv': 'Приём и проверка', 'dia_tx': 'Передача в линию',
 		'dia_rx': 'Приём ответа', 'dia_tmo': 'таймаут', 'dia_check': 'Проверка ответа',
 		'dia_send': 'Ответ клиенту', 'dia_exc': 'Формирование MODBUS-исключения (в журнал идёт EXCRPT)',
@@ -1224,7 +1278,7 @@ def s_pack_ru ():
 				'шлюз передаёт, только пока устройство держит CTS; нужны провода RTS и CTS; нельзя вместе с rs485 = 1. '
 				'XON/XOFF — устройство останавливает и запускает передачу символами XOFF (0x13) и XON (0x11); только '
 				'для RAW-слушателя: в кадрах MODBUS RTU эти октеты встречаются, поэтому MODBUS-слушатель на таком порту — ошибка. Регистр не важен; другое '
-				'значение или число (и DSR/DTR: в Linux такого нет) — ошибка.'),
+				'значение или число (и DSR/DTR: в Linux такого нет; для устройства с DTR/DSR переделайте кабель, см. ниже) — ошибка.'),
 			('ts_enabled', 'нет', '1 — включить псевдоустройство меток времени (глава 5). По умолчанию 0.'),
 			('ts_unit', 'нет', 'Адрес ведомого, на который отвечает псевдоустройство. Диапазон 0..255. По умолчанию 135.'),
 			('ts_fncode', 'нет', 'Код функции, на который оно отвечает. Диапазон 1..127. По умолчанию 3.'),
@@ -1303,6 +1357,25 @@ def s_pack_ru ():
 		   '4-портового FT4232H отличаются частью :1.0 ... :1.3) или своё имя через правило udev:'),
 		 C('SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-xhci-hcd.0-usb-0:1.1:1.0", SYMLINK+="rs485-1"'),
 		 P('в /etc/udev/rules.d/99-rs485.rules даёт /dev/rs485-1 (значения смотрите в udevadm info /dev/ttyUSB0).'),
+		 P('<b>Устройство с DTR/DSR.</b> Некоторые устройства не работают с RTS/CTS: они включают свой DTR, когда '
+		   'готовы принять данные, и передают, только пока включён их DSR. Linux такое управление потоком не умеет '
+		   '(его драйверы портов знают только RTS/CTS и XON/XOFF), поэтому не умеет и шлюз. Вместо этого переделайте '
+		   'кабель и поставьте flow = "RTS/CTS": тогда всю работу делают адаптер и его драйвер. Это в основном для RAW-слушателя '
+		   '(3.3); устройство MODBUS обычно стоит на RS-485, где таких проводов нет: там flow = "NONE". CTS стороны шлюза '
+		   'идёт на DTR устройства (устройство готово принять: шлюз передаёт, только пока он включён); RTS — на DSR '
+		   '(шлюз готов принять: адаптер снимает его, когда его буфер полон, и устройство ждёт).'),
+		 fig(dia_dtrdsr(L), 'Кабель для устройства с DTR/DSR, flow = "RTS/CTS"'),
+		 P('&bull; Номера контактов — для вилки DE-9, как у ПК, с обеих сторон: значит, на кабеле две розетки DE-9 («мама»). Если у устройства другой разъём, ориентируйтесь на '
+		   'имена сигналов в его руководстве.'),
+		 P('&bull; DTR, DSR и DCD на стороне шлюза не подключаются: шлюз их не использует. Если устройству нужны '
+		   'включённые DCD или CTS, смотрите его руководство.'),
+		 P('&bull; Обычный нуль-модемный кабель соединяет DTR с DSR (и DCD), а RTS с CTS. С таким кабелем при flow = "RTS/CTS" устройство '
+		   'не сможет остановить шлюз, когда занято (данные теряются), а если устройство держит свой RTS снятым, шлюз '
+		   'не передаёт вовсе (TXDRAINTMO). Сделайте кабель по схеме выше или поставьте переходник, который меняет провода местами.'),
+		 P('&bull; У адаптера должны быть провода RTS и CTS (трёхпроводной адаптер TxD, RxD, GND не подойдёт); если его '
+		   'драйвер не принимает RTS/CTS, шлюз пишет FLOWNOTSET. Нельзя вместе с rs485 = 1.'),
+		 P('&bull; В сообщениях и в главе 7 CTS — это DTR устройства: «CTS снят» значит, что устройство держит '
+		   'свой DTR снятым.'),
 		 H2('3.2.  Раздел listeners'),
 		 tbl(['Ключ', 'Обяз.', 'Значение и допустимые величины'], [
 			('bind', 'да', 'Где слушать: TCP:&lt;IP-адрес&gt;:&lt;порт&gt;. Порт 1..65535; '
@@ -1543,7 +1616,7 @@ def s_pack_ru ():
 				'исключение 4. Адаптер или его USB-связь зависли: dmesg | tail; переподключите адаптер или '
 				'перезагрузите плату. С X.00-13ECO01 линия из-за этого не блокируется.'),
 			('TXDRAINTMO на порту с flow = "RTS/CTS"', 'Устройство (или кабель) не даёт CTS, и шлюзу нельзя передавать. '
-				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS; если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные, а на USB — приход следующего клиента, если CTS всё ещё снят; клиент, пришедший сразу, может ждать до iotmo, но не дольше 5 секунд (данные клиентов, пришедших до конца этого ожидания, не выбрасываются и уходят друг за другом). Пока CTS снят, запрос MODBUS '
+				'Проверьте провода RTS и CTS и что устройство работает с RTS/CTS (устройству с DTR/DSR нужен кабель из 3.1); если нет — поставьте flow = "NONE". На RAW-слушателе данные просто не уходят; если клиент уйдёт, RAWSTALL может выбросить его последние данные, а на USB — приход следующего клиента, если CTS всё ещё снят; клиент, пришедший сразу, может ждать до iotmo, но не дольше 5 секунд (данные клиентов, пришедших до конца этого ожидания, не выбрасываются и уходят друг за другом). Пока CTS снят, запрос MODBUS '
 				'ждёт его до iotmo, потом не отправляется вовсе: CTSOFF, исключение 4. Если CTS снят посреди передачи, остаток выбрасывается; порт USB-адаптера для этого закрывается и открывается снова (проверено на FTDI).'),
 			('DEVLOCKERR / DEVBUSY на каждом запросе одного порта', 'Линию держит другой запрос, который не '
 				'заканчивается. Обновитесь до X.00-13ECO01 или новее (старый шлюз мог навсегда зависнуть в '

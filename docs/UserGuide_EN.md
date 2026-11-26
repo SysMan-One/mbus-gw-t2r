@@ -78,7 +78,7 @@ listen for TCP clients on every network interface, port 502, and forward them to
 | `iotmo` | no | How long to wait for the device's answer, in **milliseconds**. Default: 1000. Take it **with a margin** over the slowest device on the line: an answer which comes later than `iotmo` is lost | 1..3600000 |
 | `lategd` | no | After a failed request (no answer, a broken answer) the gateway listens to the line for this many **milliseconds** more and throws away what comes (`%T2R-W-LATEANS`): a late answer must not go to the next request: an answer to a read carries nothing of its request, so a device which answers later than `iotmo` + `lategd` can give one client the data of another. Take `lategd` with a margin over how late your devices can be. It costs time only after a failure: a request to a dead device takes `iotmo` + `lategd`. Default: `iotmo` / 2, but not less than 100; `0` --- only the 3.5 character pause, as before X.00-13ECO08 | 0..60000 |
 | `rs485` | no | `1` --- ask the kernel to drive the RS-485 direction control (only for ports that support it) | `0` or `1` |
-| `flow` | no | The flow control of the line. `"NONE"` --- no flow control. `"RTS/CTS"` --- the hardware handshake: the gateway sends only while the device holds CTS on; it needs the RTS and CTS wires in the cable; not together with `rs485 = 1`. `"XON/XOFF"` --- the device stops and starts the gateway with the XOFF (0x13) and XON (0x11) characters; **only for a RAW listener**: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is an error. Not case-sensitive; another value or a number (also `"DSR/DTR"`: Linux has no such flow control) is an error. Default: `"NONE"` | `"NONE"`, `"RTS/CTS"`, `"XON/XOFF"` |
+| `flow` | no | The flow control of the line. `"NONE"` --- no flow control. `"RTS/CTS"` --- the hardware handshake: the gateway sends only while the device holds CTS on; it needs the RTS and CTS wires in the cable; not together with `rs485 = 1`. `"XON/XOFF"` --- the device stops and starts the gateway with the XOFF (0x13) and XON (0x11) characters; **only for a RAW listener**: MODBUS RTU frames carry these octets, so a MODBUS listener on such a port is an error. Not case-sensitive; another value or a number (also `"DSR/DTR"`: Linux has no such flow control; for a device with the DTR/DSR handshake rewire the cable, see "A device with the DTR/DSR handshake" below) is an error. Default: `"NONE"` | `"NONE"`, `"RTS/CTS"`, `"XON/XOFF"` |
 | `ts_enabled` | no | `1` --- enable the built-in Time Stamp pseudo device (see section 6) | `0` or `1` |
 | `ts_unit` | no | The slave address the pseudo device answers on | 0..255, default 135 |
 | `ts_fncode` | no | The function code it answers to | 1..127, default 3 |
@@ -168,6 +168,41 @@ name into `device` (and into `target` of the listener) instead:
 - or your own name made by a udev rule, for example `/dev/rs485-1`:
   `SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-xhci-hcd.0-usb-0:1.1:1.0", SYMLINK+="rs485-1"`
   in `/etc/udev/rules.d/99-rs485.rules` (see `udevadm info /dev/ttyUSB0` for the values).
+
+**A device with the DTR/DSR handshake.** Some devices do not use RTS/CTS: they turn their DTR on
+when they can take data, and send only while their DSR is on. Linux cannot do this kind of flow
+control (its serial drivers know only RTS/CTS and XON/XOFF), so the gateway cannot do it either.
+Rewire the cable instead, and set `flow = "RTS/CTS"`: then the adapter and its driver do the work.
+This is mostly for a RAW listener (3.3). A MODBUS device is usually on RS-485, which has no such wires:
+there `flow = "NONE"`.
+
+```
+  The gateway (USB adapter, DE-9)          The device (DE-9, like a PC)
+    TxD  3  -------------------------->  2  RxD
+    RxD  2  <--------------------------  3  TxD
+    RTS  7  -------------------------->  6  DSR   the gateway can take data
+    CTS  8  <--------------------------  4  DTR   the device can take data
+    GND  5  ---------------------------  5  GND
+```
+
+| The gateway side | The device side | What it means |
+|---|---|---|
+| CTS (pin 8, an input) | DTR (pin 4, an output) | The device can take data: the gateway sends only while it is on |
+| RTS (pin 7, an output) | DSR (pin 6, an input) | The gateway can take data: the adapter turns it off when its buffer is full, and the device waits |
+| TxD, RxD, GND | RxD, TxD, GND | The data and the ground, as in any cable |
+
+- The pin numbers are for a DE-9 plug like the one of a PC, on both ends: so the cable has two DE-9
+  sockets (female). If the device has another socket, go by the names of the signals in its manual.
+- DTR, DSR and DCD of the gateway side are not connected: the gateway does not use them.
+  If the device also wants its DCD or CTS on, see its manual.
+- A common null-modem cable joins DTR to DSR (and DCD), and RTS to CTS. With such a cable and
+  `flow = "RTS/CTS"` the device cannot stop the gateway when it is busy (data is lost), or, if the
+  device keeps its RTS off, the gateway never sends (`TXDRAINTMO`). Make the cable above, or put an
+  adapter which swaps the wires.
+- The adapter must have the RTS and CTS wires (a three-wire TxD, RxD, GND adapter cannot do it); if its
+  driver does not take RTS/CTS, the gateway prints `FLOWNOTSET`. Not together with `rs485 = 1`.
+- In the messages and in chapter 7, CTS is the DTR of the device: "CTS is off" means that the device
+  holds its DTR off.
 
 ### 3.2. The `listeners` section --- one record per TCP port
 
@@ -446,7 +481,7 @@ dislikes.**
 | `%T2R-W-IDLETMO, [...] No activity for the past N seconds (idletmo) --- close the connection` | A client has sent nothing for `idletmo` seconds | normal for a client which polls rarely --- it reconnects; to keep the connection, raise `idletmo` of this listener |
 | `%T2R-W-RAWBUSY, [...] --- the raw listener is busy and <takeover> is off --- the connection is rejected` | A client is already connected to the RAW port and `takeover = 0` | normal. Disconnect the first client, or set `takeover = 1` |
 | `%T2R-E-TXDRAINTMO, [...] --- the request has not been transmitted in N msec` | The USB adapter took the request but did not send it out; the request gets exception 4 | the adapter or its USB link hangs: `dmesg \| tail`; replug the adapter or reboot the board. Since X.00-13ECO01 the line is not blocked by it: the next request tries again |
-| `TXDRAINTMO` on a port with `flow = "RTS/CTS"` | The device (or the cable) holds CTS off, so the gateway may not send | check that the cable has the RTS and CTS wires and that the device uses the RTS/CTS handshake; if it does not, set `flow = "NONE"`. On a RAW listener the data from the client just does not go out; if the client goes, its last data may be dropped by `RAWSTALL`, or (USB) when the next client comes and CTS is still off; a client which comes at once may wait for that up to `iotmo`, 5 seconds at most (the data of the clients which come before the end of that wait is not dropped, it goes out in turn). While CTS is off a MODBUS request waits for it up to `iotmo`, then it is not sent at all (`CTSOFF`, exception 4). If CTS goes off in the middle, the rest of the request is discarded; a USB adapter of the usb-serial kind is closed and opened again for that (tried on FTDI) |
+| `TXDRAINTMO` on a port with `flow = "RTS/CTS"` | The device (or the cable) holds CTS off, so the gateway may not send | check that the cable has the RTS and CTS wires and that the device uses the RTS/CTS handshake (a device with DTR/DSR needs the cable of 3.1); if it does not, set `flow = "NONE"`. On a RAW listener the data from the client just does not go out; if the client goes, its last data may be dropped by `RAWSTALL`, or (USB) when the next client comes and CTS is still off; a client which comes at once may wait for that up to `iotmo`, 5 seconds at most (the data of the clients which come before the end of that wait is not dropped, it goes out in turn). While CTS is off a MODBUS request waits for it up to `iotmo`, then it is not sent at all (`CTSOFF`, exception 4). If CTS goes off in the middle, the rest of the request is discarded; a USB adapter of the usb-serial kind is closed and opened again for that (tried on FTDI) |
 | `%T2R-E-DEVLOCKERR` / `DEVBUSY` on every request of one port, the other ports are fine | Another request holds the line and does not end | update to X.00-13ECO01 or newer (an older gateway can hang forever in the serial driver). Before the restart, save what the stuck thread does: `for t in /proc/$(pidof mbusgw-t2r)/task/*; do echo $t $(cat $t/wchan); done` |
 | `%T2R-E-SESSFAIL, [...] --- cannot start a session thread, pthread_create()->11` | Too many TCP clients at once: every client takes a thread, and systemd limits the service (`TasksMax`, 578 on a small board) | find who keeps so many connections open (`ss -tn`); if they are all real, raise the limit: `TasksMax=2048` in the `[Service]` section of the unit, then `systemctl daemon-reload` |
 | `%T2R-E-LSNRERR, Listener 0.0.0.0:502 --- bind() error, errno: 98` | errno 98 = the TCP port is already taken | another gateway instance is running, or another program owns the port: `sudo ss -tlnp \| grep 502` |
